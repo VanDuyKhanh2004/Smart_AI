@@ -18,6 +18,14 @@ export interface AuthResponse {
   };
 }
 
+export interface RegisterResponse {
+  success: boolean;
+  message: string;
+  data: {
+    user: User;
+  };
+}
+
 export interface TokenResponse {
   success: boolean;
   data: {
@@ -34,4 +42,8 @@ export interface RegisterRequest {
   name: string;
   email: string;
   password: string;
+}
+
+export interface ResendVerificationRequest {
+  email: string;
 }

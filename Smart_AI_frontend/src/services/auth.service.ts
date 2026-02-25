@@ -1,9 +1,11 @@
 import apiClient from '@/lib/axios';
 import type {
   AuthResponse,
+  RegisterResponse,
   TokenResponse,
   LoginRequest,
   RegisterRequest,
+  ResendVerificationRequest,
   User,
 } from '@/types/auth.type';
 
@@ -13,8 +15,8 @@ export const authService = {
     return response.data;
   },
 
-  async register(data: RegisterRequest): Promise<AuthResponse> {
-    const response = await apiClient.post<AuthResponse>('/auth/register', data);
+  async register(data: RegisterRequest): Promise<RegisterResponse> {
+    const response = await apiClient.post<RegisterResponse>('/auth/register', data);
     return response.data;
   },
 
@@ -32,5 +34,21 @@ export const authService = {
   async getMe(): Promise<User> {
     const response = await apiClient.get<{ success: boolean; data: { user: User } }>('/auth/me');
     return response.data.data.user;
+  },
+
+  async verifyEmail(token: string, email?: string): Promise<{ success: boolean; message: string }> {
+    const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
+    const response = await apiClient.get<{ success: boolean; message: string }>(
+      `/auth/verify-email?token=${encodeURIComponent(token)}${emailParam}`
+    );
+    return response.data;
+  },
+
+  async resendVerification(data: ResendVerificationRequest): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post<{ success: boolean; message: string }>(
+      '/auth/resend-verification',
+      data
+    );
+    return response.data;
   },
 };
