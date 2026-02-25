@@ -17,8 +17,11 @@ const RegisterForm: React.FC = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
   
-  const { register, isLoading, error, clearError } = useAuthStore();
+  const { register, resendVerification, isLoading, error, clearError } = useAuthStore();
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -54,15 +57,37 @@ const RegisterForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
+    setSuccessMessage(null);
+    setResendMessage(null);
+    setResendError(null);
     
     if (!validateForm()) {
       return;
     }
     
     try {
-      await register(name, email, password);
+      const message = await register(name, email, password);
+      setSuccessMessage(message);
     } catch {
       // Error is handled by the store
+    }
+  };
+
+  const handleResend = async () => {
+    setResendMessage(null);
+    setResendError(null);
+
+    if (!email.trim()) {
+      setResendError('Vui long nhap email de gui lai');
+      return;
+    }
+
+    try {
+      const message = await resendVerification(email);
+      setResendMessage(message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gui lai that bai';
+      setResendError(message);
     }
   };
 
@@ -171,6 +196,24 @@ const RegisterForm: React.FC = () => {
               {error}
             </div>
           )}
+
+          {successMessage && (
+            <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
+              {successMessage}
+            </div>
+          )}
+
+          {resendMessage && (
+            <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
+              {resendMessage}
+            </div>
+          )}
+
+          {resendError && (
+            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+              {resendError}
+            </div>
+          )}
           
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
@@ -182,6 +225,18 @@ const RegisterForm: React.FC = () => {
               'Đăng ký'
             )}
           </Button>
+
+          {successMessage && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={handleResend}
+              disabled={isLoading}
+            >
+              Gui lai email xac nhan
+            </Button>
+          )}
         </form>
       </CardContent>
     </Card>

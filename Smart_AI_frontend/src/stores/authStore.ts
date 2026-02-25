@@ -17,7 +17,7 @@ interface AuthState {
 
 interface AuthActions {
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<string>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<boolean>;
   clearError: () => void;
@@ -25,6 +25,7 @@ interface AuthActions {
   setAccessToken: (token: string) => void;
   setAuth: (user: User, accessToken: string, refreshToken: string) => void;
   updateUserProfile: (updates: Partial<Pick<User, 'name' | 'phone' | 'avatar'>>) => void;
+  resendVerification: (email: string) => Promise<string>;
 }
 
 type AuthStore = AuthState & AuthActions;
@@ -63,10 +64,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Login failed';
-      const axiosError = error as { response?: { data?: { message?: string } } };
+      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string } } } };
       set({
         isLoading: false,
-        error: axiosError.response?.data?.message || message,
+        error: axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message,
       });
       throw error;
     }
@@ -76,35 +77,33 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await authService.register({ name, email, password });
-      const { user, accessToken, refreshToken } = response.data;
-      
-      localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-      
+      const { message } = response;
+
       set({
-        user,
-        accessToken,
-        isAuthenticated: true,
         isLoading: false,
         error: null,
       });
 
-      // Merge guest cart with user cart after successful registration (don't block on failure)
-      useCartStore.getState().mergeGuestCart().catch(() => {
-        // Ignore cart merge errors
-      });
-      // Fetch wishlist for authenticated user
-      useWishlistStore.getState().fetchWishlist().catch(() => {
-        // Ignore wishlist fetch errors
-      });
+      return message;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Registration failed';
-      const axiosError = error as { response?: { data?: { message?: string } } };
+      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string } } } };
       set({
         isLoading: false,
-        error: axiosError.response?.data?.message || message,
+        error: axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message,
       });
       throw error;
+    }
+  },
+
+  resendVerification: async (email: string) => {
+    try {
+      const response = await authService.resendVerification({ email });
+      return response.message;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Resend verification failed';
+      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string } } } };
+      throw new Error(axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message);
     }
   },
 

@@ -4,7 +4,7 @@ import { ProductListPage, ProductDetailPage } from '@/features/products';
 import { ComplaintListPage } from '@/features/complaints';
 import { CartPage } from '@/features/cart';
 import { WishlistPage } from '@/features/wishlist';
-import { LoginPage, RegisterPage } from '@/features/auth';
+import { LoginPage, RegisterPage, VerifyEmailPage } from '@/features/auth';
 import { AdminProductPage, AdminReviewsPage, AdminQAPage, AdminDashboardPage, AdminPromotionPage, AdminStoresPage, AdminAppointmentsPage } from '@/features/admin';
 import { CheckoutPage, OrderHistoryPage, AdminOrderPage } from '@/features/orders';
 import { ComparePage, CompareHistoryPage } from '@/features/compare';
@@ -23,6 +23,7 @@ const AppRouter: React.FC = () => {
         {/* Public routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         
         {/* Protected routes with Layout */}
         <Route path="/" element={<Navigate to="/products" replace />} />

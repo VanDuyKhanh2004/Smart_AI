@@ -14,8 +14,10 @@ const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
   
-  const { login, isLoading, error, clearError } = useAuthStore();
+  const { login, resendVerification, isLoading, error, clearError } = useAuthStore();
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -39,6 +41,8 @@ const LoginForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
+    setResendMessage(null);
+    setResendError(null);
     
     if (!validateForm()) {
       return;
@@ -48,6 +52,24 @@ const LoginForm: React.FC = () => {
       await login(email, password);
     } catch {
       // Error is handled by the store
+    }
+  };
+
+  const handleResend = async () => {
+    setResendMessage(null);
+    setResendError(null);
+
+    if (!email.trim()) {
+      setResendError('Vui long nhap email de gui lai');
+      return;
+    }
+
+    try {
+      const message = await resendVerification(email);
+      setResendMessage(message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gui lai that bai';
+      setResendError(message);
     }
   };
 
@@ -112,6 +134,18 @@ const LoginForm: React.FC = () => {
               {error}
             </div>
           )}
+
+          {resendMessage && (
+            <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
+              {resendMessage}
+            </div>
+          )}
+
+          {resendError && (
+            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+              {resendError}
+            </div>
+          )}
           
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
@@ -123,6 +157,18 @@ const LoginForm: React.FC = () => {
               'Đăng nhập'
             )}
           </Button>
+
+          {error && error.toLowerCase().includes('xac nhan') && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={handleResend}
+              disabled={isLoading}
+            >
+              Gui lai email xac nhan
+            </Button>
+          )}
 
           {/* Divider */}
           <div className="relative">
