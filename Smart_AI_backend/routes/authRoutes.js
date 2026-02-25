@@ -6,7 +6,9 @@ const {
   logout, 
   refreshToken, 
   getMe,
-  googleLogin 
+  googleLogin,
+  verifyEmail,
+  resendVerification
 } = require('../controllers/authController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -15,6 +17,9 @@ router.post('/register', register);
 router.post('/login', login);
 router.post('/google-login', googleLogin);
 router.post('/refresh', refreshToken);
+router.get('/verify-email', verifyEmail);
+router.post('/verify-email', verifyEmail);
+router.post('/resend-verification', resendVerification);
 
 // Protected routes
 router.post('/logout', protect, logout);

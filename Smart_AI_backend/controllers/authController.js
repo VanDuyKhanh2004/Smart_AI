@@ -5,8 +5,26 @@ const {
   verifyRefreshToken 
 } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
+const crypto = require('crypto');
+const { sendWelcomeEmail, sendVerificationEmail } = require('../services/emailService');
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+const createEmailVerificationToken = (user) => {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+  user.emailVerificationToken = hashedToken;
+  user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+  return rawToken;
+};
+
+const buildVerifyUrl = (token, email) => {
+  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
+  return `${baseUrl}/verify-email?token=${token}${emailParam}`;
+};
 
 /**
  * @desc    Register new user
@@ -36,20 +54,22 @@ const register = async (req, res) => {
       password
     });
 
-    // Generate tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    const verificationToken = createEmailVerificationToken(user);
 
-    // Save refresh token to user
-    user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
+
+    try {
+      const verifyUrl = buildVerifyUrl(verificationToken, user.email);
+      await sendVerificationEmail(user, verifyUrl);
+    } catch (mailError) {
+      console.warn('Verification email failed:', mailError.message);
+    }
 
     res.status(201).json({
       success: true,
+      message: 'Vui long xac nhan email de kich hoat tai khoan',
       data: {
-        user: user.toJSON(),
-        accessToken,
-        refreshToken
+        user: user.toJSON()
       }
     });
   } catch (error) {
@@ -125,6 +145,16 @@ const login = async (req, res) => {
       });
     }
 
+    if (!user.emailVerified && !user.googleId) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Vui long xac nhan email truoc khi dang nhap'
+        }
+      });
+    }
+
     // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
@@ -132,6 +162,17 @@ const login = async (req, res) => {
     // Save refresh token to user
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
+
+    if (!user.welcomeEmailSent && (user.emailVerified || user.googleId)) {
+      try {
+        await sendWelcomeEmail(user);
+        user.welcomeEmailSent = true;
+        user.firstLoginAt = new Date();
+        await user.save({ validateBeforeSave: false });
+      } catch (mailError) {
+        console.warn('Welcome email failed:', mailError.message);
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -336,6 +377,13 @@ const googleLogin = async (req, res) => {
       });
     }
 
+    if (!user.emailVerified) {
+      user.emailVerified = true;
+      user.emailVerificationToken = undefined;
+      user.emailVerificationExpires = undefined;
+      await user.save({ validateBeforeSave: false });
+    }
+
     // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
@@ -343,6 +391,17 @@ const googleLogin = async (req, res) => {
     // Save refresh token
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
+
+    if (!user.welcomeEmailSent) {
+      try {
+        await sendWelcomeEmail(user);
+        user.welcomeEmailSent = true;
+        user.firstLoginAt = new Date();
+        await user.save({ validateBeforeSave: false });
+      } catch (mailError) {
+        console.warn('Welcome email failed:', mailError.message);
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -375,10 +434,185 @@ const googleLogin = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Verify email
+ * @route   GET /api/auth/verify-email
+ * @access  Public
+ */
+const verifyEmail = async (req, res) => {
+  try {
+    const token = req.query.token || req.body.token;
+    const email = req.query.email || req.body.email;
+    const acceptHeader = req.headers.accept || '';
+    const wantsHtml = acceptHeader.includes('text/html');
+
+    const redirectToFrontend = (status, messageText) => {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
+      const redirectUrl = `${baseUrl}/verify-email?status=${encodeURIComponent(status)}&message=${encodeURIComponent(messageText)}${emailParam}`;
+      return res.redirect(302, redirectUrl);
+    };
+
+    if (!token) {
+      if (wantsHtml) {
+        return redirectToFrontend('error', 'Khong tim thay token xac nhan');
+      }
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Token la bat buoc'
+        }
+      });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      if (email) {
+        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        if (existingUser && existingUser.emailVerified) {
+          if (wantsHtml) {
+            return redirectToFrontend('success', 'Email da duoc kich hoat');
+          }
+          return res.status(200).json({
+            success: true,
+            message: 'Email da duoc kich hoat'
+          });
+        }
+      }
+      if (wantsHtml) {
+        return redirectToFrontend('error', 'Token khong hop le hoac da het han');
+      }
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Token khong hop le hoac da het han'
+        }
+      });
+    }
+
+    user.emailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+
+    if (!user.welcomeEmailSent) {
+      try {
+        await sendWelcomeEmail(user);
+        user.welcomeEmailSent = true;
+        user.firstLoginAt = new Date();
+      } catch (mailError) {
+        console.warn('Welcome email failed:', mailError.message);
+      }
+    }
+
+    await user.save({ validateBeforeSave: false });
+
+    if (wantsHtml) {
+      return redirectToFrontend('success', 'Xac nhan email thanh cong');
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Xac nhan email thanh cong'
+    });
+  } catch (error) {
+    console.error('Verify email error:', error);
+
+    if (req.accepts('html')) {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const redirectUrl = `${baseUrl}/verify-email?status=error&message=${encodeURIComponent('Loi server')}`;
+      return res.redirect(302, redirectUrl);
+    }
+
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
+/**
+ * @desc    Resend verification email
+ * @route   POST /api/auth/resend-verification
+ * @access  Public
+ */
+const resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Email la bat buoc'
+        }
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'Khong tim thay nguoi dung'
+        }
+      });
+    }
+
+    if (user.emailVerified || user.googleId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'EMAIL_ALREADY_VERIFIED',
+          message: 'Email da duoc xac nhan'
+        }
+      });
+    }
+
+    const verificationToken = createEmailVerificationToken(user);
+    await user.save({ validateBeforeSave: false });
+
+    try {
+      const verifyUrl = buildVerifyUrl(verificationToken);
+      await sendVerificationEmail(user, verifyUrl);
+    } catch (mailError) {
+      console.warn('Verification email failed:', mailError.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Da gui lai email xac nhan'
+    });
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   googleLogin,
+  verifyEmail,
+  resendVerification,
   logout,
   refreshToken,
   getMe

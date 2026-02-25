@@ -49,6 +49,26 @@ const userSchema = new mongoose.Schema({
   avatar: {
     type: String,
     default: null
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  emailVerificationToken: {
+    type: String,
+    select: false
+  },
+  emailVerificationExpires: {
+    type: Date,
+    select: false
+  },
+  welcomeEmailSent: {
+    type: Boolean,
+    default: false
+  },
+  firstLoginAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true,
@@ -60,6 +80,8 @@ const userSchema = new mongoose.Schema({
       delete ret.__v;
       delete ret.password;
       delete ret.refreshToken;
+      delete ret.emailVerificationToken;
+      delete ret.emailVerificationExpires;
       return ret;
     }
   },
@@ -71,6 +93,8 @@ const userSchema = new mongoose.Schema({
       delete ret.__v;
       delete ret.password;
       delete ret.refreshToken;
+      delete ret.emailVerificationToken;
+      delete ret.emailVerificationExpires;
       return ret;
     }
   }
