@@ -23,7 +23,6 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
   const user = useAuthStore((state) => state.user);
   const updateUserProfile = useAuthStore((state) => state.updateUserProfile);
 
-  const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [phone, setPhone] = useState(user?.phone || '');
@@ -54,13 +53,7 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleEdit = () => {
-    setIsEditing(true);
-    setErrors({});
-  };
-
   const handleCancel = () => {
-    setIsEditing(false);
     setName(user?.name || '');
     setPhone(user?.phone || '');
     setErrors({});
@@ -87,7 +80,6 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
         phone: response.data.phone,
       });
 
-      setIsEditing(false);
       onSuccess?.('Cập nhật thông tin thành công');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Cập nhật thất bại';
@@ -144,7 +136,7 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
                     setErrors((prev) => ({ ...prev, name: undefined }));
                   }
                 }}
-                disabled={!isEditing || isLoading}
+                disabled={isLoading}
                 aria-invalid={!!errors.name}
               />
               {errors.name && (
@@ -181,7 +173,7 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
                     setErrors((prev) => ({ ...prev, phone: undefined }));
                   }
                 }}
-                disabled={!isEditing || isLoading}
+                disabled={isLoading}
                 aria-invalid={!!errors.phone}
               />
               {errors.phone && (
@@ -190,25 +182,17 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
             </div>
 
             <div className="flex gap-3 pt-2">
-              {isEditing ? (
-                <>
-                  <Button type="submit" disabled={isLoading}>
-                    {isLoading ? 'Đang lưu...' : 'Lưu thay đổi'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCancel}
-                    disabled={isLoading}
-                  >
-                    Hủy
-                  </Button>
-                </>
-              ) : (
-                <Button type="button" onClick={handleEdit}>
-                  Chỉnh sửa
-                </Button>
-              )}
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? 'Đang lưu...' : 'Lưu thay đổi'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCancel}
+                disabled={isLoading}
+              >
+                Hủy
+              </Button>
             </div>
           </form>
         </div>

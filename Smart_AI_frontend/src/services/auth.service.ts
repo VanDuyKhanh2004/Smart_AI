@@ -6,6 +6,8 @@ import type {
   LoginRequest,
   RegisterRequest,
   ResendVerificationRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
   User,
 } from '@/types/auth.type';
 
@@ -47,6 +49,22 @@ export const authService = {
   async resendVerification(data: ResendVerificationRequest): Promise<{ success: boolean; message: string }> {
     const response = await apiClient.post<{ success: boolean; message: string }>(
       '/auth/resend-verification',
+      data
+    );
+    return response.data;
+  },
+
+  async forgotPassword(data: ForgotPasswordRequest): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post<{ success: boolean; message: string }>(
+      '/auth/forgot-password',
+      data
+    );
+    return response.data;
+  },
+
+  async resetPassword(data: ResetPasswordRequest): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post<{ success: boolean; message: string }>(
+      '/auth/reset-password',
       data
     );
     return response.data;
