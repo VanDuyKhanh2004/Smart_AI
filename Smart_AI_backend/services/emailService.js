@@ -70,6 +70,35 @@ const buildVerificationEmail = (user, verifyUrl) => {
   return { subject, text, html };
 };
 
+const buildPasswordResetEmail = (user, resetUrl) => {
+  const displayName = user.name || 'ban';
+  const subject = 'Dat lai mat khau Smart AI';
+  const text = [
+    `Xin chao ${displayName},`,
+    '',
+    'Ban da yeu cau dat lai mat khau Smart AI.',
+    `Link dat lai mat khau: ${resetUrl}`,
+    'Link nay chi co hieu luc trong thoi gian ngan.',
+    '',
+    'Neu ban khong yeu cau, hay bo qua email nay.',
+    '',
+    'Smart AI Team'
+  ].join('\n');
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+      <h2>Xin chao ${displayName},</h2>
+      <p>Ban da yeu cau dat lai mat khau <strong>Smart AI</strong>.</p>
+      <p><a href="${resetUrl}">Dat lai mat khau</a></p>
+      <p>Link nay chi co hieu luc trong thoi gian ngan.</p>
+      <p>Neu ban khong yeu cau, hay bo qua email nay.</p>
+      <p>Smart AI Team</p>
+    </div>
+  `;
+
+  return { subject, text, html };
+};
+
 const sendWelcomeEmail = async (user) => {
   const transporter = getTransporter();
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
@@ -98,7 +127,22 @@ const sendVerificationEmail = async (user, verifyUrl) => {
   });
 };
 
+const sendPasswordResetEmail = async (user, resetUrl) => {
+  const transporter = getTransporter();
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const { subject, text, html } = buildPasswordResetEmail(user, resetUrl);
+
+  return transporter.sendMail({
+    from,
+    to: user.email,
+    subject,
+    text,
+    html
+  });
+};
+
 module.exports = {
   sendWelcomeEmail,
-  sendVerificationEmail
+  sendVerificationEmail,
+  sendPasswordResetEmail
 };
