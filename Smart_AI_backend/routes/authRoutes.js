@@ -8,7 +8,9 @@ const {
   getMe,
   googleLogin,
   verifyEmail,
-  resendVerification
+  resendVerification,
+  requestPasswordReset,
+  resetPassword
 } = require('../controllers/authController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -20,6 +22,8 @@ router.post('/refresh', refreshToken);
 router.get('/verify-email', verifyEmail);
 router.post('/verify-email', verifyEmail);
 router.post('/resend-verification', resendVerification);
+router.post('/forgot-password', requestPasswordReset);
+router.post('/reset-password', resetPassword);
 
 // Protected routes
 router.post('/logout', protect, logout);

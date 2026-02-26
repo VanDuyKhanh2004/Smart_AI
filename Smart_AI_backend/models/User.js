@@ -69,6 +69,14 @@ const userSchema = new mongoose.Schema({
   firstLoginAt: {
     type: Date,
     default: null
+  },
+  passwordResetToken: {
+    type: String,
+    select: false
+  },
+  passwordResetExpires: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true,
@@ -82,6 +90,8 @@ const userSchema = new mongoose.Schema({
       delete ret.refreshToken;
       delete ret.emailVerificationToken;
       delete ret.emailVerificationExpires;
+      delete ret.passwordResetToken;
+      delete ret.passwordResetExpires;
       return ret;
     }
   },
@@ -95,6 +105,8 @@ const userSchema = new mongoose.Schema({
       delete ret.refreshToken;
       delete ret.emailVerificationToken;
       delete ret.emailVerificationExpires;
+      delete ret.passwordResetToken;
+      delete ret.passwordResetExpires;
       return ret;
     }
   }

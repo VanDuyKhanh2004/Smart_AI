@@ -6,7 +6,7 @@ const {
 } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
 const crypto = require('crypto');
-const { sendWelcomeEmail, sendVerificationEmail } = require('../services/emailService');
+const { sendWelcomeEmail, sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -24,6 +24,22 @@ const buildVerifyUrl = (token, email) => {
   const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
   return `${baseUrl}/verify-email?token=${token}${emailParam}`;
+};
+
+const createPasswordResetToken = (user) => {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+  user.passwordResetToken = hashedToken;
+  user.passwordResetExpires = Date.now() + 60 * 60 * 1000;
+
+  return rawToken;
+};
+
+const buildResetPasswordUrl = (token, email) => {
+  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
+  return `${baseUrl}/reset-password?token=${token}${emailParam}`;
 };
 
 /**
@@ -607,12 +623,147 @@ const resendVerification = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Request password reset
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
+const requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Email la bat buoc'
+        }
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        message: 'Neu email ton tai, he thong da gui huong dan dat lai mat khau'
+      });
+    }
+
+    if (user.googleId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'GOOGLE_ACCOUNT',
+          message: 'Tai khoan dang nhap Google khong the su dung chuc nang quen mat khau'
+        }
+      });
+    }
+
+    const resetToken = createPasswordResetToken(user);
+    await user.save({ validateBeforeSave: false });
+
+    try {
+      const resetUrl = buildResetPasswordUrl(resetToken, user.email);
+      await sendPasswordResetEmail(user, resetUrl);
+    } catch (mailError) {
+      console.warn('Password reset email failed:', mailError.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Neu email ton tai, he thong da gui huong dan dat lai mat khau'
+    });
+  } catch (error) {
+    console.error('Request password reset error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
+/**
+ * @desc    Reset password
+ * @route   POST /api/auth/reset-password
+ * @access  Public
+ */
+const resetPassword = async (req, res) => {
+  try {
+    const { token, password, passwordConfirm } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Token va mat khau la bat buoc'
+        }
+      });
+    }
+
+    if (passwordConfirm && password !== passwordConfirm) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'PASSWORD_MISMATCH',
+          message: 'Mat khau xac nhan khong khop'
+        }
+      });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() }
+    }).select('+password');
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Token khong hop le hoac da het han'
+        }
+      });
+    }
+
+    user.password = password;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    user.refreshToken = null;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Dat lai mat khau thanh cong'
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   googleLogin,
   verifyEmail,
   resendVerification,
+  requestPasswordReset,
+  resetPassword,
   logout,
   refreshToken,
   getMe
