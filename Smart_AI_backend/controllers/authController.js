@@ -125,6 +125,7 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const maxAttempts = Number(process.env.LOGIN_MAX_ATTEMPTS || 5);
 
     // Validate input
     if (!email || !password) {
@@ -149,9 +150,22 @@ const login = async (req, res) => {
       });
     }
 
+    if (user.isLocked) {
+      const retryAfter = Math.ceil((new Date(user.lockUntil).getTime() - Date.now()) / 1000);
+      res.setHeader('Retry-After', String(Math.max(retryAfter, 1)));
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: 'ACCOUNT_LOCKED',
+          message: 'Tai khoan tam thoi bi khoa do dang nhap sai nhieu lan. Vui long thu lai sau.'
+        }
+      });
+    }
+
     // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      await user.incrementLoginAttempts({ maxAttempts });
       return res.status(401).json({
         success: false,
         error: {
@@ -169,6 +183,11 @@ const login = async (req, res) => {
           message: 'Vui long xac nhan email truoc khi dang nhap'
         }
       });
+    }
+
+    if (user.loginAttempts || user.lockUntil) {
+      user.loginAttempts = 0;
+      user.lockUntil = undefined;
     }
 
     // Generate tokens
@@ -379,8 +398,28 @@ const googleLogin = async (req, res) => {
     if (user) {
       // Update Google ID if user exists but doesn't have it
       if (!user.googleId) {
-        user.googleId = googleId;
-        await user.save({ validateBeforeSave: false });
+        // Chỉ cho phép auto-linking nếu email đã được verify (bảo mật)
+        if (user.emailVerified) {
+          user.googleId = googleId;
+          // Cập nhật avatar từ Google nếu user chưa có
+          if (!user.avatar && picture) {
+            user.avatar = picture;
+          }
+          await user.save({ validateBeforeSave: false });
+        } else {
+          // Email chưa verify → không cho phép auto-linking
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'EMAIL_NOT_VERIFIED',
+              message: 'Tài khoản với email này đã tồn tại nhưng chưa được xác minh. Vui lòng xác minh email hoặc đăng nhập bằng mật khẩu.',
+              data: {
+                email: user.email,
+                requireVerification: true
+              }
+            }
+          });
+        }
       }
     } else {
       // Create new user
@@ -756,6 +795,196 @@ const resetPassword = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Request unlock account email
+ * @route   POST /api/auth/request-unlock
+ * @access  Public
+ */
+const requestUnlockAccount = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Email la bat buoc'
+        }
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() })
+      .select('+lockUntil +unlockToken +unlockTokenExpires');
+
+    if (!user) {
+      // Không tiết lộ user không tồn tại vì lý do bảo mật
+      return res.status(200).json({
+        success: true,
+        message: 'Neu tai khoan bi khoa, email mo khoa da duoc gui'
+      });
+    }
+
+    // Kiểm tra xem tài khoản có bị khóa không
+    if (!user.isLocked) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'ACCOUNT_NOT_LOCKED',
+          message: 'Tai khoan chua bi khoa'
+        }
+      });
+    }
+
+    // Tạo unlock token
+    const unlockToken = user.createUnlockToken();
+    await user.save({ validateBeforeSave: false });
+
+    // Build unlock URL
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const unlockUrl = `${baseUrl}/unlock-account?token=${unlockToken}&email=${encodeURIComponent(email)}`;
+
+    // Gửi email
+    const { sendUnlockAccountEmail } = require('../services/emailService');
+    await sendUnlockAccountEmail(user, unlockUrl);
+
+    res.status(200).json({
+      success: true,
+      message: 'Email mo khoa tai khoan da duoc gui'
+    });
+  } catch (error) {
+    console.error('Request unlock account error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
+/**
+ * @desc    Unlock account with token
+ * @route   POST /api/auth/unlock-account
+ * @access  Public
+ */
+const unlockAccount = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Token la bat buoc'
+        }
+      });
+    }
+
+    const user = await User.findByUnlockToken(token);
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Token khong hop le hoac da het han'
+        }
+      });
+    }
+
+    // Reset login attempts và mở khóa
+    await user.resetLoginAttempts();
+
+    res.status(200).json({
+      success: true,
+      message: 'Mo khoa tai khoan thanh cong. Ban co the dang nhap ngay bay gio'
+    });
+  } catch (error) {
+    console.error('Unlock account error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
+/**
+ * @desc    Admin unlock account
+ * @route   POST /api/auth/admin-unlock
+ * @access  Private/Admin
+ */
+const adminUnlockAccount = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Email la bat buoc'
+        }
+      });
+    }
+
+    // Kiểm tra quyền admin (req.user được set từ protect middleware)
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Ban khong co quyen thuc hien hanh dong nay'
+        }
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() })
+      .select('+loginAttempts +lockUntil');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'Khong tim thay nguoi dung'
+        }
+      });
+    }
+
+    // Reset login attempts
+    await user.resetLoginAttempts();
+
+    // Log action (có thể thêm logging system)
+    console.log(`Admin ${req.user.email} unlocked account ${email}`);
+
+    res.status(200).json({
+      success: true,
+      message: `Da mo khoa tai khoan ${email} thanh cong`,
+      data: {
+        email: user.email,
+        name: user.name,
+        unlockedBy: req.user.email,
+        unlockedAt: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('Admin unlock account error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Loi server'
+      }
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -764,6 +993,9 @@ module.exports = {
   resendVerification,
   requestPasswordReset,
   resetPassword,
+  requestUnlockAccount,
+  unlockAccount,
+  adminUnlockAccount,
   logout,
   refreshToken,
   getMe

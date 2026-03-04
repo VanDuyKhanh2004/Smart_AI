@@ -3,6 +3,7 @@ const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const Promotion = require('../models/Promotion');
+const { sendOrderConfirmationEmail } = require('../services/emailService');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -251,6 +252,17 @@ const createOrder = async (req, res) => {
     // Populate user info for response
     const populatedOrder = await Order.findById(order._id)
       .populate('user', 'name email');
+
+    // Send order confirmation email
+    try {
+      await sendOrderConfirmationEmail(
+        { name: populatedOrder.user.name, email: populatedOrder.user.email },
+        populatedOrder
+      );
+    } catch (emailError) {
+      console.warn('Order confirmation email failed:', emailError.message);
+      // Don't fail the order if email fails
+    }
 
     res.status(201).json({
       success: true,
