@@ -77,6 +77,23 @@ const userSchema = new mongoose.Schema({
   passwordResetExpires: {
     type: Date,
     select: false
+  },
+  loginAttempts: {
+    type: Number,
+    default: 0,
+    select: false
+  },
+  lockUntil: {
+    type: Date,
+    select: false
+  },
+  unlockToken: {
+    type: String,
+    select: false
+  },
+  unlockTokenExpires: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true,
@@ -137,14 +154,67 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
+userSchema.virtual('isLocked').get(function() {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
+});
+
+userSchema.methods.incrementLoginAttempts = async function(options = {}) {
+  const maxAttempts = Number(options.maxAttempts || process.env.LOGIN_MAX_ATTEMPTS || 5);
+  const lockMinutes = Number(options.lockMinutes || process.env.LOGIN_LOCK_MINUTES || 15);
+
+  if (this.lockUntil && this.lockUntil <= Date.now()) {
+    this.loginAttempts = 1;
+    this.lockUntil = undefined;
+  } else {
+    this.loginAttempts = (this.loginAttempts || 0) + 1;
+  }
+
+  if (this.loginAttempts >= maxAttempts && !this.isLocked) {
+    this.lockUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
+  }
+
+  await this.save({ validateBeforeSave: false });
+};
+
+userSchema.methods.resetLoginAttempts = async function() {
+  this.loginAttempts = 0;
+  this.lockUntil = undefined;
+  this.unlockToken = undefined;
+  this.unlockTokenExpires = undefined;
+  await this.save({ validateBeforeSave: false });
+};
+
+// Method to create unlock token
+userSchema.methods.createUnlockToken = function() {
+  const crypto = require('crypto');
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+  
+  this.unlockToken = hashedToken;
+  this.unlockTokenExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+  
+  return rawToken;
+};
+
 // Static method to find user by email with password
 userSchema.statics.findByEmailWithPassword = function(email) {
-  return this.findOne({ email }).select('+password');
+  return this.findOne({ email }).select('+password +loginAttempts +lockUntil');
 };
 
 // Static method to find user by email with refresh token
 userSchema.statics.findByEmailWithRefreshToken = function(email) {
   return this.findOne({ email }).select('+refreshToken');
+};
+
+// Static method to find user by unlock token
+userSchema.statics.findByUnlockToken = function(token) {
+  const crypto = require('crypto');
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+  
+  return this.findOne({
+    unlockToken: hashedToken,
+    unlockTokenExpires: { $gt: Date.now() }
+  }).select('+unlockToken +unlockTokenExpires +loginAttempts +lockUntil');
 };
 
 module.exports = mongoose.model('User', userSchema);
