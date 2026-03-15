@@ -32,31 +32,25 @@ const AppRouter: React.FC = () => {
         <Route 
           path="/products" 
           element={
-            <ProtectedRoute>
-              <Layout>
-                <ProductListPage />
-              </Layout>
-            </ProtectedRoute>
+            <Layout>
+              <ProductListPage />
+            </Layout>
           } 
         />
         <Route 
           path="/products/:id" 
           element={
-            <ProtectedRoute>
-              <Layout>
-                <ProductDetailPage />
-              </Layout>
-            </ProtectedRoute>
+            <Layout>
+              <ProductDetailPage />
+            </Layout>
           } 
         />
         <Route 
           path="/cart" 
           element={
-            <ProtectedRoute>
-              <Layout>
-                <CartPage />
-              </Layout>
-            </ProtectedRoute>
+            <Layout>
+              <CartPage />
+            </Layout>
           } 
         />
         {/* Wishlist route - Requirements: 1.3 - Protected with auth (redirect to login if not authenticated) */}
@@ -114,11 +108,9 @@ const AppRouter: React.FC = () => {
         <Route 
           path="/compare" 
           element={
-            <ProtectedRoute>
-              <Layout>
-                <ComparePage />
-              </Layout>
-            </ProtectedRoute>
+            <Layout>
+              <ComparePage />
+            </Layout>
           } 
         />
         <Route 
@@ -210,11 +202,9 @@ const AppRouter: React.FC = () => {
         <Route 
           path="/stores" 
           element={
-            <ProtectedRoute>
-              <Layout>
-                <StoreLocatorPage />
-              </Layout>
-            </ProtectedRoute>
+            <Layout>
+              <StoreLocatorPage />
+            </Layout>
           } 
         />
         

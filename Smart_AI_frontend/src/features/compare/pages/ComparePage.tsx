@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +38,7 @@ import { cn } from '@/lib/utils';
 const ComparePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // State
   const [products, setProducts] = useState<Product[]>([]);
@@ -145,6 +146,11 @@ const ComparePage: React.FC = () => {
 
   // Handle add to cart (Requirement 7.1, 7.3)
   const handleAddToCart = async (product: Product) => {
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: location.pathname } });
+      return;
+    }
+
     setAddingToCart((prev) => ({ ...prev, [product._id]: true }));
 
     try {
@@ -154,50 +160,7 @@ const ComparePage: React.FC = () => {
           ? product.colors[0]
           : 'default';
 
-      if (isAuthenticated) {
-        await addItem(product._id, 1, color);
-      } else {
-        // For guest users, update store state directly
-        const currentItems = useCartStore.getState().items;
-        const existingIndex = currentItems.findIndex((item) => {
-          const itemProductId =
-            item.product?._id ||
-            (item as unknown as { productId: string }).productId;
-          return itemProductId === product._id && item.color === color;
-        });
-
-        let newItems;
-        if (existingIndex >= 0) {
-          newItems = currentItems.map((item, index) =>
-            index === existingIndex
-              ? { ...item, quantity: item.quantity + 1 }
-              : item
-          );
-        } else {
-          newItems = [
-            ...currentItems,
-            {
-              _id: `local-${Date.now()}`,
-              product: product,
-              quantity: 1,
-              color: color,
-              addedAt: new Date().toISOString(),
-            },
-          ];
-        }
-
-        useCartStore.getState().setItems(newItems);
-
-        // Save to localStorage
-        const localCartItems = newItems.map((item) => ({
-          productId:
-            item.product?._id ||
-            (item as unknown as { productId: string }).productId,
-          quantity: item.quantity,
-          color: item.color,
-        }));
-        localStorage.setItem('guestCart', JSON.stringify(localCartItems));
-      }
+      await addItem(product._id, 1, color);
 
       setAddedToCart((prev) => ({ ...prev, [product._id]: true }));
       setTimeout(() => {

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import CartSummary from '../components/CartSummary';
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const {
     items,
     isLoading,
@@ -39,6 +40,13 @@ const CartPage: React.FC = () => {
     }
   }, [error, clearError]);
 
+  useEffect(() => {
+    if (!checkoutNotice) return;
+
+    const timer = setTimeout(() => setCheckoutNotice(null), 1500);
+    return () => clearTimeout(timer);
+  }, [checkoutNotice]);
+
   const handleUpdateQuantity = async (itemId: string, quantity: number) => {
     try {
       await updateQuantity(itemId, quantity);
@@ -64,6 +72,14 @@ const CartPage: React.FC = () => {
   };
 
   const handleCheckout = () => {
+    if (!isAuthenticated) {
+      setCheckoutNotice('Vui lòng đăng nhập để thanh toán');
+      setTimeout(() => {
+        navigate('/login', { state: { from: '/checkout' } });
+      }, 600);
+      return;
+    }
+
     navigate('/checkout');
   };
 
@@ -82,6 +98,12 @@ const CartPage: React.FC = () => {
       {error && (
         <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
           {error}
+        </div>
+      )}
+
+      {checkoutNotice && (
+        <div className="mb-4 p-4 bg-primary/10 border border-primary/20 rounded-md text-primary text-sm">
+          {checkoutNotice}
         </div>
       )}
 

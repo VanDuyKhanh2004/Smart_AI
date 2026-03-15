@@ -1,8 +1,9 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingBag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCartStore } from '@/stores/cartStore';
+import { useAuthStore } from '@/stores/authStore';
 
 interface MiniCartPreviewProps {
   isVisible: boolean;
@@ -13,13 +14,23 @@ interface MiniCartPreviewProps {
  * Requirements: 4.2 - Display mini cart preview with recent items on hover
  */
 const MiniCartPreview: React.FC<MiniCartPreviewProps> = ({ isVisible }) => {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuthStore();
   const items = useCartStore((state) => state.items);
   const getTotalPrice = useCartStore((state) => state.getTotalPrice);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   
   // Show only 3 most recent items
   const recentItems = items.slice(-3).reverse();
   const totalPrice = getTotalPrice();
   const hasMoreItems = items.length > 3;
+
+  useEffect(() => {
+    if (!checkoutNotice) return;
+
+    const timer = setTimeout(() => setCheckoutNotice(null), 1500);
+    return () => clearTimeout(timer);
+  }, [checkoutNotice]);
 
   if (!isVisible) return null;
 
@@ -29,6 +40,18 @@ const MiniCartPreview: React.FC<MiniCartPreviewProps> = ({ isVisible }) => {
       style: 'currency',
       currency: 'VND',
     }).format(price);
+  };
+
+  const handleCheckout = () => {
+    if (!isAuthenticated) {
+      setCheckoutNotice('Vui lòng đăng nhập để thanh toán');
+      setTimeout(() => {
+        navigate('/login', { state: { from: '/checkout' } });
+      }, 600);
+      return;
+    }
+
+    navigate('/checkout');
   };
 
   return (
@@ -92,6 +115,12 @@ const MiniCartPreview: React.FC<MiniCartPreviewProps> = ({ isVisible }) => {
               <span className="text-sm text-muted-foreground">Tổng cộng:</span>
               <span className="text-base font-semibold">{formatPrice(totalPrice)}</span>
             </div>
+
+            {checkoutNotice && (
+              <div className="p-2 bg-primary/10 border border-primary/20 rounded-md text-primary text-xs">
+                {checkoutNotice}
+              </div>
+            )}
             
             <div className="flex gap-2">
               <Link to="/cart" className="flex-1">
@@ -99,11 +128,11 @@ const MiniCartPreview: React.FC<MiniCartPreviewProps> = ({ isVisible }) => {
                   Xem giỏ hàng
                 </Button>
               </Link>
-              <Link to="/checkout" className="flex-1">
-                <Button size="sm" className="w-full">
+              <div className="flex-1">
+                <Button size="sm" className="w-full" onClick={handleCheckout}>
                   Thanh toán
                 </Button>
-              </Link>
+              </div>
             </div>
           </div>
         </>

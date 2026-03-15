@@ -9,7 +9,11 @@ const LoginPage: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuthStore();
   
   // Get the redirect path from location state, default to home
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+  const locationState = location.state as { from?: string | { pathname?: string } } | null;
+  const from =
+    typeof locationState?.from === 'string'
+      ? locationState.from
+      : locationState?.from?.pathname || '/';
 
   useEffect(() => {
     // Redirect if already authenticated
