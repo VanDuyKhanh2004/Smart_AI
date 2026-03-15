@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +22,7 @@ import CompareButton from '@/components/ui/CompareButton';
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +146,11 @@ const ProductDetailPage: React.FC = () => {
 
   const handleAddToCart = async () => {
     if (!product) return;
+
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: location.pathname } });
+      return;
+    }
     
     // Check if color is required but not selected
     const hasColors = product.colors && product.colors.length > 0;
@@ -164,49 +170,7 @@ const ProductDetailPage: React.FC = () => {
     setAddedToCart(false);
 
     try {
-      if (isAuthenticated) {
-        // For authenticated users, call API
-        await addItem(product._id, quantity, colorToUse);
-      } else {
-        // For guest users, update store state directly and save to localStorage
-        const currentItems = useCartStore.getState().items;
-        const existingIndex = currentItems.findIndex(
-          (item) => {
-            const itemProductId = item.product?._id || (item as unknown as { productId: string }).productId;
-            return itemProductId === product._id && item.color === colorToUse;
-          }
-        );
-
-        let newItems;
-        if (existingIndex >= 0) {
-          // Update existing item quantity
-          newItems = currentItems.map((item, index) => 
-            index === existingIndex 
-              ? { ...item, quantity: item.quantity + quantity }
-              : item
-          );
-        } else {
-          // Add new item with product info for badge display
-          newItems = [...currentItems, {
-            _id: `local-${Date.now()}`,
-            product: product,
-            quantity,
-            color: colorToUse,
-            addedAt: new Date().toISOString(),
-          }];
-        }
-
-        // Update store state
-        useCartStore.getState().setItems(newItems);
-        
-        // Save to localStorage
-        const localCartItems = newItems.map((item) => ({
-          productId: item.product?._id || (item as unknown as { productId: string }).productId,
-          quantity: item.quantity,
-          color: item.color,
-        }));
-        localStorage.setItem('guestCart', JSON.stringify(localCartItems));
-      }
+      await addItem(product._id, quantity, colorToUse);
 
       setAddedToCart(true);
       // Reset success state after 2 seconds
