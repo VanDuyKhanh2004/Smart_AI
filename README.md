@@ -82,17 +82,18 @@ Mục tiêu của repository này là cung cấp nền tảng full-stack cho:
   | Mongoose
   v
 [MongoDB]
+```
 
-Ngoài ra backend tích hợp:
+Backend còn tích hợp:
 - OpenAI API (AI features)
 - SMTP (email notifications)
-```
 
 ## Cấu trúc dự án
 
 ```text
 .
 |-- docker-compose.yml
+|-- LICENSE
 |-- README.md
 |-- Smart_AI_backend/
 |-- Smart_AI_frontend/
