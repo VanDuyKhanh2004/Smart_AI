@@ -9,8 +9,6 @@ const connectDatabase = async () => {
     }
 
     const connectionOptions = {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000, // Timeout sau 5s nếu không kết nối được
       socketTimeoutMS: 45000, // Đóng kết nối sau 45s không hoạt động
       maxPoolSize: 10, // Tối đa 10 kết nối trong pool
@@ -18,10 +16,8 @@ const connectDatabase = async () => {
       maxIdleTimeMS: 30000, // Đóng kết nối không hoạt động sau 30s
     };
 
-    const connection = await mongoose.connect(
-      process.env.MONGO_CONNECTION_STRING,
-      connectionOptions
-    );
+    // Newer MongoDB drivers ignore useNewUrlParser/useUnifiedTopology; pass only supported options
+    const connection = await mongoose.connect(process.env.MONGO_CONNECTION_STRING, connectionOptions);
 
     console.log(`MongoDB Connected: ${connection.connection.host}`);
     console.log(`Database Name: ${connection.connection.name}`);

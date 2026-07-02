@@ -126,7 +126,8 @@ const conversationSchema = new mongoose.Schema({
 });
 
 
-conversationSchema.index({ sessionId: 1 }, { unique: true });
+// `sessionId` is declared `unique: true` on the field; avoid duplicate index
+// conversationSchema.index({ sessionId: 1 }, { unique: true });
 conversationSchema.index({ lastMessageAt: -1 });
 conversationSchema.index({ createdAt: -1 });
 conversationSchema.index({ status: 1 });

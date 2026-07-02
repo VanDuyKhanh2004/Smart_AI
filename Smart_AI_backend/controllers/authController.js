@@ -490,6 +490,109 @@ const googleLogin = async (req, res) => {
 };
 
 /**
+ * @desc    Link Google account to currently authenticated user
+ * @route   POST /api/auth/link/google
+ * @access  Private
+ */
+const linkGoogle = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Google credential là bắt buộc' }
+      });
+    }
+
+    // Verify Google token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, picture } = payload;
+
+    // Ensure no other user already linked this Google account
+    const existing = await User.findOne({ googleId });
+    if (existing && existing._id.toString() !== req.user._id.toString()) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'GOOGLE_LINKED', message: 'Google account đã được liên kết với người dùng khác' }
+      });
+    }
+
+    // Require that google email matches current user's email for safety
+    if (email.toLowerCase() !== req.user.email.toLowerCase()) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'EMAIL_MISMATCH', message: 'Email Google không khớp với email tài khoản hiện tại' }
+      });
+    }
+
+    // Link and save
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Người dùng không tồn tại' } });
+    }
+
+    user.googleId = googleId;
+    if (!user.avatar && picture) user.avatar = picture;
+    await user.save({ validateBeforeSave: false });
+
+    res.status(200).json({ success: true, message: 'Đã liên kết tài khoản Google thành công', data: { user: user.toJSON() } });
+  } catch (error) {
+    console.error('Link Google error:', error);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Lỗi server' } });
+  }
+};
+
+/**
+ * @desc    Unlink Google account from currently authenticated user
+ * @route   POST /api/auth/unlink/google
+ * @access  Private
+ */
+const unlinkGoogle = async (req, res) => {
+  try {
+    // For safety, if user has no password (Google-only account), require setting password first
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user) {
+      return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Người dùng không tồn tại' } });
+    }
+
+    if (!user.googleId) {
+      return res.status(400).json({ success: false, error: { code: 'NOT_LINKED', message: 'Tài khoản chưa liên kết với Google' } });
+    }
+
+    const providedPassword = req.body.password;
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_PASSWORD', message: 'Tài khoản hiện là Google-only. Vui lòng thiết lập mật khẩu trước khi hủy liên kết.' }
+      });
+    }
+
+    if (!providedPassword) {
+      return res.status(400).json({ success: false, error: { code: 'PASSWORD_REQUIRED', message: 'Mật khẩu hiện tại là bắt buộc để hủy liên kết' } });
+    }
+
+    const match = await user.comparePassword(providedPassword);
+    if (!match) {
+      return res.status(401).json({ success: false, error: { code: 'INVALID_PASSWORD', message: 'Mật khẩu không đúng' } });
+    }
+
+    user.googleId = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    res.status(200).json({ success: true, message: 'Đã hủy liên kết Google thành công', data: { user: user.toJSON() } });
+  } catch (error) {
+    console.error('Unlink Google error:', error);
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Lỗi server' } });
+  }
+};
+
+/**
  * @desc    Verify email
  * @route   GET /api/auth/verify-email
  * @access  Public
@@ -998,5 +1101,8 @@ module.exports = {
   adminUnlockAccount,
   logout,
   refreshToken,
-  getMe
+  getMe,
+  linkGoogle,
+  unlinkGoogle
 };
+

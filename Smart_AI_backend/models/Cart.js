@@ -53,7 +53,7 @@ const cartSchema = new mongoose.Schema({
   }
 });
 
-// Index for user lookup
-cartSchema.index({ user: 1 }, { unique: true });
+// `user` field already declares `unique: true`; avoid duplicate index
+// cartSchema.index({ user: 1 }, { unique: true });
 
 module.exports = mongoose.model('Cart', cartSchema);

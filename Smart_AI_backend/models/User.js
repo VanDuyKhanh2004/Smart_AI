@@ -129,8 +129,8 @@ const userSchema = new mongoose.Schema({
   }
 });
 
-// Index for email lookup performance
-userSchema.index({ email: 1 });
+// Note: `email` field already declares `unique: true`,
+// avoid duplicate index declaration to prevent Mongoose warnings.
 
 // Pre-save middleware to hash password
 userSchema.pre('save', async function(next) {

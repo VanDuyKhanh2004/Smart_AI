@@ -82,8 +82,8 @@ const promotionSchema = new mongoose.Schema({
   }
 });
 
-// Indexes for code and status queries
-promotionSchema.index({ code: 1 }, { unique: true });
+// `code` field already declares `unique: true`; avoid duplicate index
+// promotionSchema.index({ code: 1 }, { unique: true });
 promotionSchema.index({ isActive: 1, startDate: 1, endDate: 1 });
 promotionSchema.index({ createdAt: -1 });
 

@@ -182,7 +182,8 @@ const orderSchema = new mongoose.Schema({
 // Indexes for efficient queries
 orderSchema.index({ user: 1 });
 orderSchema.index({ status: 1 });
-orderSchema.index({ orderNumber: 1 }, { unique: true });
+// `orderNumber` field already declares `unique: true`; avoid duplicate index
+// orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1, createdAt: -1 });

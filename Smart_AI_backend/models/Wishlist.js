@@ -43,7 +43,8 @@ const wishlistSchema = new mongoose.Schema({
 });
 
 // Index for user lookup (unique)
-wishlistSchema.index({ user: 1 }, { unique: true });
+// `user` field already declares `unique: true`; avoid duplicate index
+// wishlistSchema.index({ user: 1 }, { unique: true });
 
 // Index for checking if product exists in wishlist
 wishlistSchema.index({ 'items.product': 1 });

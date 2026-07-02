@@ -50,7 +50,9 @@ export const useCartStore = create<CartStore>((set, get) => ({
   // Computed: total price of all items
   getTotalPrice: () => {
     return get().items.reduce((total, item) => {
-      return total + (item.product.price * item.quantity);
+      const price = item?.product?.price ?? 0;
+      const qty = item?.quantity ?? 0;
+      return total + price * qty;
     }, 0);
   },
 
