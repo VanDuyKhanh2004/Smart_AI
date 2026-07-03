@@ -1,20 +1,15 @@
 'use client';
 
-import { Badge } from '@repo/shadcn-ui/components/ui/badge';
+import { Badge } from '@/components/ui/badge';
 import {
   Carousel,
   CarouselContent,
   CarouselItem,
   type CarouselApi,
-} from '@repo/shadcn-ui/components/ui/carousel';
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from '@repo/shadcn-ui/components/ui/hover-card';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+} from '@/components/ui/carousel';
+import { cn } from '@/lib/utils';
 import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react';
-import { type ComponentProps, useCallback, useEffect, useState, useRef, createContext, useContext } from 'react';
+import { type ComponentProps, useCallback, useEffect, useState, createContext, useContext } from 'react';
 
 // Context to share carousel API with child components
 const CarouselApiContext = createContext<CarouselApi | undefined>(undefined);
@@ -49,10 +44,10 @@ export const InlineCitationText = ({
   />
 );
 
-export type InlineCitationCardProps = ComponentProps<typeof HoverCard>;
+export type InlineCitationCardProps = ComponentProps<'div'>;
 
-export const InlineCitationCard = (props: InlineCitationCardProps) => (
-  <HoverCard closeDelay={0} openDelay={0} {...(props as any)} />
+export const InlineCitationCard = ({ className, ...props }: InlineCitationCardProps) => (
+  <div className={cn('inline-flex flex-col', className)} {...(props as any)} />
 );
 
 export type InlineCitationCardTriggerProps = ComponentProps<typeof Badge> & {
@@ -64,22 +59,20 @@ export const InlineCitationCardTrigger = ({
   className,
   ...props
 }: InlineCitationCardTriggerProps) => (
-  <HoverCardTrigger asChild>
-    <Badge
-      className={cn('ml-1 rounded-full', className)}
-      variant="secondary"
-      {...(props as any)}
-    >
-      {sources.length ? (
-        <>
-          {new URL(sources[0]).hostname}{' '}
-          {sources.length > 1 && `+${sources.length - 1}`}
-        </>
-      ) : (
-        'unknown'
-      )}
-    </Badge>
-  </HoverCardTrigger>
+  <Badge
+    className={cn('ml-1 rounded-full', className)}
+    variant="secondary"
+    {...(props as any)}
+  >
+    {sources.length ? (
+      <>
+        {new URL(sources[0]).hostname}{' '}
+        {sources.length > 1 && `+${sources.length - 1}`}
+      </>
+    ) : (
+      'unknown'
+    )}
+  </Badge>
 );
 
 export type InlineCitationCardBodyProps = ComponentProps<'div'>;
@@ -88,7 +81,7 @@ export const InlineCitationCardBody = ({
   className,
   ...props
 }: InlineCitationCardBodyProps) => (
-  <HoverCardContent className={cn('relative w-80 p-0', className)} {...(props as any)} />
+  <div className={cn('relative w-80 p-0', className)} {...(props as any)} />
 );
 
 export type InlineCitationCarouselProps = ComponentProps<typeof Carousel>;

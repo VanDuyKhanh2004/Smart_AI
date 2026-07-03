@@ -1,13 +1,7 @@
 'use client';
 
-import { Button } from '@repo/shadcn-ui/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@repo/shadcn-ui/components/ui/tooltip';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { ComponentProps } from 'react';
 
 export type ActionsProps = ComponentProps<'div'>;
@@ -31,35 +25,19 @@ export const Action = ({
   variant = 'ghost',
   size = 'sm',
   ...props
-}: ActionProps) => {
-  const button = (
-    <Button
-      className={cn(
-        'size-9 p-1.5 text-muted-foreground hover:text-foreground',
-        className
-      )}
-      size={size}
-      type="button"
-      variant={variant}
-      {...(props as any)}
-    >
-      {children}
-      <span className="sr-only">{label || tooltip}</span>
-    </Button>
-  );
-
-  if (tooltip) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>
-            <p>{tooltip}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-
-  return button;
-};
+}: ActionProps) => (
+  <Button
+    className={cn(
+      'size-9 p-1.5 text-muted-foreground hover:text-foreground',
+      className
+    )}
+    size={size}
+    title={tooltip}
+    type="button"
+    variant={variant}
+    {...(props as any)}
+  >
+    {children}
+    <span className="sr-only">{label || tooltip}</span>
+  </Button>
+);

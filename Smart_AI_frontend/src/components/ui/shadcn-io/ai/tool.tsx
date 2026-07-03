@@ -1,12 +1,7 @@
 'use client';
 
-import { Badge } from '@repo/shadcn-ui/components/ui/badge';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@repo/shadcn-ui/components/ui/collapsible';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import type { ToolUIPart } from 'ai';
 import {
   CheckCircleIcon,
@@ -19,10 +14,10 @@ import {
 import type { ComponentProps, ReactNode } from 'react';
 import { CodeBlock } from './code-block';
 
-export type ToolProps = ComponentProps<typeof Collapsible>;
+export type ToolProps = ComponentProps<'div'>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible
+  <div
     className={cn('not-prose mb-4 w-full rounded-md border', className)}
     {...(props as any)}
   />
@@ -63,7 +58,7 @@ export const ToolHeader = ({
   state,
   ...props
 }: ToolHeaderProps) => (
-  <CollapsibleTrigger
+  <div
     className={cn(
       'flex w-full items-center justify-between gap-4 p-3',
       className
@@ -75,16 +70,16 @@ export const ToolHeader = ({
       <span className="font-medium text-sm">{type}</span>
       {getStatusBadge(state)}
     </div>
-    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-  </CollapsibleTrigger>
+    <ChevronDownIcon className="size-4 text-muted-foreground" />
+  </div>
 );
 
-export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
+export type ToolContentProps = ComponentProps<'div'>;
 
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
-  <CollapsibleContent
+  <div
     className={cn(
-      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
+      'text-popover-foreground outline-none',
       className
     )}
     {...(props as any)}

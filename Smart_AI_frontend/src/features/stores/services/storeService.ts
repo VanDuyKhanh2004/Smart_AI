@@ -1,6 +1,5 @@
 import apiClient from '@/lib/axios';
 import type {
-  Store,
   GetStoresResponse,
   GetStoreByIdResponse,
   CreateStoreRequest,

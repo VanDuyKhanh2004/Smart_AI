@@ -1,5 +1,3 @@
-import type { Product } from './product.type';
-
 // Product in wishlist can have either _id or id due to MongoDB toJSON transform
 export interface WishlistProduct {
   _id?: string;

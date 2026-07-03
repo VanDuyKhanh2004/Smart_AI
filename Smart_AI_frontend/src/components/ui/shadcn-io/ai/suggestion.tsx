@@ -1,26 +1,21 @@
 'use client';
 
-import { Button } from '@repo/shadcn-ui/components/ui/button';
-import {
-  ScrollArea,
-  ScrollBar,
-} from '@repo/shadcn-ui/components/ui/scroll-area';
-import { cn } from '@repo/shadcn-ui/lib/utils';
-import type { ComponentProps } from 'react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import type { ComponentProps, HTMLAttributes } from 'react';
 
-export type SuggestionsProps = ComponentProps<typeof ScrollArea>;
+export type SuggestionsProps = HTMLAttributes<HTMLDivElement>;
 
 export const Suggestions = ({
   className,
   children,
   ...props
 }: SuggestionsProps) => (
-  <ScrollArea className="w-full overflow-x-auto whitespace-nowrap" {...(props as any)}>
-    <div className={cn('flex w-max flex-nowrap items-center gap-2', className)}>
+  <div className={cn('w-full overflow-x-auto whitespace-nowrap', className)} {...(props as any)}>
+    <div className={cn('flex w-max flex-nowrap items-center gap-2')}>
       {children}
     </div>
-    <ScrollBar className="hidden" orientation="horizontal" />
-  </ScrollArea>
+  </div>
 );
 
 export type SuggestionProps = Omit<ComponentProps<typeof Button>, 'onClick'> & {

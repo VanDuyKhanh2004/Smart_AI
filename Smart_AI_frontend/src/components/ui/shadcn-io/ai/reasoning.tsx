@@ -1,15 +1,9 @@
 'use client';
 
-import { useControllableState } from '@radix-ui/react-use-controllable-state';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@repo/shadcn-ui/components/ui/collapsible';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+import { cn } from '@/lib/utils';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
-import type { ComponentProps } from 'react';
-import { createContext, memo, useContext, useEffect, useState } from 'react';
+import type { HTMLAttributes } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useState } from 'react';
 import { Response } from './response';
 
 type ReasoningContextValue = {
@@ -29,7 +23,7 @@ const useReasoning = () => {
   return context;
 };
 
-export type ReasoningProps = ComponentProps<typeof Collapsible> & {
+export type ReasoningProps = HTMLAttributes<HTMLDivElement> & {
   isStreaming?: boolean;
   open?: boolean;
   defaultOpen?: boolean;
@@ -50,18 +44,17 @@ export const Reasoning = memo(
     children,
     ...props
   }: ReasoningProps) => {
-    const [isOpen, setIsOpen] = useControllableState({
-      prop: open,
-      defaultProp: defaultOpen,
-      onChange: onOpenChange,
-    });
-    const [duration, setDuration] = useControllableState({
-      prop: durationProp,
-      defaultProp: 0,
-    });
+    const [isOpenInternal, setIsOpenInternal] = useState(defaultOpen);
+    const isOpen = open !== undefined ? open : isOpenInternal;
+    const [duration, setDuration] = useState(durationProp ?? 0);
 
     const [hasAutoClosedRef, setHasAutoClosedRef] = useState(false);
     const [startTime, setStartTime] = useState<number | null>(null);
+
+    const setIsOpen = useCallback((val: boolean) => {
+      setIsOpenInternal(val);
+      onOpenChange?.(val);
+    }, [onOpenChange]);
 
     // Track duration when streaming starts and ends
     useEffect(() => {
@@ -73,7 +66,7 @@ export const Reasoning = memo(
         setDuration(Math.round((Date.now() - startTime) / 1000));
         setStartTime(null);
       }
-    }, [isStreaming, startTime, setDuration]);
+    }, [isStreaming, startTime]);
 
     // Auto-open when streaming starts, auto-close when streaming ends (once only)
     useEffect(() => {
@@ -89,30 +82,22 @@ export const Reasoning = memo(
       }
     }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosedRef]);
 
-    const handleOpenChange = (newOpen: boolean) => {
-      setIsOpen(newOpen);
-    };
-
     return (
       <ReasoningContext.Provider
         value={{ isStreaming, isOpen, setIsOpen, duration }}
       >
-        <Collapsible
+        <div
           className={cn('not-prose mb-4', className)}
-          onOpenChange={handleOpenChange}
-          open={isOpen}
           {...(props as any)}
         >
           {children}
-        </Collapsible>
+        </div>
       </ReasoningContext.Provider>
     );
   }
 );
 
-export type ReasoningTriggerProps = ComponentProps<
-  typeof CollapsibleTrigger
-> & {
+export type ReasoningTriggerProps = HTMLAttributes<HTMLButtonElement> & {
   title?: string;
 };
 
@@ -123,14 +108,16 @@ export const ReasoningTrigger = memo(
     children,
     ...props
   }: ReasoningTriggerProps) => {
-    const { isStreaming, isOpen, duration } = useReasoning();
+    const { isStreaming, isOpen, setIsOpen, duration } = useReasoning();
 
     return (
-      <CollapsibleTrigger
+      <button
         className={cn(
           'flex items-center gap-2 text-muted-foreground text-sm',
           className
         )}
+        onClick={() => setIsOpen(!isOpen)}
+        type="button"
         {...(props as any)}
       >
         {children ?? (
@@ -149,30 +136,31 @@ export const ReasoningTrigger = memo(
             />
           </>
         )}
-      </CollapsibleTrigger>
+      </button>
     );
   }
 );
 
-export type ReasoningContentProps = ComponentProps<
-  typeof CollapsibleContent
-> & {
+export type ReasoningContentProps = HTMLAttributes<HTMLDivElement> & {
   children: string;
 };
 
 export const ReasoningContent = memo(
-  ({ className, children, ...props }: ReasoningContentProps) => (
-    <CollapsibleContent
-      className={cn(
-        'mt-4 text-sm',
-        'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
-        className
-      )}
-      {...(props as any)}
-    >
-      <Response className="grid gap-2">{children}</Response>
-    </CollapsibleContent>
-  )
+  ({ className, children, ...props }: ReasoningContentProps) => {
+    const { isOpen } = useReasoning();
+    if (!isOpen) return null;
+    return (
+      <div
+        className={cn(
+          'mt-4 text-sm',
+          className
+        )}
+        {...(props as any)}
+      >
+        <Response className="grid gap-2">{children}</Response>
+      </div>
+    );
+  }
 );
 
 Reasoning.displayName = 'Reasoning';

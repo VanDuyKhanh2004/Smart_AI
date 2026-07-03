@@ -1,19 +1,8 @@
 'use client';
 
-import { Button } from '@repo/shadcn-ui/components/ui/button';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@repo/shadcn-ui/components/ui/collapsible';
-import { Input } from '@repo/shadcn-ui/components/ui/input';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@repo/shadcn-ui/components/ui/tooltip';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { ChevronDownIcon } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { createContext, useContext, useState } from 'react';
@@ -103,25 +92,17 @@ export const WebPreviewNavigationButton = ({
   children,
   ...props
 }: WebPreviewNavigationButtonProps) => (
-  <TooltipProvider>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          className="h-8 w-8 p-0 hover:text-foreground"
-          disabled={disabled}
-          onClick={onClick}
-          size="sm"
-          variant="ghost"
-          {...(props as any)}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p>{tooltip}</p>
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
+  <Button
+    className="h-8 w-8 p-0 hover:text-foreground"
+    disabled={disabled}
+    onClick={onClick}
+    size="sm"
+    title={tooltip}
+    variant="ghost"
+    {...(props as any)}
+  >
+    {children}
+  </Button>
 );
 
 export type WebPreviewUrlProps = ComponentProps<typeof Input>;
@@ -214,56 +195,50 @@ export const WebPreviewConsole = ({
   const { consoleOpen, setConsoleOpen } = useWebPreview();
 
   return (
-    <Collapsible
+    <div
       className={cn('border-t bg-muted/50 font-mono text-sm', className)}
-      onOpenChange={setConsoleOpen}
-      open={consoleOpen}
       {...(props as any)}
     >
-      <CollapsibleTrigger asChild>
-        <Button
-          className="flex w-full items-center justify-between p-4 text-left font-medium hover:bg-muted/50"
-          variant="ghost"
-        >
-          Console
-          <ChevronDownIcon
-            className={cn(
-              'h-4 w-4 transition-transform duration-200',
-              consoleOpen && 'rotate-180'
-            )}
-          />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent
-        className={cn(
-          'px-4 pb-4',
-          'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in'
-        )}
+      <Button
+        className="flex w-full items-center justify-between p-4 text-left font-medium hover:bg-muted/50"
+        onClick={() => setConsoleOpen(!consoleOpen)}
+        variant="ghost"
       >
-        <div className="max-h-48 space-y-1 overflow-y-auto">
-          {logs.length === 0 ? (
-            <p className="text-muted-foreground">No console output</p>
-          ) : (
-            logs.map((log, index) => (
-              <div
-                className={cn(
-                  'text-xs',
-                  log.level === 'error' && 'text-destructive',
-                  log.level === 'warn' && 'text-yellow-600',
-                  log.level === 'log' && 'text-foreground'
-                )}
-                key={`${log.timestamp.getTime()}-${index}`}
-              >
-                <span className="text-muted-foreground">
-                  {log.timestamp.toLocaleTimeString()}
-                </span>{' '}
-                {log.message}
-              </div>
-            ))
+        Console
+        <ChevronDownIcon
+          className={cn(
+            'h-4 w-4 transition-transform duration-200',
+            consoleOpen && 'rotate-180'
           )}
-          {children}
+        />
+      </Button>
+      {consoleOpen && (
+        <div className="px-4 pb-4">
+          <div className="max-h-48 space-y-1 overflow-y-auto">
+            {logs.length === 0 ? (
+              <p className="text-muted-foreground">No console output</p>
+            ) : (
+              logs.map((log, index) => (
+                <div
+                  className={cn(
+                    'text-xs',
+                    log.level === 'error' && 'text-destructive',
+                    log.level === 'warn' && 'text-yellow-600',
+                    log.level === 'log' && 'text-foreground'
+                  )}
+                  key={`${log.timestamp.getTime()}-${index}`}
+                >
+                  <span className="text-muted-foreground">
+                    {log.timestamp.toLocaleTimeString()}
+                  </span>{' '}
+                  {log.message}
+                </div>
+              ))
+            )}
+            {children}
+          </div>
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      )}
+    </div>
   );
 };

@@ -1,13 +1,8 @@
 'use client';
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@repo/shadcn-ui/components/ui/collapsible';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+import { cn } from '@/lib/utils';
 import { ChevronDownIcon, SearchIcon } from 'lucide-react';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, HTMLAttributes } from 'react';
 
 export type TaskItemFileProps = ComponentProps<'div'>;
 
@@ -35,24 +30,25 @@ export const TaskItem = ({ children, className, ...props }: TaskItemProps) => (
   </div>
 );
 
-export type TaskProps = ComponentProps<typeof Collapsible>;
+export type TaskProps = HTMLAttributes<HTMLDivElement> & {
+  defaultOpen?: boolean;
+};
 
 export const Task = ({
   defaultOpen = true,
   className,
+  children,
   ...props
 }: TaskProps) => (
-  <Collapsible
-    className={cn(
-      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=open]:animate-in',
-      className
-    )}
-    defaultOpen={defaultOpen}
+  <div
+    className={cn(className)}
     {...(props as any)}
-  />
+  >
+    {children}
+  </div>
 );
 
-export type TaskTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
+export type TaskTriggerProps = HTMLAttributes<HTMLButtonElement> & {
   title: string;
 };
 
@@ -62,7 +58,7 @@ export const TaskTrigger = ({
   title,
   ...props
 }: TaskTriggerProps) => (
-  <CollapsibleTrigger asChild className={cn('group', className)} {...(props as any)}>
+  <div className={cn('group', className)} {...(props as any)}>
     {children ?? (
       <div className="flex cursor-pointer items-center gap-2 text-muted-foreground hover:text-foreground">
         <SearchIcon className="size-4" />
@@ -70,19 +66,19 @@ export const TaskTrigger = ({
         <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
       </div>
     )}
-  </CollapsibleTrigger>
+  </div>
 );
 
-export type TaskContentProps = ComponentProps<typeof CollapsibleContent>;
+export type TaskContentProps = HTMLAttributes<HTMLDivElement>;
 
 export const TaskContent = ({
   children,
   className,
   ...props
 }: TaskContentProps) => (
-  <CollapsibleContent
+  <div
     className={cn(
-      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
+      'text-popover-foreground outline-none',
       className
     )}
     {...(props as any)}
@@ -90,5 +86,5 @@ export const TaskContent = ({
     <div className="mt-4 space-y-2 border-muted border-l-2 pl-4">
       {children}
     </div>
-  </CollapsibleContent>
+  </div>
 );

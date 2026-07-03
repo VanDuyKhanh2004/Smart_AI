@@ -1,24 +1,19 @@
 'use client';
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@repo/shadcn-ui/components/ui/collapsible';
-import { cn } from '@repo/shadcn-ui/lib/utils';
+import { cn } from '@/lib/utils';
 import { BookIcon, ChevronDownIcon } from 'lucide-react';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, HTMLAttributes } from 'react';
 
-export type SourcesProps = ComponentProps<'div'>;
+export type SourcesProps = HTMLAttributes<HTMLDivElement>;
 
 export const Sources = ({ className, ...props }: SourcesProps) => (
-  <Collapsible
+  <div
     className={cn('not-prose mb-4 text-primary text-xs', className)}
     {...(props as any)}
   />
 );
 
-export type SourcesTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
+export type SourcesTriggerProps = HTMLAttributes<HTMLButtonElement> & {
   count: number;
 };
 
@@ -28,26 +23,25 @@ export const SourcesTrigger = ({
   children,
   ...props
 }: SourcesTriggerProps) => (
-  <CollapsibleTrigger className="flex items-center gap-2" {...(props as any)}>
+  <button className="flex items-center gap-2" type="button" {...(props as any)}>
     {children ?? (
       <>
         <p className="font-medium">Used {count} sources</p>
         <ChevronDownIcon className="h-4 w-4" />
       </>
     )}
-  </CollapsibleTrigger>
+  </button>
 );
 
-export type SourcesContentProps = ComponentProps<typeof CollapsibleContent>;
+export type SourcesContentProps = HTMLAttributes<HTMLDivElement>;
 
 export const SourcesContent = ({
   className,
   ...props
 }: SourcesContentProps) => (
-  <CollapsibleContent
+  <div
     className={cn(
       'mt-3 flex w-fit flex-col gap-2',
-      'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
       className
     )}
     {...(props as any)}
