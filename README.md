@@ -1,298 +1,649 @@
-# Smart AI Agent
+# 🤖 Smart AI Agent
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)
-![React](https://img.shields.io/badge/Frontend-React%2018-61DAFB?logo=react&logoColor=black)
-![Docker](https://img.shields.io/badge/DevOps-Docker-2496ED?logo=docker&logoColor=white)
+> AI-powered E-commerce Platform built with **React**, **Node.js**, **MongoDB**, **Socket.IO**, **Docker** and **OpenAI API**.
 
-Monorepo thương mại điện tử tích hợp AI, gồm backend API và frontend web.
+![License](https://img.shields.io/badge/license-MIT-green)
+![Node.js](https://img.shields.io/badge/Node.js-18+-brightgreen)
+![React](https://img.shields.io/badge/React-18-blue)
+![MongoDB](https://img.shields.io/badge/MongoDB-7-green)
+![Docker](https://img.shields.io/badge/Docker-Supported-blue)
+![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o-purple)
 
-## Mục lục
+---
 
-- [Tổng quan](#tong-quan)
-- [Trạng thái dự án](#trang-thai-du-an)
-- [Tính năng chính](#tinh-nang-chinh)
-- [Công nghệ sử dụng](#cong-nghe-su-dung)
-- [Kiến trúc tổng thể](#kien-truc-tong-the)
-- [Cấu trúc dự án](#cau-truc-du-an)
-- [Yêu cầu môi trường](#yeu-cau-moi-truong)
-- [Chạy nhanh với Docker](#chay-nhanh-voi-docker)
-- [Chạy local không Docker](#chay-local-khong-docker)
-- [Biến môi trường](#bien-moi-truong)
-- [Scripts](#scripts)
-- [API và Socket](#api-va-socket)
-- [Troubleshooting](#troubleshooting)
-- [Bảo mật](#bao-mat)
-- [Đóng góp](#dong-gop)
-- [License](#license)
+# 📸 Demo
 
-## Tổng quan
+> Thêm ảnh chụp màn hình của dự án tại thư mục `docs/images`
 
-Project gồm 2 ứng dụng:
-- Backend API: Node.js + Express + MongoDB + Socket.IO
-- Frontend: React + TypeScript + Vite + TailwindCSS
+## Home Page
 
-Mục tiêu của repository này là cung cấp nền tảng full-stack cho:
-- Quản lý sản phẩm, giỏ hàng, đơn hàng, wishlist, review
-- Quản lý hồ sơ, địa chỉ, cửa hàng, khiếu nại, khuyến mãi
-- Tích hợp AI hỗ trợ hỏi đáp/gợi ý
-- Realtime event qua Socket.IO
+<img src="docs/images/home.png" width="900">
 
-## Trạng thái dự án
+---
 
-- Status: Active development
-- Mức độ sẵn sàng: Có thể chạy local/Docker để phát triển và demo
-- Mục tiêu gần: Chuẩn hóa test, CI/CD và tài liệu API chi tiết
+## AI Assistant
 
-## Tính năng chính
+<img src="docs/images/chat.png" width="900">
 
-- Xác thực bằng JWT và Google Login
-- CRUD cho domain e-commerce (products, cart, orders, reviews...)
-- Upload avatar và phục vụ static file
-- Tích hợp AI model qua API key
-- Hỗ trợ chạy local hoặc Docker Compose
+---
 
-## Công nghệ sử dụng
+## Shopping Cart
 
-### Backend
-- Node.js, Express, Mongoose
+<img src="docs/images/cart.png" width="900">
+
+---
+
+## Order Management
+
+<img src="docs/images/orders.png" width="900">
+
+---
+
+# 📖 Table of Contents
+
+- Overview
+- Features
+- Tech Stack
+- System Architecture
+- AI Workflow
+- Project Structure
+- Database
+- Installation
+- Docker Deployment
+- Local Development
+- Environment Variables
+- API
 - Socket.IO
-- JWT, bcryptjs
-- Multer, Nodemailer
+- Security
+- Roadmap
+- Troubleshooting
+- Contributing
+- Author
+- License
 
-### Frontend
-- React 18, TypeScript, Vite
-- React Router, TanStack Query, Zustand
-- TailwindCSS
-- Axios, Socket.IO client
+---
 
-### Hạ tầng
-- MongoDB 7
-- Docker, Docker Compose
+# 📌 Overview
 
-## Kiến trúc tổng thể
+Smart AI Agent là hệ thống thương mại điện tử tích hợp AI hỗ trợ tư vấn và chăm sóc khách hàng.
+
+Repository bao gồm hai phần:
+
+- **Backend API**
+- **Frontend Web**
+
+Hệ thống hỗ trợ:
+
+- Đăng nhập JWT
+- Google OAuth
+- Quản lý sản phẩm
+- Giỏ hàng
+- Wishlist
+- Đơn hàng
+- Promotion
+- Complaint
+- AI Chat
+- Realtime Notification
+- Docker Deployment
+
+---
+
+# ✨ Features
+
+## Authentication
+
+- ✅ JWT Authentication
+- ✅ Refresh Token
+- ✅ Google Login
+- ✅ Forgot Password
+- ✅ Account Lock Protection
+
+---
+
+## AI
+
+- ✅ OpenAI Integration
+- ✅ AI Chat Assistant
+- ✅ Conversation History
+- ✅ Intent Classification
+- ✅ Product Recommendation
+
+---
+
+## E-commerce
+
+- ✅ Product Management
+
+- ✅ Shopping Cart
+
+- ✅ Wishlist
+
+- ✅ Reviews
+
+- ✅ Orders
+
+- ✅ Promotions
+
+- ✅ Stores
+
+- ✅ Address Management
+
+---
+
+## Realtime
+
+- ✅ Socket.IO
+
+- ✅ Live Notification
+
+---
+
+## Infrastructure
+
+- ✅ Docker
+
+- ✅ Docker Compose
+
+- ✅ Environment Configuration
+
+---
+
+# 🛠 Tech Stack
+
+| Backend   | Frontend   | Database      | AI            | DevOps         |
+| --------- | ---------- | ------------- | ------------- | -------------- |
+| Node.js   | React      | MongoDB       | OpenAI GPT-4o | Docker         |
+| Express   | TypeScript | Mongoose      | OpenAI API    | Docker Compose |
+| Socket.IO | Vite       | MongoDB Atlas |               | Git            |
+
+---
+
+# 🏗️ System Architecture
 
 ```text
-[React + Vite Frontend]
-  |
-  | HTTP (/api) + Socket.IO
-  v
-[Node.js + Express Backend]
-  |
-  | Mongoose
-  v
-[MongoDB]
+                +----------------------+
+                |      Web Browser     |
+                +----------+-----------+
+                           |
+                  HTTP / Socket.IO
+                           |
+          +----------------+----------------+
+          |                                 |
+          |        React + TypeScript       |
+          +----------------+----------------+
+                           |
+                     REST API Request
+                           |
+                 Express + Node.js Server
+                           |
+        +---------+--------+---------+
+        |         |                  |
+    MongoDB   OpenAI API       Socket.IO
 ```
 
-Backend còn tích hợp:
-- OpenAI API (AI features)
-- SMTP (email notifications)
+---
 
-## Cấu trúc dự án
+# 🤖 AI Workflow
+
+```mermaid
+sequenceDiagram
+
+User->>Frontend: Ask AI
+
+Frontend->>Backend: POST /api/chat
+
+Backend->>OpenAI: Prompt
+
+OpenAI-->>Backend: AI Response
+
+Backend-->>Frontend: JSON Response
+
+Frontend-->>User: Display Answer
+```
+
+---
+
+# 🗂 Project Structure
 
 ```text
 .
-|-- docker-compose.yml
-|-- LICENSE
-|-- README.md
-|-- Smart_AI_backend/
-|-- Smart_AI_frontend/
+├── Smart_AI_backend
+│   ├── configs
+│   ├── controllers
+│   ├── middlewares
+│   ├── models
+│   ├── routes
+│   ├── services
+│   ├── socket
+│   ├── uploads
+│   ├── utils
+│   ├── package.json
+│   └── index.js
+│
+├── Smart_AI_frontend
+│   ├── public
+│   ├── src
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── docker-compose.yml
+├── README.md
+└── LICENSE
 ```
 
-Lưu ý: Trong `Smart_AI_backend/` có thêm thư mục `Smart_ai_backend/` (khác chữ hoa/thường), khả năng là bản sao cũ. Luồng chạy chính hiện tại dùng `Smart_AI_backend/` ở cấp gốc.
+---
 
-## Yêu cầu môi trường
+# 🗄 Database Collections
+
+MongoDB gồm các collection chính:
+
+- Users
+- Products
+- Categories
+- Orders
+- OrderDetails
+- Reviews
+- Wishlist
+- Cart
+- Conversations
+- Promotions
+- Complaints
+- Stores
+- Appointments
+- Addresses
+
+---
+
+# ⚙️ Requirements
 
 - Node.js >= 18
+
 - npm >= 9
-- MongoDB (nếu chạy local không dùng Docker)
-- Docker + Docker Compose (nếu chạy bằng container)
 
-## Chạy nhanh với Docker
+- MongoDB >= 7
 
-Khuyến nghị cho môi trường demo/onboard.
+- Docker Desktop
 
-### 1) Tạo file env cho backend
+---
+
+# 🚀 Quick Start (Docker)
+
+## Clone project
+
+```bash
+git clone git@github.com:VanDuyKhanh2004/Smart_AI.git
+
+cd Smart_AI
+```
+
+---
+
+## Backend
 
 ```bash
 cd Smart_AI_backend
+
 cp .env.docker.example .env.docker
 ```
 
-Điền các biến bắt buộc trong `.env.docker`:
-- `OPENAI_API_KEY`
-- `JWT_SECRET`
-- `JWT_REFRESH_SECRET`
+Cập nhật
 
-Biến tùy chọn:
-- `GOOGLE_CLIENT_ID`
-- Cấu hình SMTP (`SMTP_HOST`, `SMTP_USER`, ...)
+```
+OPENAI_API_KEY
 
-### 2) Chạy toàn bộ stack
+JWT_SECRET
+
+JWT_REFRESH_SECRET
+```
+
+---
+
+## Run
 
 ```bash
-cd ..
 docker compose up --build
 ```
 
 Sau khi chạy:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:5000
-- MongoDB: localhost:27017
 
-## Chạy local không Docker
+Frontend
 
-### 1) Backend
-
-Tạo file `.env` tại `Smart_AI_backend/`:
-
-```env
-NODE_ENV=development
-PORT=5000
-FRONTEND_URL=http://localhost:5173
-
-MONGO_CONNECTION_STRING=mongodb://localhost:27017/smart_ai
-
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-4o
-
-JWT_SECRET=your_jwt_secret
-JWT_EXPIRE=15m
-JWT_REFRESH_SECRET=your_refresh_secret
-JWT_REFRESH_EXPIRE=7d
-
-GOOGLE_CLIENT_ID=
-
-LOGIN_MAX_ATTEMPTS=5
-LOGIN_LOCK_MINUTES=15
-LOGIN_IP_MAX_ATTEMPTS=20
-LOGIN_IP_WINDOW_MINUTES=15
-LOGIN_IP_BLOCK_MINUTES=15
-
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASS=
-SMTP_SECURE=false
-SMTP_FROM=
+```
+http://localhost:3000
 ```
 
-Chạy backend:
+Backend
+
+```
+http://localhost:5000
+```
+
+MongoDB
+
+```
+localhost:27017
+```
+
+---
+
+# 💻 Local Development
+
+## Backend
 
 ```bash
 cd Smart_AI_backend
+
 npm install
+
 npm run dev
 ```
 
-### 2) Frontend
+---
 
-Tạo file `.env` tại `Smart_AI_frontend/`:
-
-```env
-VITE_API_BASE_URL=http://localhost:5000/api
-VITE_API_URL=http://localhost:5000
-VITE_GOOGLE_CLIENT_ID=
-```
-
-Chạy frontend:
+## Frontend
 
 ```bash
 cd Smart_AI_frontend
+
 npm install
+
 npm run dev
 ```
 
-Frontend dev server mặc định: http://localhost:5173
+Frontend
 
-## Biến môi trường
+```
+http://localhost:5173
+```
 
-### Backend bắt buộc
-- `MONGO_CONNECTION_STRING`
-- `OPENAI_API_KEY`
-- `JWT_SECRET`
-- `JWT_REFRESH_SECRET`
+Backend
 
-### Backend tùy chọn
-- `OPENAI_MODEL` (mặc định: `gpt-4o`)
-- `GOOGLE_CLIENT_ID`
-- `FRONTEND_URL`
-- Nhóm SMTP
-- Nhóm cấu hình login rate limit
+```
+http://localhost:5000
+```
 
-### Frontend
-- `VITE_API_BASE_URL` (mặc định: `http://localhost:5000/api`)
-- `VITE_API_URL` (mặc định: `http://localhost:5000`)
-- `VITE_GOOGLE_CLIENT_ID`
+---
 
-## Scripts
+# 🔐 Environment Variables
 
-### Backend (`Smart_AI_backend/package.json`)
-- `npm run dev`: chạy dev với nodemon
-- `npm start`: chạy production
+## Backend
 
-### Frontend (`Smart_AI_frontend/package.json`)
-- `npm run dev`: chạy Vite dev server
-- `npm run build`: build production
-- `npm run preview`: chạy preview bản build
-- `npm run lint`: lint source code
+```env
+PORT=5000
 
-## API và Socket
+NODE_ENV=development
 
-Backend mount API với prefix `/api` cho các nhóm route:
-- `/auth`
-- `/products`
-- `/complaints`
-- `/cart`
-- `/orders`
-- `/reviews`
-- `/wishlist`
-- `/compare`
-- `/questions`
-- `/dashboard`
-- `/addresses`
-- `/profile`
-- `/promotions`
-- `/stores`
-- `/appointments`
+MONGO_CONNECTION_STRING=
 
-Static avatar:
-- `/uploads/avatars/...`
+OPENAI_API_KEY=
 
-Socket.IO chạy cùng host/port với backend.
+OPENAI_MODEL=gpt-4o
 
-## Troubleshooting
+JWT_SECRET=
 
-- Backend không kết nối MongoDB:
-  - Kiểm tra `MONGO_CONNECTION_STRING`
-  - Đảm bảo MongoDB đang chạy
+JWT_REFRESH_SECRET=
 
-- Lỗi CORS:
-  - Kiểm tra `FRONTEND_URL` ở backend
-  - Kiểm tra `VITE_API_BASE_URL` ở frontend
+GOOGLE_CLIENT_ID=
 
-- Google Login không hoạt động:
-  - Kiểm tra `GOOGLE_CLIENT_ID` ở cả backend và frontend
+SMTP_HOST=
 
-- Tính năng AI lỗi:
-  - Kiểm tra `OPENAI_API_KEY`
+SMTP_PORT=
 
-## Bảo mật
+SMTP_USER=
 
-- Không commit file `.env` thật
-- Sử dụng secret đủ mạnh cho JWT
-- Cấu hình CORS bằng domain production trước khi deploy
-- Định kỳ xoay vòng API key và secret
+SMTP_PASS=
+```
 
-## Đóng góp
+---
+
+## Frontend
+
+```env
+VITE_API_BASE_URL=http://localhost:5000/api
+
+VITE_API_URL=http://localhost:5000
+
+VITE_GOOGLE_CLIENT_ID=
+```
+
+---
+
+# 📡 REST API
+
+| Method | Endpoint           | Description    |
+| ------ | ------------------ | -------------- |
+| POST   | /api/auth/login    | Login          |
+| POST   | /api/auth/register | Register       |
+| POST   | /api/auth/google   | Google Login   |
+| GET    | /api/products      | Get Products   |
+| GET    | /api/products/:id  | Product Detail |
+| POST   | /api/cart          | Add To Cart    |
+| GET    | /api/orders        | Order History  |
+| POST   | /api/reviews       | Review Product |
+| POST   | /api/chat          | AI Chat        |
+
+---
+
+# ⚡ Socket.IO
+
+Realtime events:
+
+- Order Notification
+
+- AI Streaming
+
+- Live Chat
+
+- User Connection
+
+---
+
+# 🔒 Security
+
+- JWT Authentication
+
+- Password Hashing (bcrypt)
+
+- Google OAuth
+
+- Login Rate Limiting
+
+- Account Lock Protection
+
+- Environment Variables
+
+- CORS Protection
+
+---
+
+# 📈 Performance
+
+- MongoDB Index
+
+- Lazy Loading
+
+- React Query Cache
+
+- Zustand State Management
+
+- Socket.IO Realtime
+
+---
+
+# 🧪 Testing
+
+Hiện tại dự án hỗ trợ:
+
+- Manual Testing
+
+- Intent Classification Evaluation
+
+Trong tương lai:
+
+- Unit Test
+
+- Integration Test
+
+- End-to-End Test
+
+---
+
+# 🚧 Roadmap
+
+## Completed
+
+- ✅ Authentication
+
+- ✅ Google Login
+
+- ✅ Shopping Cart
+
+- ✅ Wishlist
+
+- ✅ Promotion
+
+- ✅ Complaint
+
+- ✅ AI Chat
+
+- ✅ Docker
+
+---
+
+## In Progress
+
+- 🚧 Unit Testing
+
+- 🚧 API Documentation
+
+- 🚧 CI/CD
+
+---
+
+## Future
+
+- Redis Cache
+
+- Kubernetes
+
+- Elasticsearch
+
+- Recommendation Engine
+
+- Microservice Architecture
+
+---
+
+# ❗ Troubleshooting
+
+## MongoDB Connection Error
+
+Kiểm tra:
+
+- MongoDB đang chạy
+
+- Chuỗi kết nối đúng
+
+---
+
+## Google Login
+
+Kiểm tra:
+
+- GOOGLE_CLIENT_ID
+
+- OAuth Redirect URI
+
+---
+
+## AI không phản hồi
+
+Kiểm tra:
+
+- OPENAI_API_KEY
+
+- Internet
+
+---
+
+## Docker Build Error
+
+Thử:
+
+```bash
+docker compose down
+
+docker compose up --build
+```
+
+---
+
+# 🤝 Contributing
 
 1. Fork repository
-2. Tạo branch mới: `feature/ten-tinh-nang`
-3. Commit theo từng thay đổi nhỏ, rõ ràng
-4. Tạo Pull Request mô tả đầy đủ phạm vi thay đổi
 
-## License
+2. Tạo branch mới
 
-Dự án được phát hành theo giấy phép MIT.
+```bash
+git checkout -b feature/your-feature
+```
 
-Xem chi tiết tại file `LICENSE` ở thư mục gốc.
+3. Commit
+
+```bash
+git commit -m "Add new feature"
+```
+
+4. Push
+
+```bash
+git push origin feature/your-feature
+```
+
+5. Tạo Pull Request
+
+---
+
+# 👨‍💻 Author
+
+**Văn Duy Khánh**
+
+GitHub
+
+https://github.com/VanDuyKhanh2004
+
+Email
+
+duykhanhpro04@gmail.com
+
+---
+
+# 🙏 Acknowledgements
+
+Dự án sử dụng:
+
+- React
+
+- Express
+
+- MongoDB
+
+- Socket.IO
+
+- OpenAI API
+
+- Docker
+
+- TailwindCSS
+
+- Vite
+
+- Mongoose
+
+---
+
+# 📄 License
+
+Distributed under the **MIT License**.
+
+See **LICENSE** for more information.

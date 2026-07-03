@@ -1,148 +1,236 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const cors = require('cors');
-require('dotenv').config();
+const express = require("express");
+const http = require("http");
+const socketIo = require("socket.io");
+const cors = require("cors");
+require("dotenv").config();
 
-const { connectDatabase } = require('./configs/database');
-const { testOpenAIConnection } = require('./utils/openai');
-const { initializeSocketHandlers, getSocketStats, shutdownSocketIO } = require('./socket/socketHandler');
+const { connectDatabase } = require("./configs/database");
+const { testOpenAIConnection } = require("./utils/openai");
+const {
+  initializeSocketHandlers,
+  getSocketStats,
+  shutdownSocketIO,
+} = require("./socket/socketHandler");
 
 // Import routes
-const productRoutes = require('./routes/productRoutes');
-const complaintRoutes = require('./routes/complaintRoutes');
-const authRoutes = require('./routes/authRoutes');
-const cartRoutes = require('./routes/cartRoutes');
-const orderRoutes = require('./routes/orderRoutes');
-const reviewRoutes = require('./routes/reviewRoutes');
-const wishlistRoutes = require('./routes/wishlistRoutes');
-const compareRoutes = require('./routes/compareRoutes');
-const qaRoutes = require('./routes/qaRoutes');
-const dashboardRoutes = require('./routes/dashboardRoutes');
-const addressRoutes = require('./routes/addressRoutes');
-const profileRoutes = require('./routes/profileRoutes');
-const promotionRoutes = require('./routes/promotionRoutes');
-const storeRoutes = require('./routes/storeRoutes');
-const appointmentRoutes = require('./routes/appointmentRoutes');
-const path = require('path');
+const productRoutes = require("./routes/productRoutes");
+const complaintRoutes = require("./routes/complaintRoutes");
+const authRoutes = require("./routes/authRoutes");
+const cartRoutes = require("./routes/cartRoutes");
+const orderRoutes = require("./routes/orderRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
+const wishlistRoutes = require("./routes/wishlistRoutes");
+const compareRoutes = require("./routes/compareRoutes");
+const qaRoutes = require("./routes/qaRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+const addressRoutes = require("./routes/addressRoutes");
+const profileRoutes = require("./routes/profileRoutes");
+const promotionRoutes = require("./routes/promotionRoutes");
+const storeRoutes = require("./routes/storeRoutes");
+const appointmentRoutes = require("./routes/appointmentRoutes");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
 
-const io = socketIo(server, {
-  cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? process.env.FRONTEND_URL || "http://localhost:3000"
-      : "*", // Allow all origins in development
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  transports: ['websocket', 'polling']
-});
-
 const PORT = process.env.PORT || 5000;
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL || "http://localhost:3000"
-    : "*", // Allow all origins in development
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Serve test-chat.html for development
-app.get('/test-chat', (req, res) => {
-  res.sendFile(__dirname + '/test-chat.html');
+const io = socketIo(server, {
+  cors: {
+    origin:
+      process.env.NODE_ENV === "production"
+        ? process.env.FRONTEND_URL || "http://localhost:3000"
+        : "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  transports: ["websocket", "polling"],
 });
 
-// Mount API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/complaints', complaintRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/wishlist', wishlistRoutes);
-app.use('/api/compare', compareRoutes);
-app.use('/api/questions', qaRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/addresses', addressRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/promotions', promotionRoutes);
-app.use('/api/stores', storeRoutes);
-app.use('/api/appointments', appointmentRoutes);
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Serve static files for avatar uploads
-app.use('/uploads/avatars', express.static(path.join(__dirname, 'uploads/avatars')));
+app.use(
+  cors({
+    origin:
+      process.env.NODE_ENV === "production"
+        ? process.env.FRONTEND_URL || "http://localhost:3000"
+        : "*",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  
-  res.status(err.status || 500).json({
-    error: {
-      message: err.message || 'Internal Server Error',
-      status: err.status || 500,
-      timestamp: new Date().toISOString()
-    }
+/* ============================================================
+   Basic Routes
+============================================================ */
+
+// Home
+app.get("/", (req, res) => {
+  res.json({
+    project: "Smart AI Backend",
+    status: "Running",
+    version: "1.0.0",
+    documentation: "/api/info",
+    health: "/health",
+    timestamp: new Date().toISOString(),
   });
 });
 
-app.use('*', (req, res) => {
+// Health Check
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: "OK",
+    message: "Smart AI Backend is running",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// API Information
+app.get("/api/info", (req, res) => {
+  res.json({
+    project: "Smart AI",
+    version: "1.0.0",
+    author: "VanDuyKhanh2004",
+    environment: process.env.NODE_ENV || "development",
+    socket: "Enabled",
+    database: "MongoDB",
+    routes: [
+      "/api/auth",
+      "/api/products",
+      "/api/cart",
+      "/api/orders",
+      "/api/reviews",
+      "/api/wishlist",
+      "/api/compare",
+      "/api/questions",
+      "/api/dashboard",
+      "/api/addresses",
+      "/api/profile",
+      "/api/promotions",
+      "/api/stores",
+      "/api/appointments",
+    ],
+  });
+});
+
+// Development Socket Test Page
+app.get("/test-chat", (req, res) => {
+  res.sendFile(__dirname + "/test-chat.html");
+});
+
+/* ============================================================
+   API Routes
+============================================================ */
+
+app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/complaints", complaintRoutes);
+app.use("/api/cart", cartRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/compare", compareRoutes);
+app.use("/api/questions", qaRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/addresses", addressRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/promotions", promotionRoutes);
+app.use("/api/stores", storeRoutes);
+app.use("/api/appointments", appointmentRoutes);
+
+// Static Files
+app.use(
+  "/uploads/avatars",
+  express.static(path.join(__dirname, "uploads/avatars")),
+);
+
+/* ============================================================
+   Error Handling
+============================================================ */
+
+app.use((err, req, res, next) => {
+  console.error("Unhandled Error:", err);
+
+  res.status(err.status || 500).json({
+    error: {
+      message: err.message || "Internal Server Error",
+      status: err.status || 500,
+      timestamp: new Date().toISOString(),
+    },
+  });
+});
+
+app.use("*", (req, res) => {
   res.status(404).json({
     error: {
       message: `Route ${req.originalUrl} not found`,
       status: 404,
-      timestamp: new Date().toISOString()
-    }
+      timestamp: new Date().toISOString(),
+    },
   });
 });
 
+/* ============================================================
+   Socket.IO
+============================================================ */
+
 initializeSocketHandlers(io);
+
+/* ============================================================
+   Start Server
+============================================================ */
 
 const initializeServer = async () => {
   try {
-    console.log('Starting Smart AI Backend...');
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    
-    console.log('Connecting to MongoDB...');
-    await connectDatabase();
-    
-    console.log('Testing external API connections...');
-    
-    // const [openaiOk] = await Promise.allSettled([
-    //   testOpenAIConnection()
-    // ]);
+    console.log("Starting Smart AI Backend...");
+    console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
 
-    // if (openaiOk.status === 'fulfilled' && openaiOk.value) {
-    //   console.log('OpenAI API ready');
-    // } else {
-    //   console.warn('OpenAI API test failed');
-    // }
+    console.log("Connecting to MongoDB...");
+    await connectDatabase();
+
+    console.log("MongoDB Connected Successfully");
+
+    // Nếu muốn kiểm tra OpenAI khi khởi động thì bỏ comment đoạn dưới
+    /*
+    const openAIReady = await testOpenAIConnection();
+
+    if (openAIReady) {
+      console.log("OpenAI API Connected");
+    } else {
+      console.warn("OpenAI API Connection Failed");
+    }
+    */
 
     server.listen(PORT, () => {
-      console.log('Smart AI Backend started successfully!');
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Socket.IO ready for connections`);
-      console.log(`Health check: http://localhost:${PORT}/health`);
-      console.log(`API info: http://localhost:${PORT}/api/info`);
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('\nDevelopment mode - Detailed logging enabled');
-      }
-    });
+      const BASE_URL =
+        process.env.NODE_ENV === "production"
+          ? process.env.RENDER_EXTERNAL_URL || `PORT ${PORT}`
+          : `http://localhost:${PORT}`;
 
+      console.log("==========================================");
+      console.log("Smart AI Backend Started Successfully");
+      console.log(`Environment : ${process.env.NODE_ENV}`);
+      console.log(`Server URL  : ${BASE_URL}`);
+      console.log(`Health      : ${BASE_URL}/health`);
+      console.log(`API Info    : ${BASE_URL}/api/info`);
+      console.log(`Socket.IO   : Enabled`);
+      console.log("==========================================");
+    });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error("Failed to start server");
+    console.error(error);
     process.exit(1);
   }
 };
 
 initializeServer();
 
-module.exports = { app, server, io };
+module.exports = {
+  app,
+  server,
+  io,
+};

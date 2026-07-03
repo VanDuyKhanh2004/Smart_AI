@@ -1,2 +1,15 @@
+node_modules/
+
 .env
-node_modules
+.env.*
+!.env.example
+!.env.docker.example
+
+logs/
+*.log
+
+coverage/
+
+uploads/
+
+npm-debug.log*

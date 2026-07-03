@@ -1,13 +1,19 @@
 {
-  "name": "frontend",
+  "name": "smart-ai-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Frontend for Smart AI - AI-powered E-commerce Platform",
+  "author": "VanDuyKhanh2004",
+  "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.8.0",
