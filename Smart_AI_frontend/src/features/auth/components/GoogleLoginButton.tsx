@@ -1,92 +1,121 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuthStore } from '@/stores/authStore';
-import axios from 'axios';
+import React, { useEffect, useRef, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import axios from "axios";
+import { useAuthStore } from "@/stores/authStore";
+
+declare global {
+  interface Window {
+    google: any;
+  }
+}
 
 const GoogleLoginButton: React.FC = () => {
   const buttonRef = useRef<HTMLDivElement>(null);
+
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
   const navigate = useNavigate();
   const location = useLocation();
+
   const { setAuth } = useAuthStore();
 
-  // Get the redirect path from location state
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
+  const from =
+    (location.state as { from?: { pathname: string } })?.from?.pathname || "/";
 
   useEffect(() => {
-    // Wait for Google script to load
-    const initializeGoogleSignIn = () => {
-      if (window.google && buttonRef.current) {
-        try {
-          console.log('Initializing Google Sign-In with Client ID:', import.meta.env.VITE_GOOGLE_CLIENT_ID);
-          
-          window.google.accounts.id.initialize({
-            client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-            callback: handleCredentialResponse,
-          });
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
-          window.google.accounts.id.renderButton(
-            buttonRef.current,
-            {
-              theme: 'outline',
-              size: 'large',
-              text: 'signin_with',
-              shape: 'rectangular',
-              width: '100%'
-            }
-          );
-          
-          console.log('Google Sign-In button rendered successfully');
-        } catch (err) {
-          console.error('Google Sign-In initialization error:', err);
-          setError('Không thể khởi tạo đăng nhập Google');
-        }
-      } else {
-        console.log('Waiting for Google script to load...');
-        // Retry after 500ms if Google script not loaded
-        setTimeout(initializeGoogleSignIn, 500);
+    console.log("========== GOOGLE LOGIN ==========");
+    console.log("Current Origin:", window.location.origin);
+    console.log("Client ID:", clientId);
+    console.log("API:", import.meta.env.VITE_API_BASE_URL);
+    console.log("==============================");
+
+    if (!clientId) {
+      setError("Không tìm thấy VITE_GOOGLE_CLIENT_ID");
+      return;
+    }
+
+    const initializeGoogle = () => {
+      if (!window.google) {
+        console.log("Google script chưa load...");
+        setTimeout(initializeGoogle, 500);
+        return;
+      }
+
+      if (!buttonRef.current) return;
+
+      try {
+        buttonRef.current.innerHTML = "";
+
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleCredentialResponse,
+        });
+
+        window.google.accounts.id.renderButton(buttonRef.current, {
+          theme: "outline",
+          size: "large",
+          text: "signin_with",
+          width: 350,
+          shape: "rectangular",
+        });
+
+        console.log("Google button rendered");
+      } catch (err) {
+        console.error(err);
+        setError("Không thể khởi tạo Google Login");
       }
     };
 
-    // Start initialization
-    initializeGoogleSignIn();
+    initializeGoogle();
   }, []);
 
-  const handleCredentialResponse = async (response: { credential: string }) => {
-    console.log('Google credential received');
-    setIsLoading(true);
-    setError(null);
-
+  const handleCredentialResponse = async (response: any) => {
     try {
-      const apiUrl = `${import.meta.env.VITE_API_BASE_URL.replace('/api', '')}/api/auth/google-login`;
-      console.log('Sending credential to:', apiUrl);
-      
-      // Send credential to backend
-      const result = await axios.post(apiUrl, { credential: response.credential });
+      setIsLoading(true);
+      setError("");
 
-      console.log('Backend response:', result.data);
+      console.log("Google credential received");
 
-      if (result.data.success) {
-        const { user, accessToken, refreshToken } = result.data.data;
+      const api = `${import.meta.env.VITE_API_BASE_URL.replace(
+        "/api",
+        "",
+      )}/api/auth/google-login`;
 
-        // Save to localStorage
-        localStorage.setItem('accessToken', accessToken);
-        localStorage.setItem('refreshToken', refreshToken);
-        localStorage.setItem('user', JSON.stringify(user));
+      console.log("POST:", api);
 
-        // Update auth store
-        setAuth(user, accessToken, refreshToken);
+      const res = await axios.post(api, {
+        credential: response.credential,
+      });
 
-        console.log('Login successful, redirecting to:', from);
-        // Redirect to the page user was trying to access or home
-        navigate(from, { replace: true });
+      console.log(res.data);
+
+      if (!res.data.success) {
+        throw new Error("Đăng nhập thất bại");
       }
+
+      const { user, accessToken, refreshToken } = res.data.data;
+
+      localStorage.setItem("user", JSON.stringify(user));
+      localStorage.setItem("accessToken", accessToken);
+      localStorage.setItem("refreshToken", refreshToken);
+
+      setAuth(user, accessToken, refreshToken);
+
+      navigate(from, {
+        replace: true,
+      });
     } catch (err: any) {
-      console.error('Google login error:', err);
-      console.error('Error response:', err.response?.data);
-      const errorMessage = err.response?.data?.error?.message || 'Đăng nhập Google thất bại';
-      setError(errorMessage);
+      console.error(err);
+
+      setError(
+        err.response?.data?.message ||
+          err.response?.data?.error?.message ||
+          err.message ||
+          "Đăng nhập Google thất bại",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -95,20 +124,18 @@ const GoogleLoginButton: React.FC = () => {
   return (
     <div className="space-y-3">
       {error && (
-        <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm text-center">
+        <div className="rounded bg-red-100 p-2 text-sm text-red-600">
           {error}
         </div>
       )}
-      
-      <div 
-        ref={buttonRef} 
-        className={`w-full flex justify-center ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
+
+      <div
+        ref={buttonRef}
+        className={isLoading ? "pointer-events-none opacity-50" : ""}
       />
-      
+
       {isLoading && (
-        <div className="text-center text-sm text-muted-foreground">
-          Đang xử lý đăng nhập...
-        </div>
+        <div className="text-center text-sm">Đang đăng nhập...</div>
       )}
     </div>
   );

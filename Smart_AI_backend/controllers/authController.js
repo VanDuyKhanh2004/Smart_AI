@@ -8,7 +8,24 @@ const { OAuth2Client } = require('google-auth-library');
 const crypto = require('crypto');
 const { sendWelcomeEmail, sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// Validate required environment variables for Google Login
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+
+if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
+  console.error('GOOGLE_CLIENT_ID chưa được cấu hình trong biến môi trường');
+}
+if (!JWT_SECRET || JWT_SECRET === 'YOUR_JWT_SECRET') {
+  console.error('JWT_SECRET chưa được cấu hình trong biến môi trường');
+}
+if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET === 'YOUR_REFRESH_SECRET') {
+  console.error('JWT_REFRESH_SECRET chưa được cấu hình trong biến môi trường');
+}
+
+const client = GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID'
+  ? new OAuth2Client(GOOGLE_CLIENT_ID)
+  : null;
 
 const createEmailVerificationToken = (user) => {
   const rawToken = crypto.randomBytes(32).toString('hex');
@@ -378,16 +395,58 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    // Verify Google token
+    // Kiểm tra biến môi trường
+    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: 'GOOGLE_CLIENT_ID chưa được cấu hình trên server'
+        }
+      });
+    }
+    if (!client) {
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: 'Google OAuth2Client chưa được khởi tạo do thiếu GOOGLE_CLIENT_ID'
+        }
+      });
+    }
+
+    // Verify Google ID Token
     const ticket = await client.verifyIdToken({
       idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: GOOGLE_CLIENT_ID
     });
 
     const payload = ticket.getPayload();
-    const { sub: googleId, email, name, picture } = payload;
+    const { sub: googleId, email, name, picture, email_verified } = payload;
 
-    // Check if user exists
+    // Kiểm tra email_verified từ Google
+    if (!email_verified) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'GOOGLE_EMAIL_NOT_VERIFIED',
+          message: 'Email Google chưa được xác minh'
+        }
+      });
+    }
+
+    // Kiểm tra email
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Không thể lấy email từ tài khoản Google'
+        }
+      });
+    }
+
+    // Check if user exists by googleId OR email
     let user = await User.findOne({ 
       $or: [
         { googleId },
@@ -396,18 +455,15 @@ const googleLogin = async (req, res) => {
     });
 
     if (user) {
-      // Update Google ID if user exists but doesn't have it
+      // User exists - update Google ID if not linked yet
       if (!user.googleId) {
-        // Chỉ cho phép auto-linking nếu email đã được verify (bảo mật)
         if (user.emailVerified) {
           user.googleId = googleId;
-          // Cập nhật avatar từ Google nếu user chưa có
           if (!user.avatar && picture) {
             user.avatar = picture;
           }
           await user.save({ validateBeforeSave: false });
         } else {
-          // Email chưa verify → không cho phép auto-linking
           return res.status(403).json({
             success: false,
             error: {
@@ -422,16 +478,18 @@ const googleLogin = async (req, res) => {
         }
       }
     } else {
-      // Create new user
+      // Create new user automatically
       user = await User.create({
-        name,
+        name: name || email.split('@')[0],
         email,
         googleId,
-        avatar: picture,
-        password: Math.random().toString(36).slice(-8) // Random password for Google users
+        avatar: picture || null,
+        emailVerified: true,
+        password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8)
       });
     }
 
+    // Auto-verify email for Google users
     if (!user.emailVerified) {
       user.emailVerified = true;
       user.emailVerificationToken = undefined;
@@ -440,6 +498,25 @@ const googleLogin = async (req, res) => {
     }
 
     // Generate tokens
+    if (!JWT_SECRET || JWT_SECRET === 'YOUR_JWT_SECRET') {
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: 'JWT_SECRET chưa được cấu hình trên server'
+        }
+      });
+    }
+    if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET === 'YOUR_REFRESH_SECRET') {
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: 'JWT_REFRESH_SECRET chưa được cấu hình trên server'
+        }
+      });
+    }
+
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
@@ -447,6 +524,7 @@ const googleLogin = async (req, res) => {
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
 
+    // Send welcome email if first time
     if (!user.welcomeEmailSent) {
       try {
         await sendWelcomeEmail(user);
@@ -467,14 +545,14 @@ const googleLogin = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Google login error:', error);
+    console.error(error);
     
     if (error.message && error.message.includes('Token')) {
       return res.status(401).json({
         success: false,
         error: {
           code: 'INVALID_TOKEN',
-          message: 'Google token không hợp lệ'
+          message: 'Google token không hợp lệ hoặc đã hết hạn'
         }
       });
     }
@@ -483,7 +561,7 @@ const googleLogin = async (req, res) => {
       success: false,
       error: {
         code: 'SERVER_ERROR',
-        message: 'Lỗi server'
+        message: error.message
       }
     });
   }
