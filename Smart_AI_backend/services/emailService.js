@@ -13,8 +13,20 @@ const pass = process.env.SMTP_PASS;
 const secure = process.env.SMTP_SECURE === "true";
 
 let transporter = null;
+let verifyDone = false;
 
-if (host && user && pass) {
+async function getTransporter() {
+  if (transporter) return transporter;
+  if (!host || !user || !pass) {
+    console.warn("SMTP configuration is missing — emails will be silently skipped");
+    return null;
+  }
+
+  console.log("SMTP_HOST:", host);
+  console.log("SMTP_PORT:", port);
+  console.log("SMTP_SECURE:", secure);
+  console.log("SMTP_USER:", user);
+
   transporter = nodemailer.createTransport({
     host,
     port,
@@ -24,22 +36,32 @@ if (host && user && pass) {
     greetingTimeout: 10000,
     socketTimeout: 10000,
   });
-  console.log("SMTP transporter created");
-} else {
-  console.warn("SMTP configuration is missing — emails will be silently skipped");
+
+  if (!verifyDone) {
+    verifyDone = true;
+    try {
+      await transporter.verify();
+      console.log("SMTP Server is ready");
+    } catch (err) {
+      console.error("SMTP Verify Error:", err);
+    }
+  }
+
+  return transporter;
 }
 
 async function sendMail(options) {
-  if (!transporter) {
+  const tr = await getTransporter();
+  if (!tr) {
     console.warn("Email failed: SMTP not configured");
     return;
   }
-  console.log("Sending email...");
+  console.log("Sending email to", options.to, "...");
   try {
-    const info = await transporter.sendMail(options);
-    console.log("Email sent successfully:", info.messageId);
+    const info = await tr.sendMail(options);
+    console.log("Email sent successfully");
   } catch (err) {
-    console.error("Email failed:", err.message);
+    console.error("Email failed:", err);
   }
 }
 
