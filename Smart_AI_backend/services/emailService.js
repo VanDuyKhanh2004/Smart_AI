@@ -7,10 +7,28 @@ function fireAndForget(promise, label) {
 }
 
 const host = process.env.SMTP_HOST;
-const port = Number(process.env.SMTP_PORT || 587);
+const port = process.env.SMTP_PORT;
+const portNum = Number(port || 587);
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
 const secure = process.env.SMTP_SECURE === "true";
+
+console.log("SMTP_HOST:", host || "MISSING");
+console.log("SMTP_PORT:", port || "MISSING");
+console.log("SMTP_SECURE:", process.env.SMTP_SECURE || "MISSING");
+console.log("SMTP_USER:", user || "MISSING");
+console.log("SMTP_PASS:", pass ? "PRESENT" : "MISSING");
+console.log("SMTP_FROM:", process.env.SMTP_FROM || "MISSING");
+
+const missingVars = [];
+if (!host) missingVars.push("SMTP_HOST");
+if (!port) missingVars.push("SMTP_PORT");
+if (!user) missingVars.push("SMTP_USER");
+if (!pass) missingVars.push("SMTP_PASS");
+
+if (missingVars.length > 0) {
+  console.warn("SMTP configuration is missing:", missingVars.join(", "), "— emails will be silently skipped");
+}
 
 let transporter = null;
 let verifyDone = false;
@@ -18,14 +36,8 @@ let verifyDone = false;
 async function getTransporter() {
   if (transporter) return transporter;
   if (!host || !user || !pass) {
-    console.warn("SMTP configuration is missing — emails will be silently skipped");
     return null;
   }
-
-  console.log("SMTP_HOST:", host);
-  console.log("SMTP_PORT:", port);
-  console.log("SMTP_SECURE:", secure);
-  console.log("SMTP_USER:", user);
 
   transporter = nodemailer.createTransport({
     host,
