@@ -1,35 +1,59 @@
-const nodemailer = require('nodemailer');
+const nodemailer = require("nodemailer");
 
-const getTransporter = () => {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const secure = process.env.SMTP_SECURE === 'true';
+function fireAndForget(promise, label) {
+  promise.catch(err => {
+    console.error(`${label}:`, err.message);
+  });
+}
 
-  if (!host || !user || !pass) {
-    throw new Error('SMTP configuration is missing');
-  }
+const host = process.env.SMTP_HOST;
+const port = Number(process.env.SMTP_PORT || 587);
+const user = process.env.SMTP_USER;
+const pass = process.env.SMTP_PASS;
+const secure = process.env.SMTP_SECURE === "true";
 
-  return nodemailer.createTransport({
+let transporter = null;
+
+if (host && user && pass) {
+  transporter = nodemailer.createTransport({
     host,
     port,
     secure,
-    auth: { user, pass }
+    auth: { user, pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
   });
-};
+  console.log("SMTP transporter created");
+} else {
+  console.warn("SMTP configuration is missing — emails will be silently skipped");
+}
+
+async function sendMail(options) {
+  if (!transporter) {
+    console.warn("Email failed: SMTP not configured");
+    return;
+  }
+  console.log("Sending email...");
+  try {
+    const info = await transporter.sendMail(options);
+    console.log("Email sent successfully:", info.messageId);
+  } catch (err) {
+    console.error("Email failed:", err.message);
+  }
+}
 
 const buildWelcomeEmail = (user) => {
-  const displayName = user.name || 'bạn';
-  const subject = '🎉 Chào mừng bạn đến với Smart AI';
+  const displayName = user.name || "bạn";
+  const subject = "🎉 Chào mừng bạn đến với Smart AI";
   const text = [
     `Xin chào ${displayName},`,
-    '',
-    'Cảm ơn bạn đã đăng nhập lần đầu vào Smart AI.',
-    'Chúc bạn có trải nghiệm tuyệt vời!',
-    '',
-    'Smart AI Team'
-  ].join('\n');
+    "",
+    "Cảm ơn bạn đã đăng nhập lần đầu vào Smart AI.",
+    "Chúc bạn có trải nghiệm tuyệt vời!",
+    "",
+    "Smart AI Team",
+  ].join("\n");
 
   const html = `
     <!DOCTYPE html>
@@ -107,7 +131,7 @@ const buildWelcomeEmail = (user) => {
                   <table role="presentation" style="margin: 0 auto;">
                     <tr>
                       <td style="border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" 
+                        <a href="${process.env.FRONTEND_URL || "http://localhost:5173"}" 
                            style="display: inline-block; padding: 14px 40px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px;">
                           Bắt đầu ngay
                         </a>
@@ -144,18 +168,18 @@ const buildWelcomeEmail = (user) => {
 };
 
 const buildVerificationEmail = (user, verifyUrl) => {
-  const displayName = user.name || 'bạn';
-  const subject = '✉️ Xác nhận email của bạn - Smart AI';
+  const displayName = user.name || "bạn";
+  const subject = "✉️ Xác nhận email của bạn - Smart AI";
   const text = [
     `Xin chào ${displayName},`,
-    '',
-    'Vui lòng xác nhận email để kích hoạt tài khoản Smart AI.',
+    "",
+    "Vui lòng xác nhận email để kích hoạt tài khoản Smart AI.",
     `Link xác nhận: ${verifyUrl}`,
-    '',
-    'Nếu bạn không đăng ký tài khoản, hãy bỏ qua email này.',
-    '',
-    'Smart AI Team'
-  ].join('\n');
+    "",
+    "Nếu bạn không đăng ký tài khoản, hãy bỏ qua email này.",
+    "",
+    "Smart AI Team",
+  ].join("\n");
 
   const html = `
     <!DOCTYPE html>
@@ -255,19 +279,19 @@ const buildVerificationEmail = (user, verifyUrl) => {
 };
 
 const buildPasswordResetEmail = (user, resetUrl) => {
-  const displayName = user.name || 'bạn';
-  const subject = '🔒 Đặt lại mật khẩu - Smart AI';
+  const displayName = user.name || "bạn";
+  const subject = "🔒 Đặt lại mật khẩu - Smart AI";
   const text = [
     `Xin chào ${displayName},`,
-    '',
-    'Bạn đã yêu cầu đặt lại mật khẩu Smart AI.',
+    "",
+    "Bạn đã yêu cầu đặt lại mật khẩu Smart AI.",
     `Link đặt lại mật khẩu: ${resetUrl}`,
-    'Link này chỉ có hiệu lực trong thời gian ngắn.',
-    '',
-    'Nếu bạn không yêu cầu, hãy bỏ qua email này.',
-    '',
-    'Smart AI Team'
-  ].join('\n');
+    "Link này chỉ có hiệu lực trong thời gian ngắn.",
+    "",
+    "Nếu bạn không yêu cầu, hãy bỏ qua email này.",
+    "",
+    "Smart AI Team",
+  ].join("\n");
 
   const html = `
     <!DOCTYPE html>
@@ -377,67 +401,64 @@ const buildPasswordResetEmail = (user, resetUrl) => {
 };
 
 const sendWelcomeEmail = async (user) => {
-  const transporter = getTransporter();
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildWelcomeEmail(user);
 
-  return transporter.sendMail({
+  await sendMail({
     from,
     to: user.email,
     subject,
     text,
-    html
+    html,
   });
 };
 
 const sendVerificationEmail = async (user, verifyUrl) => {
-  const transporter = getTransporter();
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildVerificationEmail(user, verifyUrl);
 
-  return transporter.sendMail({
+  await sendMail({
     from,
     to: user.email,
     subject,
     text,
-    html
+    html,
   });
 };
 
 const sendPasswordResetEmail = async (user, resetUrl) => {
-  const transporter = getTransporter();
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildPasswordResetEmail(user, resetUrl);
 
-  return transporter.sendMail({
+  await sendMail({
     from,
     to: user.email,
     subject,
     text,
-    html
+    html,
   });
 };
 
 const buildUnlockAccountEmail = (user, unlockUrl) => {
-  const displayName = user.name || 'bạn';
-  const subject = '🔓 Mở khóa tài khoản Smart AI';
-  
+  const displayName = user.name || "bạn";
+  const subject = "🔓 Mở khóa tài khoản Smart AI";
+
   const text = [
     `Xin chào ${displayName},`,
-    '',
-    'Tài khoản của bạn đã bị khóa tạm thời do đăng nhập sai quá nhiều lần.',
-    '',
-    'Nhấp vào liên kết dưới đây để mở khóa tài khoản:',
+    "",
+    "Tài khoản của bạn đã bị khóa tạm thời do đăng nhập sai quá nhiều lần.",
+    "",
+    "Nhấp vào liên kết dưới đây để mở khóa tài khoản:",
     unlockUrl,
-    '',
-    'Liên kết này có hiệu lực trong 1 giờ.',
-    '',
-    'Nếu bạn không yêu cầu mở khóa tài khoản, vui lòng bỏ qua email này.',
-    'Tài khoản của bạn sẽ tự động được mở khóa sau 30 phút.',
-    '',
-    'Trân trọng,',
-    'Smart AI Team'
-  ].join('\n');
+    "",
+    "Liên kết này có hiệu lực trong 1 giờ.",
+    "",
+    "Nếu bạn không yêu cầu mở khóa tài khoản, vui lòng bỏ qua email này.",
+    "Tài khoản của bạn sẽ tự động được mở khóa sau 30 phút.",
+    "",
+    "Trân trọng,",
+    "Smart AI Team",
+  ].join("\n");
 
   const html = `
     <!DOCTYPE html>
@@ -522,7 +543,7 @@ const buildUnlockAccountEmail = (user, unlockUrl) => {
                     Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ với chúng tôi
                   </p>
                   <p style="margin: 0 0 20px; color: #4a5568; font-size: 14px;">
-                    📧 ${process.env.SMTP_USER || 'support@smartai.com'} | 📱 1900-xxxx
+                    📧 ${process.env.SMTP_USER || "support@smartai.com"} | 📱 1900-xxxx
                   </p>
                   <p style="margin: 0; color: #a0aec0; font-size: 12px;">
                     © 2026 Smart AI. All rights reserved.
@@ -541,47 +562,49 @@ const buildUnlockAccountEmail = (user, unlockUrl) => {
 };
 
 const sendUnlockAccountEmail = async (user, unlockUrl) => {
-  const transporter = getTransporter();
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildUnlockAccountEmail(user, unlockUrl);
 
-  return transporter.sendMail({
+  await sendMail({
     from,
     to: user.email,
     subject,
     text,
-    html
+    html,
   });
 };
 
 const buildOrderConfirmationEmail = (user, order) => {
-  const displayName = user.name || order.shippingAddress.fullName || 'Quý khách';
+  const displayName =
+    user.name || order.shippingAddress.fullName || "Quý khách";
   const subject = `✅ Đơn hàng #${order.orderNumber} đã được tiếp nhận`;
-  
+
   // Format currency
   const formatCurrency = (amount) => {
-    return amount.toLocaleString('vi-VN') + 'đ';
+    return amount.toLocaleString("vi-VN") + "đ";
   };
 
   // Format date
   const formatDate = (date) => {
-    return new Date(date).toLocaleString('vi-VN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
+    return new Date(date).toLocaleString("vi-VN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
   // Build items HTML
-  const itemsHtml = order.items.map(item => `
+  const itemsHtml = order.items
+    .map(
+      (item) => `
     <tr>
       <td style="padding: 15px; border-bottom: 1px solid #e2e8f0;">
         <table role="presentation" style="width: 100%; border-collapse: collapse;">
           <tr>
             <td style="width: 60px; vertical-align: top;">
-              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0;">` : ''}
+              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0;">` : ""}
             </td>
             <td style="padding-left: 15px; vertical-align: top;">
               <p style="margin: 0 0 5px; color: #2d3748; font-weight: 600; font-size: 15px;">
@@ -600,23 +623,25 @@ const buildOrderConfirmationEmail = (user, order) => {
         </table>
       </td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join("");
 
   const text = [
     `Xin chào ${displayName},`,
-    '',
+    "",
     `Cảm ơn bạn đã đặt hàng tại Smart AI!`,
-    '',
+    "",
     `Mã đơn hàng: ${order.orderNumber}`,
     `Tổng tiền: ${formatCurrency(order.total)}`,
-    '',
+    "",
     `Chúng tôi sẽ xử lý đơn hàng của bạn trong thời gian sớm nhất.`,
     `Bạn có thể theo dõi trạng thái đơn hàng trong tài khoản của mình.`,
-    '',
-    'Cảm ơn bạn đã tin tưởng Smart AI!',
-    '',
-    'Smart AI Team'
-  ].join('\n');
+    "",
+    "Cảm ơn bạn đã tin tưởng Smart AI!",
+    "",
+    "Smart AI Team",
+  ].join("\n");
 
   const html = `
     <!DOCTYPE html>
@@ -725,7 +750,9 @@ const buildOrderConfirmationEmail = (user, order) => {
                         <span style="color: #2d3748; font-size: 14px;">${formatCurrency(order.shippingFee)}</span>
                       </td>
                     </tr>
-                    ${order.promotion ? `
+                    ${
+                      order.promotion
+                        ? `
                     <tr>
                       <td style="padding: 8px 0;">
                         <span style="color: #10b981; font-size: 14px;">Giảm giá (${order.promotion.code}):</span>
@@ -734,7 +761,9 @@ const buildOrderConfirmationEmail = (user, order) => {
                         <span style="color: #10b981; font-size: 14px;">-${formatCurrency(order.promotion.discountAmount)}</span>
                       </td>
                     </tr>
-                    ` : ''}
+                    `
+                        : ""
+                    }
                     <tr>
                       <td style="padding: 15px 0 0; border-top: 2px solid #2d3748;">
                         <strong style="color: #2d3748; font-size: 18px;">Tổng cộng:</strong>
@@ -749,7 +778,7 @@ const buildOrderConfirmationEmail = (user, order) => {
                   <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                     <tr>
                       <td align="center" style="padding: 20px 0;">
-                        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/orders/${order._id}" 
+                        <a href="${process.env.FRONTEND_URL || "http://localhost:5173"}/orders/${order._id}" 
                            style="display: inline-block; padding: 14px 40px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
                           Theo dõi đơn hàng
                         </a>
@@ -773,7 +802,7 @@ const buildOrderConfirmationEmail = (user, order) => {
                     Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ với chúng tôi
                   </p>
                   <p style="margin: 0 0 20px; color: #4a5568; font-size: 14px;">
-                    📧 ${process.env.SMTP_USER || 'support@smartai.com'} | 📱 1900-xxxx
+                    📧 ${process.env.SMTP_USER || "support@smartai.com"} | 📱 1900-xxxx
                   </p>
                   <p style="margin: 0; color: #a0aec0; font-size: 12px;">
                     © 2026 Smart AI. All rights reserved.
@@ -792,22 +821,22 @@ const buildOrderConfirmationEmail = (user, order) => {
 };
 
 const sendOrderConfirmationEmail = async (user, order) => {
-  const transporter = getTransporter();
   const { subject, text, html } = buildOrderConfirmationEmail(user, order);
 
-  await transporter.sendMail({
-    from: `"Smart AI" <${process.env.SMTP_USER}>`,
+  await sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: user.email,
     subject,
     text,
-    html
+    html,
   });
 };
 
 module.exports = {
+  fireAndForget,
   sendWelcomeEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendUnlockAccountEmail,
-  sendOrderConfirmationEmail
+  sendOrderConfirmationEmail,
 };

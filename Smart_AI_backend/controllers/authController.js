@@ -6,7 +6,7 @@ const {
 } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
 const crypto = require('crypto');
-const { sendWelcomeEmail, sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
+const { fireAndForget, sendWelcomeEmail, sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 
 // Validate required environment variables for Google Login
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -91,12 +91,8 @@ const register = async (req, res) => {
 
     await user.save({ validateBeforeSave: false });
 
-    try {
-      const verifyUrl = buildVerifyUrl(verificationToken, user.email);
-      await sendVerificationEmail(user, verifyUrl);
-    } catch (mailError) {
-      console.warn('Verification email failed:', mailError.message);
-    }
+    const verifyUrl = buildVerifyUrl(verificationToken, user.email);
+    fireAndForget(sendVerificationEmail(user, verifyUrl), "Verification email failed");
 
     res.status(201).json({
       success: true,
@@ -216,14 +212,10 @@ const login = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     if (!user.welcomeEmailSent && (user.emailVerified || user.googleId)) {
-      try {
-        await sendWelcomeEmail(user);
-        user.welcomeEmailSent = true;
-        user.firstLoginAt = new Date();
-        await user.save({ validateBeforeSave: false });
-      } catch (mailError) {
-        console.warn('Welcome email failed:', mailError.message);
-      }
+      fireAndForget(sendWelcomeEmail(user), "Welcome email failed");
+      user.welcomeEmailSent = true;
+      user.firstLoginAt = new Date();
+      await user.save({ validateBeforeSave: false });
     }
 
     res.status(200).json({
@@ -526,14 +518,10 @@ const googleLogin = async (req, res) => {
 
     // Send welcome email if first time
     if (!user.welcomeEmailSent) {
-      try {
-        await sendWelcomeEmail(user);
-        user.welcomeEmailSent = true;
-        user.firstLoginAt = new Date();
-        await user.save({ validateBeforeSave: false });
-      } catch (mailError) {
-        console.warn('Welcome email failed:', mailError.message);
-      }
+      fireAndForget(sendWelcomeEmail(user), "Welcome email failed");
+      user.welcomeEmailSent = true;
+      user.firstLoginAt = new Date();
+      await user.save({ validateBeforeSave: false });
     }
 
     res.status(200).json({
@@ -739,13 +727,9 @@ const verifyEmail = async (req, res) => {
     user.emailVerificationExpires = undefined;
 
     if (!user.welcomeEmailSent) {
-      try {
-        await sendWelcomeEmail(user);
-        user.welcomeEmailSent = true;
-        user.firstLoginAt = new Date();
-      } catch (mailError) {
-        console.warn('Welcome email failed:', mailError.message);
-      }
+      fireAndForget(sendWelcomeEmail(user), "Welcome email failed");
+      user.welcomeEmailSent = true;
+      user.firstLoginAt = new Date();
     }
 
     await user.save({ validateBeforeSave: false });
@@ -820,12 +804,8 @@ const resendVerification = async (req, res) => {
     const verificationToken = createEmailVerificationToken(user);
     await user.save({ validateBeforeSave: false });
 
-    try {
-      const verifyUrl = buildVerifyUrl(verificationToken);
-      await sendVerificationEmail(user, verifyUrl);
-    } catch (mailError) {
-      console.warn('Verification email failed:', mailError.message);
-    }
+    const verifyUrl = buildVerifyUrl(verificationToken);
+    fireAndForget(sendVerificationEmail(user, verifyUrl), "Verification email failed");
 
     res.status(200).json({
       success: true,
@@ -884,12 +864,8 @@ const requestPasswordReset = async (req, res) => {
     const resetToken = createPasswordResetToken(user);
     await user.save({ validateBeforeSave: false });
 
-    try {
-      const resetUrl = buildResetPasswordUrl(resetToken, user.email);
-      await sendPasswordResetEmail(user, resetUrl);
-    } catch (mailError) {
-      console.warn('Password reset email failed:', mailError.message);
-    }
+    const resetUrl = buildResetPasswordUrl(resetToken, user.email);
+    fireAndForget(sendPasswordResetEmail(user, resetUrl), "Password reset email failed");
 
     res.status(200).json({
       success: true,
@@ -1026,8 +1002,8 @@ const requestUnlockAccount = async (req, res) => {
     const unlockUrl = `${baseUrl}/unlock-account?token=${unlockToken}&email=${encodeURIComponent(email)}`;
 
     // Gửi email
-    const { sendUnlockAccountEmail } = require('../services/emailService');
-    await sendUnlockAccountEmail(user, unlockUrl);
+    const { fireAndForget: f2, sendUnlockAccountEmail } = require('../services/emailService');
+    f2(sendUnlockAccountEmail(user, unlockUrl), "Unlock account email failed");
 
     res.status(200).json({
       success: true,
