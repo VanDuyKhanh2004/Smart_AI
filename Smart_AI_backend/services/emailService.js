@@ -1,5 +1,4 @@
 const nodemailer = require("nodemailer");
-const net = require("net");
 
 function fireAndForget(promise, label) {
   promise.catch(err => {
@@ -9,7 +8,6 @@ function fireAndForget(promise, label) {
 
 const host = process.env.SMTP_HOST;
 const port = process.env.SMTP_PORT;
-const portNum = Number(port || 587);
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
 const secure = process.env.SMTP_SECURE === "true";
@@ -55,36 +53,28 @@ async function getTransporter() {
     return null;
   }
 
-  try {
-    await new Promise((resolve, reject) => {
-      const socket = net.createConnection(portNum, host, () => {
-        socket.end();
-        resolve(null);
-      });
-      socket.on("error", reject);
-      socket.setTimeout(5000, () => {
-        socket.destroy();
-        reject(new Error("Connection timeout"));
-      });
-    });
-    console.log("TCP CONNECT OK");
-  } catch (err) {
-    console.log("TCP CONNECT FAILED");
-    console.error(err);
-  }
-
-  transporter = nodemailer.createTransport({
+  const transportOptions = {
     host,
     port,
     secure,
     auth: { user, pass },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
-    socketTimeout: 10000,
-  });
+    socketTimeout: 15000,
+    ...(process.env.NODE_ENV === "development" && { logger: true, debug: true }),
+  };
+
+  console.log("Nodemailer options:", JSON.stringify(transportOptions, (key, value) => key === "auth" ? { user: value.user, pass: "PRESENT" } : value, 2));
+
+  transporter = nodemailer.createTransport(transportOptions);
 
   if (!verifyDone) {
     verifyDone = true;
+
+    console.log("Connecting to:");
+    console.log("  host:", host);
+    console.log("  port:", port);
+    console.log("  secure:", secure);
 
     try {
       await transporter.verify();
