@@ -3,12 +3,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { useAuthStore } from "@/stores/authStore";
 
-declare global {
-  interface Window {
-    google: any;
-  }
-}
-
 const GoogleLoginButton: React.FC = () => {
   const buttonRef = useRef<HTMLDivElement>(null);
 
