@@ -35,7 +35,22 @@ let verifyDone = false;
 
 async function getTransporter() {
   if (transporter) return transporter;
-  if (!host || !user || !pass) {
+
+  console.log("SMTP_HOST =", process.env.SMTP_HOST || "MISSING");
+  console.log("SMTP_PORT =", process.env.SMTP_PORT || "MISSING");
+  console.log("SMTP_SECURE =", process.env.SMTP_SECURE || "MISSING");
+  console.log("SMTP_USER =", process.env.SMTP_USER || "MISSING");
+  console.log("SMTP_PASS =", process.env.SMTP_PASS ? "PRESENT" : "MISSING");
+  console.log("SMTP_FROM =", process.env.SMTP_FROM || "MISSING");
+
+  const missing = [];
+  if (!host) missing.push("SMTP_HOST");
+  if (!port) missing.push("SMTP_PORT");
+  if (!user) missing.push("SMTP_USER");
+  if (!pass) missing.push("SMTP_PASS");
+  if (missing.length > 0) {
+    console.log("Missing SMTP variables:");
+    missing.forEach(v => console.log("- " + v));
     return null;
   }
 
