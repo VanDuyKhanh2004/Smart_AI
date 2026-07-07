@@ -1,7 +1,10 @@
-const { TransactionalEmailsApi, SendSmtpEmail } = require("@getbrevo/brevo");
+const { BrevoClient } = require("@getbrevo/brevo");
+const brevoPkg = require("@getbrevo/brevo/package.json");
+
+console.log("Brevo SDK version:", brevoPkg.version);
 
 function fireAndForget(promise, label) {
-  promise.catch(err => {
+  promise.catch((err) => {
     console.error(`${label}:`, err.message);
   });
 }
@@ -20,34 +23,37 @@ if (!brevoFromName) missingVars.push("BREVO_FROM_NAME");
 if (!brevoFromEmail) missingVars.push("BREVO_FROM_EMAIL");
 
 if (missingVars.length > 0) {
-  console.warn("Brevo configuration is missing:", missingVars.join(", "), "— emails will be silently skipped");
+  console.warn(
+    "Brevo configuration is missing:",
+    missingVars.join(", "),
+    "— emails will be silently skipped",
+  );
 }
 
-let apiInstance = null;
+let client = null;
 
-function getApiInstance() {
-  if (apiInstance) return apiInstance;
-  apiInstance = new TransactionalEmailsApi();
-  apiInstance.setApiKey(0, brevoKey);
-  console.log("Brevo initialized");
-  return apiInstance;
+function getClient() {
+  if (client) return client;
+  client = new BrevoClient({ apiKey: brevoKey });
+  console.log("Brevo initialized successfully");
+  return client;
 }
 
 async function sendMail(options) {
-  const api = getApiInstance();
   if (!brevoKey || !brevoFromName || !brevoFromEmail) {
     console.warn("Email failed: Brevo not configured");
     return;
   }
+  const c = getClient();
   console.log("Sending email...");
   try {
-    const email = new SendSmtpEmail();
-    email.sender = { name: brevoFromName, email: brevoFromEmail };
-    email.to = [{ email: options.to }];
-    email.subject = options.subject;
-    email.htmlContent = options.html;
-    email.textContent = options.text;
-    await api.sendTransacEmail(email);
+    const result = await c.transactionalEmails.sendTransacEmail({
+      sender: { name: brevoFromName, email: brevoFromEmail },
+      to: [{ email: options.to }],
+      subject: options.subject,
+      htmlContent: options.html,
+      textContent: options.text,
+    });
     console.log("Email sent successfully");
   } catch (err) {
     console.error("Email failed:", err);
