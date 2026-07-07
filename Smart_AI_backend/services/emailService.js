@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const net = require("net");
 
 function fireAndForget(promise, label) {
   promise.catch(err => {
@@ -66,6 +67,25 @@ async function getTransporter() {
 
   if (!verifyDone) {
     verifyDone = true;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const socket = net.createConnection(portNum, host, () => {
+          socket.end();
+          resolve(null);
+        });
+        socket.on("error", reject);
+        socket.setTimeout(5000, () => {
+          socket.destroy();
+          reject(new Error("Connection timeout"));
+        });
+      });
+      console.log("TCP CONNECT SUCCESS");
+    } catch (err) {
+      console.log("TCP CONNECT FAILED");
+      console.error(err);
+    }
+
     try {
       await transporter.verify();
       console.log("SMTP Server is ready");
