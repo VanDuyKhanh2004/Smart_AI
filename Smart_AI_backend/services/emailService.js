@@ -1,4 +1,4 @@
-const nodemailer = require("nodemailer");
+const { TransactionalEmailsApi, SendSmtpEmail } = require("@getbrevo/brevo");
 
 function fireAndForget(promise, label) {
   promise.catch(err => {
@@ -6,96 +6,48 @@ function fireAndForget(promise, label) {
   });
 }
 
-const host = process.env.SMTP_HOST;
-const port = process.env.SMTP_PORT;
-const user = process.env.SMTP_USER;
-const pass = process.env.SMTP_PASS;
-const secure = process.env.SMTP_SECURE === "true";
+const brevoKey = process.env.BREVO_API_KEY;
+const brevoFromName = process.env.BREVO_FROM_NAME;
+const brevoFromEmail = process.env.BREVO_FROM_EMAIL;
 
-console.log("SMTP_HOST:", host || "MISSING");
-console.log("SMTP_PORT:", port || "MISSING");
-console.log("SMTP_SECURE:", process.env.SMTP_SECURE || "MISSING");
-console.log("SMTP_USER:", user || "MISSING");
-console.log("SMTP_PASS:", pass ? "PRESENT" : "MISSING");
-console.log("SMTP_FROM:", process.env.SMTP_FROM || "MISSING");
+console.log("BREVO_API_KEY:", brevoKey ? "PRESENT" : "MISSING");
+console.log("BREVO_FROM_NAME:", brevoFromName || "MISSING");
+console.log("BREVO_FROM_EMAIL:", brevoFromEmail || "MISSING");
 
 const missingVars = [];
-if (!host) missingVars.push("SMTP_HOST");
-if (!port) missingVars.push("SMTP_PORT");
-if (!user) missingVars.push("SMTP_USER");
-if (!pass) missingVars.push("SMTP_PASS");
+if (!brevoKey) missingVars.push("BREVO_API_KEY");
+if (!brevoFromName) missingVars.push("BREVO_FROM_NAME");
+if (!brevoFromEmail) missingVars.push("BREVO_FROM_EMAIL");
 
 if (missingVars.length > 0) {
-  console.warn("SMTP configuration is missing:", missingVars.join(", "), "— emails will be silently skipped");
+  console.warn("Brevo configuration is missing:", missingVars.join(", "), "— emails will be silently skipped");
 }
 
-let transporter = null;
-let verifyDone = false;
+let apiInstance = null;
 
-async function getTransporter() {
-  if (transporter) return transporter;
-
-  console.log("SMTP_HOST =", process.env.SMTP_HOST || "MISSING");
-  console.log("SMTP_PORT =", process.env.SMTP_PORT || "MISSING");
-  console.log("SMTP_SECURE =", process.env.SMTP_SECURE || "MISSING");
-  console.log("SMTP_USER =", process.env.SMTP_USER || "MISSING");
-  console.log("SMTP_PASS =", process.env.SMTP_PASS ? "PRESENT" : "MISSING");
-  console.log("SMTP_FROM =", process.env.SMTP_FROM || "MISSING");
-
-  const missing = [];
-  if (!host) missing.push("SMTP_HOST");
-  if (!port) missing.push("SMTP_PORT");
-  if (!user) missing.push("SMTP_USER");
-  if (!pass) missing.push("SMTP_PASS");
-  if (missing.length > 0) {
-    console.log("Missing SMTP variables:");
-    missing.forEach(v => console.log("- " + v));
-    return null;
-  }
-
-  const transportOptions = {
-    host,
-    port,
-    secure,
-    auth: { user, pass },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    ...(process.env.NODE_ENV === "development" && { logger: true, debug: true }),
-  };
-
-  console.log("Nodemailer options:", JSON.stringify(transportOptions, (key, value) => key === "auth" ? { user: value.user, pass: "PRESENT" } : value, 2));
-
-  transporter = nodemailer.createTransport(transportOptions);
-
-  if (!verifyDone) {
-    verifyDone = true;
-
-    console.log("Connecting to:");
-    console.log("  host:", host);
-    console.log("  port:", port);
-    console.log("  secure:", secure);
-
-    try {
-      await transporter.verify();
-      console.log("SMTP Server is ready");
-    } catch (err) {
-      console.error("SMTP Verify Error:", err);
-    }
-  }
-
-  return transporter;
+function getApiInstance() {
+  if (apiInstance) return apiInstance;
+  apiInstance = new TransactionalEmailsApi();
+  apiInstance.setApiKey(0, brevoKey);
+  console.log("Brevo initialized");
+  return apiInstance;
 }
 
 async function sendMail(options) {
-  const tr = await getTransporter();
-  if (!tr) {
-    console.warn("Email failed: SMTP not configured");
+  const api = getApiInstance();
+  if (!brevoKey || !brevoFromName || !brevoFromEmail) {
+    console.warn("Email failed: Brevo not configured");
     return;
   }
-  console.log("Sending email to", options.to, "...");
+  console.log("Sending email...");
   try {
-    const info = await tr.sendMail(options);
+    const email = new SendSmtpEmail();
+    email.sender = { name: brevoFromName, email: brevoFromEmail };
+    email.to = [{ email: options.to }];
+    email.subject = options.subject;
+    email.htmlContent = options.html;
+    email.textContent = options.text;
+    await api.sendTransacEmail(email);
     console.log("Email sent successfully");
   } catch (err) {
     console.error("Email failed:", err);
@@ -460,11 +412,9 @@ const buildPasswordResetEmail = (user, resetUrl) => {
 };
 
 const sendWelcomeEmail = async (user) => {
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildWelcomeEmail(user);
 
   await sendMail({
-    from,
     to: user.email,
     subject,
     text,
@@ -473,11 +423,9 @@ const sendWelcomeEmail = async (user) => {
 };
 
 const sendVerificationEmail = async (user, verifyUrl) => {
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildVerificationEmail(user, verifyUrl);
 
   await sendMail({
-    from,
     to: user.email,
     subject,
     text,
@@ -486,11 +434,9 @@ const sendVerificationEmail = async (user, verifyUrl) => {
 };
 
 const sendPasswordResetEmail = async (user, resetUrl) => {
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildPasswordResetEmail(user, resetUrl);
 
   await sendMail({
-    from,
     to: user.email,
     subject,
     text,
@@ -621,11 +567,9 @@ const buildUnlockAccountEmail = (user, unlockUrl) => {
 };
 
 const sendUnlockAccountEmail = async (user, unlockUrl) => {
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
   const { subject, text, html } = buildUnlockAccountEmail(user, unlockUrl);
 
   await sendMail({
-    from,
     to: user.email,
     subject,
     text,
@@ -883,7 +827,6 @@ const sendOrderConfirmationEmail = async (user, order) => {
   const { subject, text, html } = buildOrderConfirmationEmail(user, order);
 
   await sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: user.email,
     subject,
     text,
