@@ -55,6 +55,24 @@ async function getTransporter() {
     return null;
   }
 
+  try {
+    await new Promise((resolve, reject) => {
+      const socket = net.createConnection(portNum, host, () => {
+        socket.end();
+        resolve(null);
+      });
+      socket.on("error", reject);
+      socket.setTimeout(5000, () => {
+        socket.destroy();
+        reject(new Error("Connection timeout"));
+      });
+    });
+    console.log("TCP CONNECT OK");
+  } catch (err) {
+    console.log("TCP CONNECT FAILED");
+    console.error(err);
+  }
+
   transporter = nodemailer.createTransport({
     host,
     port,
@@ -67,24 +85,6 @@ async function getTransporter() {
 
   if (!verifyDone) {
     verifyDone = true;
-
-    try {
-      await new Promise((resolve, reject) => {
-        const socket = net.createConnection(portNum, host, () => {
-          socket.end();
-          resolve(null);
-        });
-        socket.on("error", reject);
-        socket.setTimeout(5000, () => {
-          socket.destroy();
-          reject(new Error("Connection timeout"));
-        });
-      });
-      console.log("TCP CONNECT SUCCESS");
-    } catch (err) {
-      console.log("TCP CONNECT FAILED");
-      console.error(err);
-    }
 
     try {
       await transporter.verify();
