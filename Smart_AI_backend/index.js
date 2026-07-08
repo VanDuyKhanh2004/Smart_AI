@@ -5,6 +5,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const { connectDatabase } = require("./configs/database");
+const { connectRedis } = require("./configs/redis");
 const { testOpenAIConnection } = require("./utils/openai");
 const {
   initializeSocketHandlers,
@@ -174,16 +175,6 @@ app.use("*", (req, res) => {
   });
 });
 
-/* ============================================================
-   Socket.IO
-============================================================ */
-
-initializeSocketHandlers(io);
-
-/* ============================================================
-   Start Server
-============================================================ */
-
 const initializeServer = async () => {
   try {
     console.log("Starting Smart AI Backend...");
@@ -193,6 +184,17 @@ const initializeServer = async () => {
     await connectDatabase();
 
     console.log("MongoDB Connected Successfully");
+
+    console.log("Connecting to Redis...");
+    await connectRedis();
+
+    console.log("Redis Connected Successfully");
+
+    /* ============================================================
+       Socket.IO
+    ============================================================ */
+
+    initializeSocketHandlers(io);
 
     // Nếu muốn kiểm tra OpenAI khi khởi động thì bỏ comment đoạn dưới
     /*
