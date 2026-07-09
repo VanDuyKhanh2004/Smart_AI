@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import ProfileInfoSection from '../components/ProfileInfoSection';
 import PasswordChangeSection from '../components/PasswordChangeSection';
+import GoogleLinkSection from '../components/GoogleLinkSection';
 import { useAuthStore } from '@/stores/authStore';
 
 /**
@@ -67,14 +68,19 @@ const ProfilePage: React.FC = () => {
       <h1 className="text-2xl font-bold mb-6">Quản lý tài khoản</h1>
 
       <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-6">
+        <TabsList className="grid w-full grid-cols-4 mb-6">
           <TabsTrigger value="profile">Thông tin cá nhân</TabsTrigger>
+          <TabsTrigger value="google">Tài khoản Google</TabsTrigger>
           <TabsTrigger value="addresses">Địa chỉ giao hàng</TabsTrigger>
           <TabsTrigger value="password">Đổi mật khẩu</TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile">
           <ProfileInfoSection onSuccess={handleSuccess} onError={handleError} />
+        </TabsContent>
+
+        <TabsContent value="google">
+          <GoogleLinkSection onSuccess={handleSuccess} onError={handleError} />
         </TabsContent>
 
         <TabsContent value="addresses">

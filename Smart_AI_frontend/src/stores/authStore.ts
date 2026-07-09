@@ -25,6 +25,7 @@ interface AuthActions {
   setAccessToken: (token: string) => void;
   setAuth: (user: User, accessToken: string, refreshToken: string) => void;
   updateUserProfile: (updates: Partial<Pick<User, 'name' | 'phone' | 'avatar'>>) => void;
+  setUser: (user: User) => void;
   resendVerification: (email: string) => Promise<string>;
 }
 
@@ -192,6 +193,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         },
       });
     }
+  },
+
+  setUser: (user: User) => {
+    set({ user });
   },
 
   initialize: async () => {

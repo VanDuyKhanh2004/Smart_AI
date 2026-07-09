@@ -26,7 +26,7 @@ router.post('/login', loginRateLimit, login);
 router.post('/google-login', googleLogin);
 // Link/unlink Google to/from authenticated account
 router.post('/link/google', protect, linkGoogle);
-router.post('/unlink/google', protect, unlinkGoogle);
+router.delete('/unlink/google', protect, unlinkGoogle);
 router.post('/refresh', refreshToken);
 router.get('/verify-email', verifyEmail);
 router.post('/verify-email', verifyEmail);
