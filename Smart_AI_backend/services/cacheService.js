@@ -60,9 +60,38 @@ const exists = async (key) => {
   }
 };
 
+const invalidatePattern = async (pattern) => {
+  try {
+    const client = getRedisClient();
+    if (!client?.isOpen) {
+      return 0;
+    }
+
+    let cursor = '0';
+    let deletedCount = 0;
+
+    do {
+      const result = await client.scan(cursor, { MATCH: pattern, COUNT: 100 });
+      cursor = result.cursor;
+      const keys = result.keys;
+
+      if (keys.length > 0) {
+        await client.del(keys);
+        deletedCount += keys.length;
+      }
+    } while (cursor !== '0');
+
+    return deletedCount;
+  } catch (error) {
+    console.error('Cache invalidatePattern error:', error.message);
+    return 0;
+  }
+};
+
 module.exports = {
   get,
   set,
   del,
   exists,
+  invalidatePattern,
 };
