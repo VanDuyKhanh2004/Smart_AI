@@ -109,6 +109,11 @@ const userSchema = new mongoose.Schema({
       delete ret.emailVerificationExpires;
       delete ret.passwordResetToken;
       delete ret.passwordResetExpires;
+      if (doc.googleId) {
+        ret.loginMethod = doc.password ? 'both' : 'google';
+      } else {
+        ret.loginMethod = 'password';
+      }
       return ret;
     }
   },
@@ -124,6 +129,11 @@ const userSchema = new mongoose.Schema({
       delete ret.emailVerificationExpires;
       delete ret.passwordResetToken;
       delete ret.passwordResetExpires;
+      if (doc.googleId) {
+        ret.loginMethod = doc.password ? 'both' : 'google';
+      } else {
+        ret.loginMethod = 'password';
+      }
       return ret;
     }
   }
