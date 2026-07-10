@@ -69,4 +69,14 @@ export const authService = {
     );
     return response.data;
   },
+
+  async linkGoogle(credential: string): Promise<{ success: boolean; message: string; data: { user: User } }> {
+    const response = await apiClient.post('/auth/link/google', { credential });
+    return response.data;
+  },
+
+  async unlinkGoogle(): Promise<{ success: boolean; message: string; data: { user: User } }> {
+    const response = await apiClient.delete('/auth/unlink/google');
+    return response.data;
+  },
 };

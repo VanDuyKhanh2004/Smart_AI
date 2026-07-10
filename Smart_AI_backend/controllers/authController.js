@@ -438,46 +438,27 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    // Check if user exists by googleId OR email
-    let user = await User.findOne({ 
-      $or: [
-        { googleId },
-        { email: email.toLowerCase() }
-      ]
-    });
+    // Look up user by googleId only — do NOT auto-link by email
+    let user = await User.findOne({ googleId });
 
-    if (user) {
-      // User exists - update Google ID if not linked yet
-      if (!user.googleId) {
-        if (user.emailVerified) {
-          user.googleId = googleId;
-          if (!user.avatar && picture) {
-            user.avatar = picture;
+    if (!user) {
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'GOOGLE_ACCOUNT_NOT_LINKED',
+            message: 'Google account chưa được liên kết với tài khoản này. Vui lòng liên kết Google trong trang hồ sơ.'
           }
-          await user.save({ validateBeforeSave: false });
-        } else {
-          return res.status(403).json({
-            success: false,
-            error: {
-              code: 'EMAIL_NOT_VERIFIED',
-              message: 'Tài khoản với email này đã tồn tại nhưng chưa được xác minh. Vui lòng xác minh email hoặc đăng nhập bằng mật khẩu.',
-              data: {
-                email: user.email,
-                requireVerification: true
-              }
-            }
-          });
-        }
+        });
       }
-    } else {
-      // Create new user automatically
+
       user = await User.create({
         name: name || email.split('@')[0],
         email,
         googleId,
         avatar: picture || null,
-        emailVerified: true,
-        password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8)
+        emailVerified: true
       });
     }
 
@@ -603,8 +584,20 @@ const linkGoogle = async (req, res) => {
       return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Người dùng không tồn tại' } });
     }
 
+    // Already linked — check if same Google account
+    if (user.googleId) {
+      if (user.googleId === googleId) {
+        return res.status(200).json({ success: true, message: 'Tài khoản Google đã được liên kết', data: { user: user.toJSON() } });
+      }
+      return res.status(409).json({
+        success: false,
+        error: { code: 'GOOGLE_ACCOUNT_MISMATCH', message: 'Tài khoản Google này không khớp với tài khoản đã liên kết trước đó' }
+      });
+    }
+
     user.googleId = googleId;
     if (!user.avatar && picture) user.avatar = picture;
+    user.emailVerified = true;
     await user.save({ validateBeforeSave: false });
 
     res.status(200).json({ success: true, message: 'Đã liên kết tài khoản Google thành công', data: { user: user.toJSON() } });
@@ -616,42 +609,37 @@ const linkGoogle = async (req, res) => {
 
 /**
  * @desc    Unlink Google account from currently authenticated user
- * @route   POST /api/auth/unlink/google
+ * @route   DELETE /api/auth/unlink/google
  * @access  Private
  */
 const unlinkGoogle = async (req, res) => {
   try {
-    // For safety, if user has no password (Google-only account), require setting password first
     const user = await User.findById(req.user._id).select('+password');
     if (!user) {
       return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Người dùng không tồn tại' } });
     }
 
     if (!user.googleId) {
-      return res.status(400).json({ success: false, error: { code: 'NOT_LINKED', message: 'Tài khoản chưa liên kết với Google' } });
-    }
-
-    const providedPassword = req.body.password;
-    if (!user.password) {
       return res.status(400).json({
         success: false,
-        error: { code: 'NO_PASSWORD', message: 'Tài khoản hiện là Google-only. Vui lòng thiết lập mật khẩu trước khi hủy liên kết.' }
+        error: { code: 'NOT_LINKED', message: 'Google account is not linked.' }
       });
     }
 
-    if (!providedPassword) {
-      return res.status(400).json({ success: false, error: { code: 'PASSWORD_REQUIRED', message: 'Mật khẩu hiện tại là bắt buộc để hủy liên kết' } });
-    }
-
-    const match = await user.comparePassword(providedPassword);
-    if (!match) {
-      return res.status(401).json({ success: false, error: { code: 'INVALID_PASSWORD', message: 'Mật khẩu không đúng' } });
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'NO_PASSWORD',
+          message: 'Cannot unlink Google account because this account has no password.'
+        }
+      });
     }
 
     user.googleId = undefined;
     await user.save({ validateBeforeSave: false });
 
-    res.status(200).json({ success: true, message: 'Đã hủy liên kết Google thành công', data: { user: user.toJSON() } });
+    res.status(200).json({ success: true, message: 'Google account unlinked successfully.', data: { user: user.toJSON() } });
   } catch (error) {
     console.error('Unlink Google error:', error);
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Lỗi server' } });
