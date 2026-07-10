@@ -175,6 +175,17 @@ const login = async (req, res) => {
       });
     }
 
+    // Google-only account cannot use email/password login
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'GOOGLE_LOGIN_REQUIRED',
+          message: 'Tài khoản này sử dụng Google để đăng nhập. Vui lòng đăng nhập bằng Google.'
+        }
+      });
+    }
+
     // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
