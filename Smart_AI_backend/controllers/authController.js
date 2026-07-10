@@ -177,7 +177,7 @@ const login = async (req, res) => {
 
     // Google-only account cannot use email/password login
     if (!user.password) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
         error: {
           code: 'GOOGLE_LOGIN_REQUIRED',
@@ -348,7 +348,7 @@ const refreshToken = async (req, res) => {
  */
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).select('+password');
     
     if (!user) {
       return res.status(404).json({
@@ -450,7 +450,7 @@ const googleLogin = async (req, res) => {
     }
 
     // Look up user by googleId only — do NOT auto-link by email
-    let user = await User.findOne({ googleId });
+    let user = await User.findOne({ googleId }).select('+password');
 
     if (!user) {
       const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -459,7 +459,7 @@ const googleLogin = async (req, res) => {
           success: false,
           error: {
             code: 'GOOGLE_ACCOUNT_NOT_LINKED',
-            message: 'Google account chưa được liên kết với tài khoản này. Vui lòng liên kết Google trong trang hồ sơ.'
+            message: 'Email này đã thuộc về một tài khoản hiện có. Vui lòng đăng nhập bằng email và mật khẩu, sau đó vào trang hồ sơ để liên kết Google.'
           }
         });
       }
@@ -590,7 +590,7 @@ const linkGoogle = async (req, res) => {
     }
 
     // Link and save
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).select('+password');
     if (!user) {
       return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Người dùng không tồn tại' } });
     }
