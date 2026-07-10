@@ -438,46 +438,27 @@ const googleLogin = async (req, res) => {
       });
     }
 
-    // Check if user exists by googleId OR email
-    let user = await User.findOne({ 
-      $or: [
-        { googleId },
-        { email: email.toLowerCase() }
-      ]
-    });
+    // Look up user by googleId only — do NOT auto-link by email
+    let user = await User.findOne({ googleId });
 
-    if (user) {
-      // User exists - update Google ID if not linked yet
-      if (!user.googleId) {
-        if (user.emailVerified) {
-          user.googleId = googleId;
-          if (!user.avatar && picture) {
-            user.avatar = picture;
+    if (!user) {
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'GOOGLE_ACCOUNT_NOT_LINKED',
+            message: 'Google account chưa được liên kết với tài khoản này. Vui lòng liên kết Google trong trang hồ sơ.'
           }
-          await user.save({ validateBeforeSave: false });
-        } else {
-          return res.status(403).json({
-            success: false,
-            error: {
-              code: 'EMAIL_NOT_VERIFIED',
-              message: 'Tài khoản với email này đã tồn tại nhưng chưa được xác minh. Vui lòng xác minh email hoặc đăng nhập bằng mật khẩu.',
-              data: {
-                email: user.email,
-                requireVerification: true
-              }
-            }
-          });
-        }
+        });
       }
-    } else {
-      // Create new user automatically
+
       user = await User.create({
         name: name || email.split('@')[0],
         email,
         googleId,
         avatar: picture || null,
-        emailVerified: true,
-        password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8)
+        emailVerified: true
       });
     }
 
