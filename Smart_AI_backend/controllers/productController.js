@@ -126,9 +126,15 @@ const createProduct = async (req, res) => {
       fullDescription.substring(0, 200) + "...",
     );
 
-    console.log("Đang tạo embedding vector...");
-    const embeddingVector = await generateEmbedding(fullDescription);
-    console.log("Embedding vector đã được tạo");
+    let embeddingVector;
+    try {
+      console.log("Đang tạo embedding vector...");
+      embeddingVector = await generateEmbedding(fullDescription);
+      console.log("Embedding vector đã được tạo");
+    } catch (error) {
+      console.error("Không thể tạo embedding, tiếp tục tạo sản phẩm mà không có vector:", error.message);
+      embeddingVector = undefined;
+    }
 
     const newProduct = new Product({
       name,
@@ -143,7 +149,8 @@ const createProduct = async (req, res) => {
       image: image || "",
     });
 
-    const savedProduct = await newProduct.save();
+    const saveOptions = embeddingVector ? {} : { validateBeforeSave: false };
+    const savedProduct = await newProduct.save(saveOptions);
     console.log("Sản phẩm đã được lưu với ID:", savedProduct._id);
 
     await cache.invalidatePattern("products:*");
@@ -351,6 +358,12 @@ const getAllProducts = async (req, res) => {
 const getProductById = async (req, res) => {
   try {
     const productId = req.params.id;
+    const cacheKey = "product:" + productId;
+
+    const cached = await cache.get(cacheKey);
+    if (cached) {
+      return res.status(200).json(cached);
+    }
 
     // Tìm sản phẩm theo ID
     const product = await Product.findOne({
@@ -377,11 +390,15 @@ const getProductById = async (req, res) => {
       reviewCount: reviewStats.totalCount,
     };
 
-    res.status(200).json({
+    const responseData = {
       success: true,
       message: "Lấy chi tiết sản phẩm thành công",
       data: productWithStats,
-    });
+    };
+
+    await cache.set(cacheKey, responseData, 300);
+
+    res.status(200).json(responseData);
   } catch (error) {
     res.status(500).json({
       success: false,
