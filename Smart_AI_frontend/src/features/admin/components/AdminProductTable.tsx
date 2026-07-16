@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -22,6 +22,7 @@ import type { Product } from '@/types/product.type';
 
 interface AdminProductTableProps {
   products: Product[];
+  onEdit: (product: Product) => void;
   onDelete: (productId: string) => void;
   isLoading?: boolean;
   isDeleting?: boolean;
@@ -29,6 +30,7 @@ interface AdminProductTableProps {
 
 export function AdminProductTable({
   products,
+  onEdit,
   onDelete,
   isLoading = false,
   isDeleting = false,
@@ -102,15 +104,25 @@ export function AdminProductTable({
               <TableCell className="text-right">{formatPrice(product.price)}</TableCell>
               <TableCell className="text-center">{product.inStock}</TableCell>
               <TableCell className="text-center">
-                <Button
-                  variant="destructive"
-                  size="icon-sm"
-                  onClick={() => handleDeleteClick(product)}
-                  disabled={isDeleting}
-                  aria-label={`Xóa ${product.name}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => onEdit(product)}
+                    aria-label={`Sửa ${product.name}`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="icon-sm"
+                    onClick={() => handleDeleteClick(product)}
+                    disabled={isDeleting}
+                    aria-label={`Xóa ${product.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}

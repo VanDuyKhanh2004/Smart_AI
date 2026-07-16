@@ -137,6 +137,14 @@ export interface CreateProductResponse {
   data: Product;
 }
 
+export type UpdateProductRequest = CreateProductRequest;
+
+export interface UpdateProductResponse {
+  success: boolean;
+  message: string;
+  data: Product;
+}
+
 export interface DeleteProductResponse {
   success: boolean;
   message: string;

@@ -451,9 +451,132 @@ const deleteProduct = async (req, res) => {
   }
 };
 
+/**
+ * Update product
+ */
+const updateProduct = async (req, res) => {
+  try {
+    const productId = req.params.id;
+    console.log("Cập nhật sản phẩm:", productId);
+
+    const existing = await Product.findById(productId);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "Không tìm thấy sản phẩm",
+        },
+      });
+    }
+
+    const {
+      name,
+      brand,
+      price,
+      specs,
+      description,
+      inStock,
+      colors,
+      tags,
+      image,
+    } = req.body;
+
+    if (!name || !brand || !price || !description) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu thông tin bắt buộc: name, brand, price, description",
+      });
+    }
+
+    // Build update payload
+    const updateData = {
+      name,
+      brand: brand.toLowerCase(),
+      price,
+      specs: specs || {},
+      description,
+      inStock: inStock !== undefined ? inStock : existing.inStock,
+      colors: colors || [],
+      tags: tags || [],
+      image: image !== undefined ? image : existing.image,
+    };
+
+    // Regenerate embedding if name / brand / description / specs / price changed
+    const embeddingRelevantFieldsChanged =
+      name !== existing.name ||
+      brand.toLowerCase() !== existing.brand ||
+      description !== existing.description ||
+      price !== existing.price ||
+      JSON.stringify(specs) !== JSON.stringify(existing.specs);
+
+    if (embeddingRelevantFieldsChanged) {
+      try {
+        const fullDescription = createProductDescription(req.body);
+        console.log("Đang tạo lại embedding vector...");
+        updateData.embedding_vector = await generateEmbedding(fullDescription);
+        console.log("Embedding vector đã được tạo lại");
+      } catch (error) {
+        // Only log — omit embedding_vector from updateData entirely.
+        // This preserves the existing vector (or its absence if the
+        // product was created when AI was down) and avoids Mongoose
+        // validating a required field that shouldn't be touched.
+        console.error("Không thể tạo lại embedding, giữ nguyên vector cũ:", error.message);
+      }
+    }
+
+    // Use explicit $set to control exactly which fields are validated.
+    // embedding_vector is deliberately NOT included when generation
+    // failed or was unnecessary — this prevents the schema's required
+    // validator from blocking the update of other fields.
+    const updatedProduct = await Product.findByIdAndUpdate(productId, { $set: updateData }, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedProduct) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "Không tìm thấy sản phẩm",
+        },
+      });
+    }
+
+    // Invalidate cache
+    await cache.del("product:" + productId);
+    await cache.invalidatePattern("products:*");
+
+    res.status(200).json({
+      success: true,
+      message: "Cập nhật sản phẩm thành công",
+      data: updatedProduct,
+    });
+  } catch (error) {
+    console.error("Lỗi khi cập nhật sản phẩm:", error.message);
+
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Dữ liệu không hợp lệ",
+        errors,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Lỗi server khi cập nhật sản phẩm",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
 module.exports = {
   createProduct,
   getAllProducts,
   getProductById,
+  updateProduct,
   deleteProduct,
 };

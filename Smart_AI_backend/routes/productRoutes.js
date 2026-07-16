@@ -4,6 +4,7 @@ const {
   createProduct,
   getAllProducts,
   getProductById,
+  updateProduct,
   deleteProduct
 } = require('../controllers/productController');
 const { protect } = require('../middlewares/authMiddleware');
@@ -15,6 +16,7 @@ router.get('/:id', getProductById);
 
 // Admin protected routes
 router.post('/', protect, adminMiddleware, createProduct);
+router.put('/:id', protect, adminMiddleware, updateProduct);
 router.delete('/:id', protect, adminMiddleware, deleteProduct);
 
 module.exports = router;
