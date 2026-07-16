@@ -39,6 +39,7 @@ export function AdminProductPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [page, setPage] = useState(1);
 
@@ -76,6 +77,27 @@ export function AdminProductPage() {
       fetchProducts();
     } catch {
       setNotification({ type: 'error', message: 'Không thể thêm sản phẩm' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEditProduct = (product: Product) => {
+    setEditingProduct(product);
+    setIsFormOpen(true);
+  };
+
+  const handleUpdateProduct = async (data: CreateProductRequest) => {
+    if (!editingProduct) return;
+    setIsSubmitting(true);
+    try {
+      await productService.updateProduct(editingProduct._id, data);
+      setNotification({ type: 'success', message: 'Cập nhật sản phẩm thành công' });
+      setIsFormOpen(false);
+      setEditingProduct(null);
+      fetchProducts();
+    } catch {
+      setNotification({ type: 'error', message: 'Không thể cập nhật sản phẩm' });
     } finally {
       setIsSubmitting(false);
     }
@@ -152,6 +174,7 @@ export function AdminProductPage() {
 
       <AdminProductTable
         products={products}
+        onEdit={handleEditProduct}
         onDelete={handleDeleteProduct}
         isLoading={isLoading}
         isDeleting={isDeleting}
@@ -187,15 +210,17 @@ export function AdminProductPage() {
         </Pagination>
       )}
 
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog open={isFormOpen} onOpenChange={(open) => { if (!open) { setEditingProduct(null); setIsFormOpen(false); } }}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Thêm sản phẩm mới</DialogTitle>
+            <DialogTitle>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</DialogTitle>
           </DialogHeader>
           <ProductForm
-            onSubmit={handleCreateProduct}
-            onCancel={() => setIsFormOpen(false)}
+            key={editingProduct?._id || 'create'}
+            onSubmit={editingProduct ? handleUpdateProduct : handleCreateProduct}
+            onCancel={() => { setEditingProduct(null); setIsFormOpen(false); }}
             isLoading={isSubmitting}
+            initialData={editingProduct || undefined}
           />
         </DialogContent>
       </Dialog>

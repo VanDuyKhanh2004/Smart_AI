@@ -5,6 +5,8 @@ import type {
   GetProductsParams,
   CreateProductRequest,
   CreateProductResponse,
+  UpdateProductRequest,
+  UpdateProductResponse,
   DeleteProductResponse,
 } from '@/types/product.type';
 
@@ -53,6 +55,15 @@ export const productService = {
     }
   },
 
+  updateProduct: async (id: string, data: UpdateProductRequest): Promise<UpdateProductResponse> => {
+    try {
+      const response = await apiClient.put<UpdateProductResponse>(`/products/${id}`, data);
+      return response.data;
+    } catch (error) {
+      throw new Error(error as string);
+    }
+  },
+
   deleteProduct: async (id: string): Promise<DeleteProductResponse> => {
     try {
       const response = await apiClient.delete<DeleteProductResponse>(`/products/${id}`);
@@ -65,4 +76,4 @@ export const productService = {
 };
 
 // Export các hàm riêng lẻ để sử dụng trực tiếp nếu cần
-export const { getAllProducts, getProductById, createProduct, deleteProduct } = productService;
+export const { getAllProducts, getProductById, createProduct, updateProduct, deleteProduct } = productService;

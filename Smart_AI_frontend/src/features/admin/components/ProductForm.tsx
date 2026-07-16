@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import type { CreateProductRequest } from '@/types/product.type';
+import type { Product, CreateProductRequest } from '@/types/product.type';
 
 interface ProductFormProps {
   onSubmit: (data: CreateProductRequest) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
+  initialData?: Product;
 }
 
 interface FormErrors {
@@ -17,20 +18,26 @@ interface FormErrors {
   description?: string;
 }
 
-export function ProductForm({ onSubmit, onCancel, isLoading = false }: ProductFormProps) {
+export function ProductForm({ onSubmit, onCancel, isLoading = false, initialData }: ProductFormProps) {
   const [formData, setFormData] = useState<CreateProductRequest>({
-    name: '',
-    brand: '',
-    price: 0,
-    description: '',
-    image: '',
-    inStock: 0,
-    colors: [],
-    tags: [],
+    name: initialData?.name || '',
+    brand: initialData?.brand || '',
+    price: initialData?.price || 0,
+    description: initialData?.description || '',
+    image: initialData?.image || '',
+    inStock: initialData?.inStock ?? 0,
+    colors: initialData?.colors || [],
+    tags: initialData?.tags || [],
   });
   const [errors, setErrors] = useState<FormErrors>({});
-  const [colorsInput, setColorsInput] = useState('');
-  const [tagsInput, setTagsInput] = useState('');
+  const [colorsInput, setColorsInput] = useState(
+    initialData?.colors ? initialData.colors.join(', ') : ''
+  );
+  const [tagsInput, setTagsInput] = useState(
+    initialData?.tags ? initialData.tags.join(', ') : ''
+  );
+
+  const isEditMode = !!initialData;
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -74,7 +81,6 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false }: ProductFo
 
   const handleInputChange = (field: keyof CreateProductRequest, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    // Clear error when user starts typing
     if (errors[field as keyof FormErrors]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
@@ -167,7 +173,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false }: ProductFo
         <Input
           id="inStock"
           type="number"
-          value={formData.inStock || ''}
+          value={formData.inStock ?? ''}
           onChange={(e) => handleInputChange('inStock', Number(e.target.value))}
           placeholder="Nhập số lượng"
           disabled={isLoading}
@@ -206,7 +212,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false }: ProductFo
           Hủy
         </Button>
         <Button type="submit" disabled={isLoading || !isFormValid}>
-          {isLoading ? 'Đang xử lý...' : 'Thêm sản phẩm'}
+          {isLoading ? 'Đang xử lý...' : (isEditMode ? 'Lưu thay đổi' : 'Thêm sản phẩm')}
         </Button>
       </div>
     </form>
