@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createProduct,
   getAllProducts,
+  searchSemantic,
   getProductById,
   updateProduct,
   deleteProduct
@@ -12,6 +13,7 @@ const { adminMiddleware } = require('../middlewares/adminMiddleware');
 
 // Public routes
 router.get('/', getAllProducts);
+router.get('/search/semantic', searchSemantic);
 router.get('/:id', getProductById);
 
 // Admin protected routes

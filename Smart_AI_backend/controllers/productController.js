@@ -2,6 +2,7 @@ const Product = require("../models/Product");
 const Review = require("../models/Review");
 const { generateEmbedding } = require("../utils/openai");
 const cache = require("../services/cacheService");
+const { search: semanticSearch } = require("../services/productSearchService");
 
 const createProductDescription = (productData) => {
   const { name, brand, price, specs, description, colors } = productData;
@@ -354,6 +355,42 @@ const getAllProducts = async (req, res) => {
   }
 };
 
+// Tìm kiếm ngữ nghĩa sản phẩm
+const searchSemantic = async (req, res) => {
+  try {
+    const query = (req.query.q || '').trim();
+    let limit = parseInt(req.query.limit) || 10;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng cung cấp từ khóa tìm kiếm (q)',
+      });
+    }
+
+    if (limit < 1) limit = 10;
+    if (limit > 50) limit = 50;
+
+    const result = await semanticSearch(query, limit);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tìm kiếm ngữ nghĩa thành công',
+      data: {
+        products: result.products,
+        query,
+        searchMode: result.searchMode,
+      },
+    });
+  } catch (error) {
+    console.error('Lỗi tìm kiếm ngữ nghĩa:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi server khi tìm kiếm sản phẩm',
+    });
+  }
+};
+
 // Lấy chi tiết sản phẩm theo ID
 const getProductById = async (req, res) => {
   try {
@@ -576,6 +613,7 @@ const updateProduct = async (req, res) => {
 module.exports = {
   createProduct,
   getAllProducts,
+  searchSemantic,
   getProductById,
   updateProduct,
   deleteProduct,

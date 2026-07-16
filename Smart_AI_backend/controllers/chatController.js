@@ -1,7 +1,6 @@
 const Conversation = require("../models/Conversation");
-const Product = require("../models/Product");
 const Complaint = require("../models/Complaint");
-const { generateEmbedding } = require("../utils/openai");
+const productSearchService = require("../services/productSearchService");
 const {
   classifyIntentAndRespond,
   generateChatResponse,
@@ -106,87 +105,8 @@ class ChatController {
    * Tìm kiếm sản phẩm liên quan bằng vector similarity
    */
   async searchRelevantProducts(clarifiedQuery, limit = 5) {
-    try {
-      const queryVector = await generateEmbedding(clarifiedQuery);
-
-      let relatedProducts = await Product.aggregate([
-        {
-          $vectorSearch: {
-            index: "vector_index",
-            path: "embedding_vector",
-            queryVector: queryVector,
-            numCandidates: 100,
-            limit: limit,
-          },
-        },
-        {
-          $project: {
-            _id: 1,
-            name: 1,
-            brand: 1,
-            price: 1,
-            specs: 1,
-            description: 1,
-            inStock: 1,
-            colors: 1,
-            isActive: 1,
-            score: { $meta: "vectorSearchScore" },
-          },
-        },
-        {
-          $match: {
-            isActive: true,
-          },
-        },
-      ]);
-      if (relatedProducts.length === 0) {
-        relatedProducts = await Product.find({
-          $text: { $search: clarifiedQuery },
-          isActive: true,
-        })
-          .select("name brand price specs description inStock colors")
-          .limit(limit)
-          .lean();
-      }
-
-      if (relatedProducts.length === 0) {
-        relatedProducts = await Product.find({
-          isActive: true,
-          inStock: { $gt: 0 },
-        })
-          .sort({ createdAt: -1 })
-          .select("name brand price specs description inStock colors")
-          .limit(limit)
-          .lean();
-      }
-
-      console.log("relatedProducts", relatedProducts);
-      return relatedProducts;
-    } catch (error) {
-      try {
-        const fallbackProducts = await Product.find({
-          $text: { $search: clarifiedQuery },
-          isActive: true,
-        })
-          .select("name brand price specs description inStock colors")
-          .limit(limit)
-          .lean();
-        if (fallbackProducts.length > 0) {
-          return fallbackProducts;
-        }
-
-        return await Product.find({
-          isActive: true,
-          inStock: { $gt: 0 },
-        })
-          .sort({ createdAt: -1 })
-          .select("name brand price specs description inStock colors")
-          .limit(limit)
-          .lean();
-      } catch (fallbackError) {
-        return [];
-      }
-    }
+    const result = await productSearchService.search(clarifiedQuery, limit);
+    return result.products;
   }
 
   /**
