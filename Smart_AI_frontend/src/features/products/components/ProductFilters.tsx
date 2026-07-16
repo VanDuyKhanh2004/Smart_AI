@@ -10,30 +10,36 @@ import {
 } from '@/components/ui/select';
 import type { ProductFilterState } from '@/types/product.type';
 import { DEFAULT_FILTER_STATE, SORT_OPTIONS } from '@/types/product.type';
-import { Search, X } from 'lucide-react';
+import { Search, X, Check } from 'lucide-react';
 
 interface ProductFiltersProps {
-  filters: ProductFilterState;
-  onFilterChange: (filters: ProductFilterState) => void;
+  draftFilters: ProductFilterState;
+  onDraftFilterChange: (filters: ProductFilterState) => void;
+  onApplyFilters: () => void;
   onClearFilters: () => void;
+  onSearchChange: (search: string) => void;
+  currentSearch: string;
   brands: string[];
   isLoading?: boolean;
 }
 
 export function ProductFilters({
-  filters,
-  onFilterChange,
+  draftFilters,
+  onDraftFilterChange,
+  onApplyFilters,
   onClearFilters,
+  onSearchChange,
+  currentSearch,
   brands,
   isLoading = false,
 }: ProductFiltersProps) {
-  const [searchInput, setSearchInput] = useState(filters.search || '');
+  const [searchInput, setSearchInput] = useState(currentSearch || '');
 
-  // Debounce search input - 300ms delay
+  // Debounce search — 300ms delay, directly applies search
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchInput !== filters.search) {
-        onFilterChange({ ...filters, search: searchInput.trim() });
+      if (searchInput !== currentSearch) {
+        onSearchChange(searchInput.trim());
       }
     }, 300);
 
@@ -41,44 +47,44 @@ export function ProductFilters({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
-  // Sync searchInput with filters.search when filters change externally
+  // Sync search input when currentSearch changes externally (reset, apply, pagination)
   useEffect(() => {
-    if (filters.search !== undefined && filters.search !== searchInput) {
-      setSearchInput(filters.search);
+    if (currentSearch !== searchInput) {
+      setSearchInput(currentSearch);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.search]);
+  }, [currentSearch]);
 
+  // Non-search handlers — only update draftFilters, NO API call
   const handleBrandChange = (value: string) => {
-    onFilterChange({
-      ...filters,
+    onDraftFilterChange({
+      ...draftFilters,
       brand: value === 'all' ? undefined : value,
     });
   };
 
-
   const handleMinPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     const numValue = value === '' ? undefined : Math.max(0, Number(value));
-    onFilterChange({ ...filters, minPrice: numValue });
+    onDraftFilterChange({ ...draftFilters, minPrice: numValue });
   };
 
   const handleMaxPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     const numValue = value === '' ? undefined : Math.max(0, Number(value));
-    onFilterChange({ ...filters, maxPrice: numValue });
+    onDraftFilterChange({ ...draftFilters, maxPrice: numValue });
   };
 
   const handleStockChange = (value: string) => {
-    onFilterChange({
-      ...filters,
+    onDraftFilterChange({
+      ...draftFilters,
       inStock: value as 'all' | 'true' | 'false',
     });
   };
 
   const handleRatingChange = (value: string) => {
-    onFilterChange({
-      ...filters,
+    onDraftFilterChange({
+      ...draftFilters,
       minRating: value === 'all' ? undefined : Number(value),
     });
   };
@@ -88,21 +94,21 @@ export function ProductFilters({
       'price' | 'name' | 'createdAt',
       'asc' | 'desc'
     ];
-    onFilterChange({ ...filters, sortBy, sortOrder });
+    onDraftFilterChange({ ...draftFilters, sortBy, sortOrder });
   };
 
-  // Check if any filter is active (different from default)
-  const isAnyFilterActive =
-    filters.brand !== undefined ||
-    filters.minPrice !== undefined ||
-    filters.maxPrice !== undefined ||
-    filters.inStock !== 'all' ||
-    (filters.search && filters.search.trim() !== '') ||
-    filters.sortBy !== DEFAULT_FILTER_STATE.sortBy ||
-    filters.sortOrder !== DEFAULT_FILTER_STATE.sortOrder ||
-    filters.minRating !== undefined;
+  // Check if draft differs from default (show Reset button)
+  const isAnyDraftActive =
+    draftFilters.brand !== undefined ||
+    draftFilters.minPrice !== undefined ||
+    draftFilters.maxPrice !== undefined ||
+    draftFilters.inStock !== 'all' ||
+    (searchInput && searchInput.trim() !== '') ||
+    draftFilters.sortBy !== DEFAULT_FILTER_STATE.sortBy ||
+    draftFilters.sortOrder !== DEFAULT_FILTER_STATE.sortOrder ||
+    draftFilters.minRating !== undefined;
 
-  const currentSortValue = `${filters.sortBy || 'createdAt'}-${filters.sortOrder || 'desc'}`;
+  const currentSortValue = `${draftFilters.sortBy || 'createdAt'}-${draftFilters.sortOrder || 'desc'}`;
 
   return (
     <div className="flex flex-wrap items-end gap-4 p-4 bg-card rounded-lg border mb-6">
@@ -119,7 +125,6 @@ export function ProductFilters({
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
-            disabled={isLoading}
           />
         </div>
       </div>
@@ -131,9 +136,8 @@ export function ProductFilters({
           Thương hiệu
         </label>
         <Select
-          value={filters.brand || 'all'}
+          value={draftFilters.brand || 'all'}
           onValueChange={handleBrandChange}
-          disabled={isLoading}
         >
           <SelectTrigger className="w-[150px]">
             <SelectValue placeholder="Tất cả" />
@@ -158,21 +162,19 @@ export function ProductFilters({
           <Input
             type="number"
             placeholder="Từ"
-            value={filters.minPrice ?? ''}
+            value={draftFilters.minPrice ?? ''}
             onChange={handleMinPriceChange}
             className="w-[100px]"
             min={0}
-            disabled={isLoading}
           />
           <span className="text-muted-foreground">-</span>
           <Input
             type="number"
             placeholder="Đến"
-            value={filters.maxPrice ?? ''}
+            value={draftFilters.maxPrice ?? ''}
             onChange={handleMaxPriceChange}
             className="w-[100px]"
             min={0}
-            disabled={isLoading}
           />
         </div>
       </div>
@@ -184,9 +186,8 @@ export function ProductFilters({
           Tình trạng
         </label>
         <Select
-          value={filters.inStock || 'all'}
+          value={draftFilters.inStock || 'all'}
           onValueChange={handleStockChange}
-          disabled={isLoading}
         >
           <SelectTrigger className="w-[130px]">
             <SelectValue placeholder="Tất cả" />
@@ -205,9 +206,8 @@ export function ProductFilters({
           Đánh giá
         </label>
         <Select
-          value={filters.minRating?.toString() || 'all'}
+          value={draftFilters.minRating?.toString() || 'all'}
           onValueChange={handleRatingChange}
-          disabled={isLoading}
         >
           <SelectTrigger className="w-[130px]">
             <SelectValue placeholder="Tất cả" />
@@ -230,7 +230,6 @@ export function ProductFilters({
         <Select
           value={currentSortValue}
           onValueChange={handleSortChange}
-          disabled={isLoading}
         >
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Mới nhất" />
@@ -245,8 +244,19 @@ export function ProductFilters({
         </Select>
       </div>
 
+      {/* Apply Filters Button */}
+      <Button
+        variant="default"
+        onClick={onApplyFilters}
+        disabled={isLoading}
+        className="h-9"
+      >
+        <Check className="h-4 w-4 mr-1" />
+        Áp dụng
+      </Button>
+
       {/* Clear Filters Button */}
-      {isAnyFilterActive && (
+      {isAnyDraftActive && (
         <Button
           variant="outline"
           onClick={onClearFilters}

@@ -29,25 +29,26 @@ const ProductListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [filters, setFilters] = useState<ProductFilterState>({ ...DEFAULT_FILTER_STATE });
+  const [draftFilters, setDraftFilters] = useState<ProductFilterState>({ ...DEFAULT_FILTER_STATE });
+  const [currentFilters, setCurrentFilters] = useState<ProductFilterState>({ ...DEFAULT_FILTER_STATE });
 
   // Wishlist integration - Requirements: 7.1
   const { isAuthenticated } = useAuthStore();
   const { checkMultipleStatus } = useWishlistStore();
 
-  // Check if any filter is active (for display purposes)
+  // Check if any filter is active (for display purposes) — based on currentFilters only
   const isFilterActive = useMemo(() => {
     return (
-      filters.brand !== undefined ||
-      filters.minPrice !== undefined ||
-      filters.maxPrice !== undefined ||
-      filters.inStock !== 'all' ||
-      (filters.search && filters.search.trim() !== '') ||
-      filters.sortBy !== DEFAULT_FILTER_STATE.sortBy ||
-      filters.sortOrder !== DEFAULT_FILTER_STATE.sortOrder ||
-      filters.minRating !== undefined
+      currentFilters.brand !== undefined ||
+      currentFilters.minPrice !== undefined ||
+      currentFilters.maxPrice !== undefined ||
+      currentFilters.inStock !== 'all' ||
+      (currentFilters.search && currentFilters.search.trim() !== '') ||
+      currentFilters.sortBy !== DEFAULT_FILTER_STATE.sortBy ||
+      currentFilters.sortOrder !== DEFAULT_FILTER_STATE.sortOrder ||
+      currentFilters.minRating !== undefined
     );
-  }, [filters]);
+  }, [currentFilters]);
 
   // Fetch brands on initial load
   useEffect(() => {
@@ -64,7 +65,7 @@ const ProductListPage: React.FC = () => {
     fetchBrands();
   }, []);
 
-  const fetchProducts = async (page: number = 1, currentFilters: ProductFilterState = filters) => {
+  const fetchProducts = async (page: number = 1, filters: ProductFilterState = currentFilters) => {
     try {
       setLoading(true);
       setError(null);
@@ -73,18 +74,18 @@ const ProductListPage: React.FC = () => {
       const params = {
         page,
         limit: 10,
-        ...(currentFilters.brand && { brand: currentFilters.brand }),
-        ...(currentFilters.minPrice !== undefined && { minPrice: currentFilters.minPrice }),
-        ...(currentFilters.maxPrice !== undefined && { maxPrice: currentFilters.maxPrice }),
-        ...(currentFilters.inStock && currentFilters.inStock !== 'all' && {
-          inStock: currentFilters.inStock === 'true',
+        ...(filters.brand && { brand: filters.brand }),
+        ...(filters.minPrice !== undefined && { minPrice: filters.minPrice }),
+        ...(filters.maxPrice !== undefined && { maxPrice: filters.maxPrice }),
+        ...(filters.inStock && filters.inStock !== 'all' && {
+          inStock: filters.inStock === 'true',
         }),
-        ...(currentFilters.search && currentFilters.search.trim() !== '' && {
-          search: currentFilters.search.trim(),
+        ...(filters.search && filters.search.trim() !== '' && {
+          search: filters.search.trim(),
         }),
-        ...(currentFilters.sortBy && { sortBy: currentFilters.sortBy }),
-        ...(currentFilters.sortOrder && { sortOrder: currentFilters.sortOrder }),
-        ...(currentFilters.minRating !== undefined && { minRating: currentFilters.minRating }),
+        ...(filters.sortBy && { sortBy: filters.sortBy }),
+        ...(filters.sortOrder && { sortOrder: filters.sortOrder }),
+        ...(filters.minRating !== undefined && { minRating: filters.minRating }),
       };
 
       const response = await productService.getAllProducts(params);
@@ -99,10 +100,11 @@ const ProductListPage: React.FC = () => {
     }
   };
 
+  // Fetch whenever currentPage or currentFilters changes
   useEffect(() => {
-    fetchProducts(currentPage, filters);
+    fetchProducts(currentPage, currentFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, filters]);
+  }, [currentPage, currentFilters]);
 
   // Fetch wishlist status for displayed products when authenticated
   // Requirements: 7.1 - Show filled heart if product is in wishlist
@@ -113,15 +115,29 @@ const ProductListPage: React.FC = () => {
     }
   }, [isAuthenticated, products, checkMultipleStatus]);
 
-  // Handle filter change - reset page to 1
-  const handleFilterChange = (newFilters: ProductFilterState) => {
-    setFilters(newFilters);
+  // Draft filter change — updates inputs immediately, NO API call, NO page reset
+  const handleDraftFilterChange = (newFilters: ProductFilterState) => {
+    setDraftFilters(newFilters);
+  };
+
+  // Apply draft filters — copies to currentFilters, resets page, triggers fetch
+  const handleApplyFilters = () => {
+    setCurrentFilters(draftFilters);
     setCurrentPage(1);
   };
 
-  // Handle clear filters - reset all filters and page
+  // Search change — directly updates both currentFilters and draftFilters, resets page
+  const handleSearchChange = (search: string) => {
+    setCurrentFilters(prev => ({ ...prev, search }));
+    setDraftFilters(prev => ({ ...prev, search }));
+    setCurrentPage(1);
+  };
+
+  // Clear all filters — resets both draft and current, resets page, triggers fetch
   const handleClearFilters = () => {
-    setFilters({ ...DEFAULT_FILTER_STATE });
+    const defaults = { ...DEFAULT_FILTER_STATE };
+    setDraftFilters(defaults);
+    setCurrentFilters(defaults);
     setCurrentPage(1);
   };
 
@@ -218,37 +234,6 @@ const ProductListPage: React.FC = () => {
     return items;
   };
 
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Đang tải danh sách sản phẩm...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <p className="text-red-500 mb-4">{error}</p>
-            <button
-              onClick={() => fetchProducts(currentPage)}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-            >
-              Thử lại
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Banner Carousel */}
@@ -267,130 +252,156 @@ const ProductListPage: React.FC = () => {
 
       {/* Product Filters */}
       <ProductFilters
-        filters={filters}
-        onFilterChange={handleFilterChange}
+        draftFilters={draftFilters}
+        onDraftFilterChange={handleDraftFilterChange}
+        onApplyFilters={handleApplyFilters}
         onClearFilters={handleClearFilters}
+        onSearchChange={handleSearchChange}
+        currentSearch={currentFilters.search || ''}
         brands={allBrands}
         isLoading={loading}
       />
 
-      {/* Product Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
-        {products.map((product) => (
-          <Link
-            key={product._id}
-            to={`/products/${product._id}`}
-            className="block transition-transform hover:scale-105"
-          >
-            <Card className="h-full cursor-pointer hover:shadow-lg transition-shadow relative">
-              {/* WishlistButton - Requirements: 7.1 */}
-              <div className="absolute top-2 right-2 z-10 flex gap-1">
-                {/* CompareButton - Requirements: 1.1 */}
-                <CompareButton
-                  productId={product._id}
-                  size="icon"
-                  variant="ghost"
-                  className="bg-white/80 hover:bg-white shadow-sm rounded-full"
-                />
-                <WishlistButton
-                  productId={product._id}
-                  size="icon"
-                  variant="ghost"
-                  className="bg-white/80 hover:bg-white shadow-sm rounded-full"
-                />
-              </div>
-              <CardContent className="p-0">
-                <AspectRatio ratio={4 / 3} className="bg-muted">
-                  <img
-                    src={product.image || '/api/placeholder/400/300'}
-                    alt={product.name}
-                    className="object-cover w-full h-full rounded-t-xl"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = 'https://via.placeholder.com/400x300/e5e5e5/9ca3af?text=No+Image';
-                    }}
-                  />
-                </AspectRatio>
-              </CardContent>
-              
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg truncate">
-                  {product.name}
-                </CardTitle>
-              </CardHeader>
-              
-              <CardFooter className="pt-0 flex-col items-start space-y-2">
-                <p className="text-sm text-muted-foreground capitalize">
-                  {product.brand}
-                </p>
-                {/* Rating display */}
-                <div className="flex items-center gap-1.5">
-                  {product.reviewCount && product.reviewCount > 0 ? (
-                    <>
-                      <StarRating rating={product.averageRating || 0} size="sm" />
-                      <span className="text-sm text-muted-foreground">
-                        ({product.reviewCount})
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-xs text-muted-foreground italic">
-                      Chưa có đánh giá
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-xl font-bold text-primary">
-                    {formatPrice(product.price)}
-                  </span>
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    product.inStock > 0 
-                      ? 'bg-green-100 text-green-800' 
-                      : 'bg-red-100 text-red-800'
-                  }`}>
-                    {product.inStock > 0 ? 'Còn hàng' : 'Hết hàng'}
-                  </span>
-                </div>
-              </CardFooter>
-            </Card>
-          </Link>
-        ))}
-      </div>
-
-      {/* Pagination */}
-      {pagination && pagination.totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (pagination.hasPrevPage) {
-                      handlePageChange(currentPage - 1);
-                    }
-                  }}
-                  className={!pagination.hasPrevPage ? 'pointer-events-none opacity-50' : ''}
-                />
-              </PaginationItem>
-              
-              {renderPaginationItems()}
-              
-              <PaginationItem>
-                <PaginationNext
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (pagination.hasNextPage) {
-                      handlePageChange(currentPage + 1);
-                    }
-                  }}
-                  className={!pagination.hasNextPage ? 'pointer-events-none opacity-50' : ''}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
+      {loading && products.length === 0 ? (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Đang tải danh sách sản phẩm...</p>
+          </div>
         </div>
+      ) : error ? (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <p className="text-red-500 mb-4">{error}</p>
+            <button
+              onClick={() => fetchProducts(currentPage)}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            >
+              Thử lại
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Product Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
+            {products.map((product) => (
+              <Link
+                key={product._id}
+                to={`/products/${product._id}`}
+                className="block transition-transform hover:scale-105"
+              >
+                <Card className="h-full cursor-pointer hover:shadow-lg transition-shadow relative">
+                  {/* WishlistButton - Requirements: 7.1 */}
+                  <div className="absolute top-2 right-2 z-10 flex gap-1">
+                    {/* CompareButton - Requirements: 1.1 */}
+                    <CompareButton
+                      productId={product._id}
+                      size="icon"
+                      variant="ghost"
+                      className="bg-white/80 hover:bg-white shadow-sm rounded-full"
+                    />
+                    <WishlistButton
+                      productId={product._id}
+                      size="icon"
+                      variant="ghost"
+                      className="bg-white/80 hover:bg-white shadow-sm rounded-full"
+                    />
+                  </div>
+                  <CardContent className="p-0">
+                    <AspectRatio ratio={4 / 3} className="bg-muted">
+                      <img
+                        src={product.image || '/api/placeholder/400/300'}
+                        alt={product.name}
+                        className="object-cover w-full h-full rounded-t-xl"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = 'https://via.placeholder.com/400x300/e5e5e5/9ca3af?text=No+Image';
+                        }}
+                      />
+                    </AspectRatio>
+                  </CardContent>
+                  
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg truncate">
+                      {product.name}
+                    </CardTitle>
+                  </CardHeader>
+                  
+                  <CardFooter className="pt-0 flex-col items-start space-y-2">
+                    <p className="text-sm text-muted-foreground capitalize">
+                      {product.brand}
+                    </p>
+                    {/* Rating display */}
+                    <div className="flex items-center gap-1.5">
+                      {product.reviewCount && product.reviewCount > 0 ? (
+                        <>
+                          <StarRating rating={product.averageRating || 0} size="sm" />
+                          <span className="text-sm text-muted-foreground">
+                            ({product.reviewCount})
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">
+                          Chưa có đánh giá
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-xl font-bold text-primary">
+                        {formatPrice(product.price)}
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        product.inStock > 0 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {product.inStock > 0 ? 'Còn hàng' : 'Hết hàng'}
+                      </span>
+                    </div>
+                  </CardFooter>
+                </Card>
+              </Link>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="flex justify-center">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (pagination.hasPrevPage) {
+                          handlePageChange(currentPage - 1);
+                        }
+                      }}
+                      className={!pagination.hasPrevPage ? 'pointer-events-none opacity-50' : ''}
+                    />
+                  </PaginationItem>
+                  
+                  {renderPaginationItems()}
+                  
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (pagination.hasNextPage) {
+                          handlePageChange(currentPage + 1);
+                        }
+                      }}
+                      className={!pagination.hasNextPage ? 'pointer-events-none opacity-50' : ''}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
