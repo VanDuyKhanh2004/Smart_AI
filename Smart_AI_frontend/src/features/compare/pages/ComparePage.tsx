@@ -296,12 +296,12 @@ const ComparePage: React.FC = () => {
               {/* Product image */}
               <AspectRatio ratio={1} className="bg-muted rounded-lg mb-3 overflow-hidden">
                 <img
-                  src={product.image || 'https://via.placeholder.com/200x200/e5e5e5/9ca3af?text=No+Image'}
+                  src={product.image || '/images/product-placeholder.svg'}
                   alt={product.name}
                   className="object-cover w-full h-full"
                   onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = 'https://via.placeholder.com/200x200/e5e5e5/9ca3af?text=No+Image';
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = '/images/product-placeholder.svg';
                   }}
                 />
               </AspectRatio>

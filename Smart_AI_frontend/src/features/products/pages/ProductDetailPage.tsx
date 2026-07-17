@@ -18,6 +18,7 @@ import { ReviewForm } from '../components/ReviewForm';
 import { QASection } from '../components/QASection';
 import WishlistButton from '@/components/ui/WishlistButton';
 import CompareButton from '@/components/ui/CompareButton';
+import ProductRecommendations from '../components/ProductRecommendations';
 
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -114,6 +115,11 @@ const ProductDetailPage: React.FC = () => {
   useEffect(() => {
     checkCanReview();
   }, [checkCanReview]);
+
+  // Scroll to top when navigating between products
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [id]);
 
   // Handle review submission
   const handleSubmitReview = async (rating: number, comment?: string) => {
@@ -303,12 +309,12 @@ const ProductDetailPage: React.FC = () => {
             <CardContent className="p-0">
               <AspectRatio ratio={4 / 3} className="bg-muted">
                 <img
-                  src={product.image || 'https://via.placeholder.com/600x450/e5e5e5/9ca3af?text=No+Image'}
+                  src={product.image || '/images/product-placeholder.svg'}
                   alt={product.name}
-                  className="object-cover w-full h-full rounded-lg"
+                  className="object-contain w-full h-full rounded-lg"
                   onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = 'https://via.placeholder.com/600x450/e5e5e5/9ca3af?text=No+Image';
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = '/images/product-placeholder.svg';
                   }}
                 />
               </AspectRatio>
@@ -494,6 +500,9 @@ const ProductDetailPage: React.FC = () => {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Product Recommendations */}
+      {id && <ProductRecommendations productId={id} />}
     </div>
   );
 };

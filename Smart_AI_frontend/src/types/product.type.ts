@@ -150,3 +150,23 @@ export interface DeleteProductResponse {
   message: string;
 }
 
+// Recommendation types
+export type RecommendationMode = 'vector' | 'brand_price' | 'fallback';
+
+export interface RecommendationSourceProduct {
+  _id: string;
+  name: string;
+}
+
+export interface ProductRecommendationData {
+  sourceProduct: RecommendationSourceProduct;
+  products: Product[];
+  recommendationMode: RecommendationMode;
+}
+
+export interface ProductRecommendationResponse {
+  success: boolean;
+  message: string;
+  data: ProductRecommendationData;
+}
+

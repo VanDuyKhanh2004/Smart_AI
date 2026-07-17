@@ -232,14 +232,13 @@ const CompareHistoryCard: React.FC<CompareHistoryCardProps> = ({
                   <img
                     src={
                       product.image ||
-                      'https://via.placeholder.com/80x80/e5e5e5/9ca3af?text=No+Image'
+                      '/images/product-placeholder.svg'
                     }
                     alt={product.name}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src =
-                        'https://via.placeholder.com/80x80/e5e5e5/9ca3af?text=No+Image';
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = '/images/product-placeholder.svg';
                     }}
                   />
                 </AspectRatio>
