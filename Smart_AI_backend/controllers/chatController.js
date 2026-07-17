@@ -126,7 +126,7 @@ class ChatController {
         : [];
       const validatedHistory = Array.isArray(chatHistory) ? chatHistory : [];
 
-      const fullResponse = await generateChatResponse(
+      const { text, provider } = await generateChatResponse(
         validatedHistory,
         userQuery,
         validatedProducts
@@ -134,12 +134,13 @@ class ChatController {
 
       socket.emit("aiResponse", {
         sessionId,
-        message: fullResponse,
+        message: text,
         timestamp: new Date().toISOString(),
       });
 
       return {
-        fullResponse,
+        fullResponse: text,
+        modelUsed: provider,
         relatedProducts: validatedProducts.map((p) => ({
           id: p._id,
           name: p.name,
@@ -411,6 +412,7 @@ class ChatController {
         retrievedProducts: responseResult.relatedProducts || [],
         responseType: responseResult.responseType || "product_query",
         skipRAG: responseResult.responseType === "small_talk",
+        modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
       });
 
       return {
