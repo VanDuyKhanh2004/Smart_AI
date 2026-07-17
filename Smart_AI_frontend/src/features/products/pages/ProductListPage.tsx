@@ -311,12 +311,12 @@ const ProductListPage: React.FC = () => {
                   <CardContent className="p-0">
                     <AspectRatio ratio={4 / 3} className="bg-muted">
                       <img
-                        src={product.image || '/api/placeholder/400/300'}
+                        src={product.image || '/images/product-placeholder.svg'}
                         alt={product.name}
                         className="object-cover w-full h-full rounded-t-xl"
                         onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.src = 'https://via.placeholder.com/400x300/e5e5e5/9ca3af?text=No+Image';
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = '/images/product-placeholder.svg';
                         }}
                       />
                     </AspectRatio>

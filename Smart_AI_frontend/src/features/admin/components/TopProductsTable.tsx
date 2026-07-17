@@ -94,9 +94,13 @@ export function TopProductsTable({ products, isLoading }: TopProductsTableProps)
                 <TableCell>
                   <div className="flex items-center gap-3">
                     <img
-                      src={item.product.image}
+                      src={item.product.image || '/images/product-placeholder.svg'}
                       alt={item.product.name}
                       className="h-10 w-10 rounded object-cover"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = '/images/product-placeholder.svg';
+                      }}
                     />
                     <span className="font-medium line-clamp-1">
                       {item.product.name}

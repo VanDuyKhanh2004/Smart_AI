@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" fill="none">
+  <rect width="200" height="150" fill="#f3f4f6"/>
+  <rect x="60" y="25" width="80" height="60" rx="8" stroke="#9ca3af" stroke-width="2" fill="none"/>
+  <circle cx="100" cy="55" r="12" stroke="#9ca3af" stroke-width="2" fill="none"/>
+  <path d="M60 78 L80 65 L95 72 L110 60 L140 78" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <text x="100" y="115" text-anchor="middle" fill="#9ca3af" font-family="sans-serif" font-size="13">Không có ảnh</text>
+</svg>

@@ -8,6 +8,7 @@ import type {
   UpdateProductRequest,
   UpdateProductResponse,
   DeleteProductResponse,
+  ProductRecommendationResponse,
 } from '@/types/product.type';
 
 
@@ -73,7 +74,18 @@ export const productService = {
     }
   },
 
+  getProductRecommendations: async (id: string, limit: number = 5): Promise<ProductRecommendationResponse> => {
+    try {
+      const response = await apiClient.get<ProductRecommendationResponse>(`/products/${id}/recommendations`, {
+        params: { limit },
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error as string);
+    }
+  },
+
 };
 
 // Export các hàm riêng lẻ để sử dụng trực tiếp nếu cần
-export const { getAllProducts, getProductById, createProduct, updateProduct, deleteProduct } = productService;
+export const { getAllProducts, getProductById, createProduct, updateProduct, deleteProduct, getProductRecommendations } = productService;

@@ -52,12 +52,12 @@ const CartItem: React.FC<CartItemProps> = ({
           {/* Product Image */}
           <div className="flex-shrink-0 w-24 h-24 rounded-md overflow-hidden bg-muted">
             <img
-              src={product.image || 'https://via.placeholder.com/96x96/e5e5e5/9ca3af?text=No+Image'}
+              src={product.image || '/images/product-placeholder.svg'}
               alt={product.name}
               className="w-full h-full object-cover"
               onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = 'https://via.placeholder.com/96x96/e5e5e5/9ca3af?text=No+Image';
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = '/images/product-placeholder.svg';
               }}
             />
           </div>

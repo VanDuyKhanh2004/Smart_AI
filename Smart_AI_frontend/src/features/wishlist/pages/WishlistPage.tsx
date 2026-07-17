@@ -199,7 +199,7 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
         <CardContent className="p-0">
           <div className="relative aspect-[4/3] bg-muted overflow-hidden rounded-t-lg">
             <img
-              src="https://via.placeholder.com/400x300/e5e5e5/9ca3af?text=Deleted"
+              src="/images/product-placeholder.svg"
               alt="Sản phẩm đã bị xóa"
               className="w-full h-full object-cover"
             />
@@ -241,12 +241,12 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
         <Link to={`/products/${productId}`}>
           <div className="relative aspect-[4/3] bg-muted overflow-hidden rounded-t-lg">
             <img
-              src={productData.image || 'https://via.placeholder.com/400x300/e5e5e5/9ca3af?text=No+Image'}
+              src={productData.image || '/images/product-placeholder.svg'}
               alt={productData.name}
               className="w-full h-full object-cover transition-transform hover:scale-105"
               onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = 'https://via.placeholder.com/400x300/e5e5e5/9ca3af?text=No+Image';
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = '/images/product-placeholder.svg';
               }}
             />
             {/* Remove Button */}

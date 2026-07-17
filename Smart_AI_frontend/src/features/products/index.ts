@@ -6,6 +6,9 @@ export { ProductFilters } from './components/ProductFilters';
 export { ReviewList } from './components/ReviewList';
 export { ReviewForm } from './components/ReviewForm';
 
+// Product Recommendations
+export { default as ProductRecommendations } from './components/ProductRecommendations';
+
 // Q&A Components
 export { QASection } from './components/QASection';
 export { QuestionForm } from './components/QuestionForm';
