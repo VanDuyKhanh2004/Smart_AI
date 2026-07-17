@@ -5,6 +5,7 @@ const {
   getAllProducts,
   searchSemantic,
   getProductById,
+  getRecommendations,
   updateProduct,
   deleteProduct
 } = require('../controllers/productController');
@@ -14,6 +15,7 @@ const { adminMiddleware } = require('../middlewares/adminMiddleware');
 // Public routes
 router.get('/', getAllProducts);
 router.get('/search/semantic', searchSemantic);
+router.get('/:id/recommendations', getRecommendations);
 router.get('/:id', getProductById);
 
 // Admin protected routes

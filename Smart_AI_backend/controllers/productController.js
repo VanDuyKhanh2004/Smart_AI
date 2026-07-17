@@ -3,6 +3,7 @@ const Review = require("../models/Review");
 const { generateEmbedding } = require("../utils/openai");
 const cache = require("../services/cacheService");
 const { search: semanticSearch } = require("../services/productSearchService");
+const { recommend: productRecommend } = require("../services/productRecommendationService");
 
 const createProductDescription = (productData) => {
   const { name, brand, price, specs, description, colors } = productData;
@@ -446,6 +447,48 @@ const getProductById = async (req, res) => {
 };
 
 /**
+ * Product Recommendations
+ */
+const getRecommendations = async (req, res) => {
+  try {
+    const productId = req.params.id;
+    const limit = req.query.limit;
+
+    const result = await productRecommend(productId, limit);
+
+    if (result.error === "INVALID_ID") {
+      return res.status(400).json({
+        success: false,
+        message: "ID sản phẩm không hợp lệ",
+      });
+    }
+
+    if (result.error === "NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy sản phẩm",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Lấy sản phẩm gợi ý thành công",
+      data: {
+        sourceProduct: result.sourceProduct,
+        products: result.products,
+        recommendationMode: result.recommendationMode,
+      },
+    });
+  } catch (error) {
+    console.error("Lỗi gợi ý sản phẩm:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi server khi lấy gợi ý sản phẩm",
+    });
+  }
+};
+
+/**
  * Delete product (soft delete by setting isActive = false)
  */
 const deleteProduct = async (req, res) => {
@@ -615,6 +658,7 @@ module.exports = {
   getAllProducts,
   searchSemantic,
   getProductById,
+  getRecommendations,
   updateProduct,
   deleteProduct,
 };
