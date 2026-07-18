@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { authService } from '@/services/auth.service';
 import { useAuthStore } from '@/stores/authStore';
+import { initGoogleIdentity, setGoogleCallback, renderGoogleButton } from '@/lib/googleIdentity';
 
 interface GoogleLinkSectionProps {
   onSuccess?: (message: string) => void;
@@ -16,55 +17,36 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || user.googleId || !buttonRef.current) return;
+    if (!user || user.googleId) return;
 
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (!clientId) return;
+    if (!clientId?.trim()) return;
 
-    let cancelled = false;
+    const mounted = { current: true };
 
-    const init = () => {
-      if (cancelled) return;
-      if (!window.google) {
-        setTimeout(init, 500);
-        return;
+    initGoogleIdentity(clientId.trim());
+    setGoogleCallback(async (credential: string) => {
+      if (!mounted.current) return;
+      setIsLoading(true);
+      try {
+        const res = await authService.linkGoogle(credential);
+        if (!mounted.current) return;
+        setUser(res.data.user);
+        onSuccess?.('Đã liên kết tài khoản Google thành công');
+      } catch (err: any) {
+        if (!mounted.current) return;
+        const msg = err.response?.data?.error?.message
+          || err.response?.data?.message
+          || 'Liên kết Google thất bại';
+        onError?.(msg);
+      } finally {
+        if (mounted.current) setIsLoading(false);
       }
-      if (!buttonRef.current) return;
-
-      buttonRef.current.innerHTML = '';
-
-      window.google.accounts.id.initialize({
-        client_id: clientId,
-        callback: async (response: any) => {
-          setIsLoading(true);
-          try {
-            const res = await authService.linkGoogle(response.credential);
-            setUser(res.data.user);
-            onSuccess?.('Đã liên kết tài khoản Google thành công');
-          } catch (err: any) {
-            const msg = err.response?.data?.error?.message
-              || err.response?.data?.message
-              || 'Liên kết Google thất bại';
-            onError?.(msg);
-          } finally {
-            setIsLoading(false);
-          }
-        },
-      });
-
-      window.google.accounts.id.renderButton(buttonRef.current, {
-        theme: 'outline',
-        size: 'large',
-        text: 'signin_with',
-        width: 350,
-        shape: 'rectangular',
-      });
-    };
-
-    init();
+    });
+    renderGoogleButton(buttonRef.current);
 
     return () => {
-      cancelled = true;
+      mounted.current = false;
     };
   }, [user?.googleId]);
 
