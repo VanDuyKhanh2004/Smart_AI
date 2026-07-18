@@ -120,6 +120,7 @@ apiClient.interceptors.response.use(
 function clearAuthStorage() {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem('user');
 }
 
 export default apiClient;

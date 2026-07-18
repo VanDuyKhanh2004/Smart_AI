@@ -220,6 +220,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       const user = await authService.getMe();
       set({
         user,
+        accessToken: localStorage.getItem(ACCESS_TOKEN_KEY),
         isAuthenticated: true,
         isLoading: false,
       });
@@ -232,30 +233,16 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         // Ignore wishlist fetch errors
       });
     } catch {
-      // Token might be expired, try to refresh
-      const refreshed = await get().refreshToken();
-      if (refreshed) {
-        try {
-          const user = await authService.getMe();
-          set({
-            user,
-            isAuthenticated: true,
-            isLoading: false,
-          });
-          // Fetch cart for authenticated user (don't await to prevent blocking)
-          useCartStore.getState().fetchCart().catch(() => {
-            // Ignore cart fetch errors
-          });
-          // Fetch wishlist for authenticated user
-          useWishlistStore.getState().fetchWishlist().catch(() => {
-            // Ignore wishlist fetch errors
-          });
-        } catch {
-          set({ isLoading: false });
-        }
-      } else {
-        set({ isLoading: false });
-      }
+      // Axios interceptor already attempted token refresh.
+      // If we reach here, the interceptor's refresh failed and
+      // localStorage tokens have been cleared by the interceptor.
+      // No need to retry refresh — just set unauthenticated state.
+      set({
+        user: null,
+        accessToken: null,
+        isAuthenticated: false,
+        isLoading: false,
+      });
     }
   },
 }));
