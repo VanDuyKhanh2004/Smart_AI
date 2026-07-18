@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { useAuthStore } from "@/stores/authStore";
+import { initGoogleIdentity, setGoogleCallback, renderGoogleButton } from "@/lib/googleIdentity";
 
 const GoogleLoginButton: React.FC = () => {
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -17,74 +18,17 @@ const GoogleLoginButton: React.FC = () => {
   const from =
     (location.state as { from?: { pathname: string } })?.from?.pathname || "/";
 
-  useEffect(() => {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const handleCredential = useCallback(async (credential: string) => {
+    setIsLoading(true);
+    setError("");
 
-    console.log("========== GOOGLE LOGIN ==========");
-    console.log("Current Origin:", window.location.origin);
-    console.log("Client ID:", clientId);
-    console.log("API:", import.meta.env.VITE_API_BASE_URL);
-    console.log("==============================");
-
-    if (!clientId) {
-      setError("Không tìm thấy VITE_GOOGLE_CLIENT_ID");
-      return;
-    }
-
-    const initializeGoogle = () => {
-      if (!window.google) {
-        console.log("Google script chưa load...");
-        setTimeout(initializeGoogle, 500);
-        return;
-      }
-
-      if (!buttonRef.current) return;
-
-      try {
-        buttonRef.current.innerHTML = "";
-
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: handleCredentialResponse,
-        });
-
-        window.google.accounts.id.renderButton(buttonRef.current, {
-          theme: "outline",
-          size: "large",
-          text: "signin_with",
-          width: 350,
-          shape: "rectangular",
-        });
-
-        console.log("Google button rendered");
-      } catch (err) {
-        console.error(err);
-        setError("Không thể khởi tạo Google Login");
-      }
-    };
-
-    initializeGoogle();
-  }, []);
-
-  const handleCredentialResponse = async (response: any) => {
     try {
-      setIsLoading(true);
-      setError("");
-
-      console.log("Google credential received");
-
       const api = `${import.meta.env.VITE_API_BASE_URL.replace(
         "/api",
         "",
       )}/api/auth/google-login`;
 
-      console.log("POST:", api);
-
-      const res = await axios.post(api, {
-        credential: response.credential,
-      });
-
-      console.log(res.data);
+      const res = await axios.post(api, { credential });
 
       if (!res.data.success) {
         throw new Error("Đăng nhập thất bại");
@@ -102,8 +46,6 @@ const GoogleLoginButton: React.FC = () => {
         replace: true,
       });
     } catch (err: any) {
-      console.error(err);
-
       setError(
         err.response?.data?.message ||
           err.response?.data?.error?.message ||
@@ -113,7 +55,19 @@ const GoogleLoginButton: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [from, setAuth]);
+
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId?.trim()) {
+      setError("Không tìm thấy VITE_GOOGLE_CLIENT_ID");
+      return;
+    }
+
+    initGoogleIdentity(clientId.trim());
+    setGoogleCallback(handleCredential);
+    renderGoogleButton(buttonRef.current);
+  }, [handleCredential]);
 
   return (
     <div className="space-y-3">
