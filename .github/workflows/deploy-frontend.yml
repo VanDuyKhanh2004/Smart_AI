@@ -10,9 +10,11 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: Smart_AI_frontend
+
+    # Vercel CLI reads these to link the project without needing .vercel/project.json
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -23,17 +25,17 @@ jobs:
           cache: npm
           cache-dependency-path: Smart_AI_frontend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
-
       - name: Install latest Vercel CLI
         run: npm install --global vercel@latest
 
+      # Vercel commands run from the repository root (no working-directory override).
+      # The Vercel project dashboard has Root Directory = Smart_AI_frontend.
+      # Vercel CLI resolves Smart_AI_frontend relative to the current directory,
+      # so running from the repo root produces the correct absolute path.
+      # Do NOT set working-directory on Vercel steps — that would double-nest
+      # to Smart_AI_frontend/Smart_AI_frontend and cause "spawn sh ENOENT".
       - name: Pull Vercel environment information
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Build project artifacts
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
