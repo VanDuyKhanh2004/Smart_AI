@@ -34,6 +34,8 @@ const storeRoutes = require("./routes/storeRoutes");
 const appointmentRoutes = require("./routes/appointmentRoutes");
 const path = require("path");
 
+const { startBullMQ, stopBullMQ } = require("./bullmq/bootstrap");
+
 const app = express();
 const server = http.createServer(app);
 
@@ -183,6 +185,48 @@ app.use("*", (req, res) => {
   });
 });
 
+const gracefulShutdown = async (signal) => {
+  logger.info({ signal }, 'Graceful shutdown initiated');
+
+  // BullMQ: workers first, queues second
+  await stopBullMQ();
+
+  // Socket.IO third
+  if (typeof shutdownSocketIO === 'function') {
+    try {
+      shutdownSocketIO();
+    } catch (err) {
+      logger.error({ err }, 'Error shutting down Socket.IO');
+    }
+  }
+
+  // HTTP server
+  try {
+    await new Promise((resolve) => server.close(resolve));
+  } catch (err) {
+    logger.error({ err }, 'Error closing HTTP server');
+  }
+
+  // Redis cache last
+  const { disconnectRedis } = require('./configs/redis');
+  try {
+    await disconnectRedis();
+  } catch (err) {
+    logger.error({ err }, 'Error disconnecting Redis');
+  }
+
+  // MongoDB last
+  const { disconnectDatabase } = require('./configs/database');
+  try {
+    await disconnectDatabase();
+  } catch (err) {
+    logger.error({ err }, 'Error disconnecting MongoDB');
+  }
+
+  logger.info({ signal }, 'Graceful shutdown complete');
+  process.exit(0);
+};
+
 const initializeServer = async () => {
   try {
     const env = process.env.NODE_ENV || 'development';
@@ -193,6 +237,8 @@ const initializeServer = async () => {
 
     logger.info('Connecting to Redis...');
     await connectRedis();
+
+    await startBullMQ();
 
     initializeSocketHandlers(io);
 
@@ -213,6 +259,8 @@ const initializeServer = async () => {
   }
 };
 
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('uncaughtException', (err) => {
   logger.error({ err }, 'Uncaught exception');
   process.exit(1);

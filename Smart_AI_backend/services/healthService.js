@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { getRedisClient } = require('../configs/redis');
+const { getBullMQHealth } = require('../bullmq/bootstrap');
 
 const SERVICE_NAME = 'smart-ai-backend';
 
@@ -38,6 +39,8 @@ const checkRedis = async () => {
   }
 };
 
+const checkBullMQ = () => getBullMQHealth();
+
 const checkAI = () => ({
   openaiConfigured: !!process.env.OPENAI_API_KEY,
   geminiConfigured: !!process.env.GEMINI_API_KEY,
@@ -67,6 +70,8 @@ const getHealthData = async (req) => {
   const totalDurationMs = Date.now() - totalStart;
   const allUp = mongodb.status === 'up' && redis.status === 'up';
 
+  const bullmq = checkBullMQ();
+
   return {
     success: allUp,
     status: allUp ? 'healthy' : 'unhealthy',
@@ -75,7 +80,7 @@ const getHealthData = async (req) => {
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     requestId: req.requestId,
-    dependencies: { mongodb, redis, ai },
+    dependencies: { mongodb, redis, ai, bullmq },
     totalDurationMs,
   };
 };

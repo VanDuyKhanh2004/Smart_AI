@@ -21,6 +21,11 @@ jest.mock('../configs/redis', () => ({
   getRedisClient: jest.fn(),
 }));
 
+jest.mock('bullmq', () => ({
+  Queue: jest.fn(),
+  Worker: jest.fn(),
+}));
+
 const mockPino = () => require('pino')();
 
 describe('Liveness endpoint', () => {
