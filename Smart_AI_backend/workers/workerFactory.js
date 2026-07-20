@@ -65,11 +65,35 @@ const createWorker = (name, processor, options = {}) => {
   logger.info({ queueName: name, concurrency, lockDuration }, 'BullMQ worker created');
 
   const safeClose = async () => {
+    const timeoutMs = parseInt(process.env.BULLMQ_CLOSE_TIMEOUT, 10) || 5000;
+
+    logger.info({ queueName: name }, 'Closing BullMQ worker');
+
+    let timer;
+    const timeoutPromise = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn(
+          { queueName: name, timeoutMs },
+          'BullMQ worker close timed out, continuing',
+        );
+        resolve();
+      }, timeoutMs);
+    });
+
     try {
-      logger.info({ queueName: name }, 'Closing BullMQ worker');
-      await worker.close();
-    } catch (err) {
-      logger.error({ err, queueName: name }, 'Error closing BullMQ worker');
+      await Promise.race([
+        worker
+          .close()
+          .then(() => {
+            logger.info({ queueName: name }, 'BullMQ worker closed');
+          })
+          .catch((err) => {
+            logger.error({ err, queueName: name }, 'Error closing BullMQ worker');
+          }),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
   };
 

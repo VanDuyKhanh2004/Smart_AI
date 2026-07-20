@@ -18,11 +18,35 @@ const createQueue = (name, options = {}) => {
   logger.info({ queueName: name, prefix }, 'BullMQ queue created');
 
   const safeClose = async () => {
+    const timeoutMs = parseInt(process.env.BULLMQ_CLOSE_TIMEOUT, 10) || 5000;
+
+    logger.info({ queueName: name }, 'Closing BullMQ queue');
+
+    let timer;
+    const timeoutPromise = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn(
+          { queueName: name, timeoutMs },
+          'BullMQ queue close timed out, continuing',
+        );
+        resolve();
+      }, timeoutMs);
+    });
+
     try {
-      logger.info({ queueName: name }, 'Closing BullMQ queue');
-      await queue.close();
-    } catch (err) {
-      logger.error({ err, queueName: name }, 'Error closing BullMQ queue');
+      await Promise.race([
+        queue
+          .close()
+          .then(() => {
+            logger.info({ queueName: name }, 'BullMQ queue closed');
+          })
+          .catch((err) => {
+            logger.error({ err, queueName: name }, 'Error closing BullMQ queue');
+          }),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
   };
 
