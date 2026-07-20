@@ -76,6 +76,9 @@ app.use(requestLogger);
    Basic Routes
 ============================================================ */
 
+const healthRoutes = require("./routes/healthRoutes");
+const { live } = require("./controllers/healthController");
+
 // Home
 app.get("/", (req, res) => {
   res.json({
@@ -88,16 +91,8 @@ app.get("/", (req, res) => {
   });
 });
 
-// Health Check
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    status: "OK",
-    message: "Smart AI Backend is running",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  });
-});
+// Liveness
+app.get("/health", live);
 
 // API Information
 app.get("/api/info", (req, res) => {
@@ -136,6 +131,7 @@ app.get("/test-chat", (req, res) => {
    API Routes
 ============================================================ */
 
+app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/complaints", complaintRoutes);
