@@ -1,6 +1,10 @@
+const logger = require('../utils/logger');
+
+let _io = null;
 
 const initializeSocketHandlers = (io) => {
-  console.log('Initializing Socket.IO handlers...');
+  _io = io;
+  logger.info('Initializing Socket.IO handlers...');
 
   io.on('connection', (socket) => {
     const clientIP = socket.handshake.address;
@@ -270,20 +274,30 @@ const getSocketStats = (io) => {
 };
 
 
-const shutdownSocketIO = (io) => {
-  console.log('Shutting down Socket.IO connections...');
-  
-  io.emit('serverShutdown', {
-    message: 'Server đang bảo trì. Vui lòng kết nối lại sau.',
-    timestamp: new Date().toISOString()
-  });
+const shutdownSocketIO = () => {
+  return new Promise((resolve) => {
+    const io = _io;
+    if (!io) {
+      logger.warn('Socket.IO not initialized, skipping shutdown');
+      resolve();
+      return;
+    }
 
-  io.sockets.sockets.forEach(socket => {
-    socket.disconnect(true);
-  });
+    logger.info('Shutting down Socket.IO connections...');
 
-  io.close(() => {
-    console.log('Socket.IO server closed');
+    io.emit('serverShutdown', {
+      message: 'Server đang bảo trì. Vui lòng kết nối lại sau.',
+      timestamp: new Date().toISOString()
+    });
+
+    io.sockets.sockets.forEach(socket => {
+      socket.disconnect(true);
+    });
+
+    io.close(() => {
+      logger.info('Socket.IO server closed');
+      resolve();
+    });
   });
 };
 

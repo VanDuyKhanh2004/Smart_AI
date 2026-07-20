@@ -35,6 +35,7 @@ const appointmentRoutes = require("./routes/appointmentRoutes");
 const path = require("path");
 
 const { startBullMQ, stopBullMQ } = require("./bullmq/bootstrap");
+const { shutdownStep } = require("./utils/shutdown");
 
 const app = express();
 const server = http.createServer(app);
@@ -185,43 +186,46 @@ app.use("*", (req, res) => {
   });
 });
 
+let shuttingDown = false;
+
 const gracefulShutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info({ signal }, 'Graceful shutdown initiated');
 
-  // BullMQ: workers first, queues second
-  await stopBullMQ();
+  // 1. BullMQ: workers first, queues second
+  await shutdownStep('BullMQ', () => stopBullMQ());
 
-  // Socket.IO third
-  if (typeof shutdownSocketIO === 'function') {
-    try {
-      shutdownSocketIO();
-    } catch (err) {
-      logger.error({ err }, 'Error shutting down Socket.IO');
-    }
-  }
+  // 2. Socket.IO
+  await shutdownStep('Socket.IO', () => {
+    return typeof shutdownSocketIO === 'function'
+      ? shutdownSocketIO()
+      : Promise.resolve();
+  });
 
-  // HTTP server
-  try {
-    await new Promise((resolve) => server.close(resolve));
-  } catch (err) {
-    logger.error({ err }, 'Error closing HTTP server');
-  }
+  // 3. HTTP server
+  await shutdownStep('HTTP server', () => {
+    return new Promise((resolve) => server.close(resolve));
+  });
 
-  // Redis cache last
-  const { disconnectRedis } = require('./configs/redis');
-  try {
+  // 4. Redis cache
+  await shutdownStep('Redis', async () => {
+    const { disconnectRedis } = require('./configs/redis');
     await disconnectRedis();
-  } catch (err) {
-    logger.error({ err }, 'Error disconnecting Redis');
-  }
+  });
 
-  // MongoDB last
-  const { disconnectDatabase } = require('./configs/database');
-  try {
+  // 5. MongoDB
+  await shutdownStep('MongoDB', async () => {
+    const { disconnectDatabase } = require('./configs/database');
     await disconnectDatabase();
-  } catch (err) {
-    logger.error({ err }, 'Error disconnecting MongoDB');
-  }
+  });
+
+  // 6. Flush logger before exit
+  await shutdownStep('Logger flush', async () => {
+    if (typeof logger.flush === 'function') {
+      logger.flush();
+    }
+  });
 
   logger.info({ signal }, 'Graceful shutdown complete');
   process.exit(0);
