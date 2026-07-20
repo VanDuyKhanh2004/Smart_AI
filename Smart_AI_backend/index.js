@@ -4,9 +4,12 @@ const socketIo = require("socket.io");
 const cors = require("cors");
 require("dotenv").config();
 
+const logger = require("./utils/logger");
+const correlationId = require("./middlewares/correlationId");
+const requestLogger = require("./middlewares/requestLogger");
+
 const { connectDatabase } = require("./configs/database");
 const { connectRedis } = require("./configs/redis");
-const { testOpenAIConnection } = require("./utils/openai");
 const {
   initializeSocketHandlers,
   getSocketStats,
@@ -48,6 +51,9 @@ const io = socketIo(server, {
   transports: ["websocket", "polling"],
 });
 
+// Correlation ID must run first so all downstream middleware/routes have req.requestId
+app.use(correlationId);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
@@ -59,9 +65,12 @@ app.use(
         : "*",
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
   }),
 );
+
+// Request logger captures every response after parsers have run
+app.use(requestLogger);
 
 /* ============================================================
    Basic Routes
@@ -154,7 +163,8 @@ app.use(
 ============================================================ */
 
 app.use((err, req, res, next) => {
-  console.error("Unhandled Error:", err);
+  const log = req.logger || logger;
+  log.error({ err }, 'Unhandled error on %s %s', req.method, req.originalUrl);
 
   res.status(err.status || 500).json({
     error: {
@@ -166,6 +176,8 @@ app.use((err, req, res, next) => {
 });
 
 app.use("*", (req, res) => {
+  const log = req.logger || logger;
+  log.warn({ requestId: req.requestId }, 'Route not found: %s %s', req.method, req.originalUrl);
   res.status(404).json({
     error: {
       message: `Route ${req.originalUrl} not found`,
@@ -177,35 +189,16 @@ app.use("*", (req, res) => {
 
 const initializeServer = async () => {
   try {
-    console.log("Starting Smart AI Backend...");
-    console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+    const env = process.env.NODE_ENV || 'development';
+    logger.info({ env }, 'Starting Smart AI Backend');
 
-    console.log("Connecting to MongoDB...");
+    logger.info('Connecting to MongoDB...');
     await connectDatabase();
 
-    console.log("MongoDB Connected Successfully");
-
-    console.log("Connecting to Redis...");
+    logger.info('Connecting to Redis...');
     await connectRedis();
 
-    console.log("Redis Connected Successfully");
-
-    /* ============================================================
-       Socket.IO
-    ============================================================ */
-
     initializeSocketHandlers(io);
-
-    // Nếu muốn kiểm tra OpenAI khi khởi động thì bỏ comment đoạn dưới
-    /*
-    const openAIReady = await testOpenAIConnection();
-
-    if (openAIReady) {
-      console.log("OpenAI API Connected");
-    } else {
-      console.warn("OpenAI API Connection Failed");
-    }
-    */
 
     server.listen(PORT, () => {
       const BASE_URL =
@@ -213,21 +206,25 @@ const initializeServer = async () => {
           ? process.env.RENDER_EXTERNAL_URL || `PORT ${PORT}`
           : `http://localhost:${PORT}`;
 
-      console.log("==========================================");
-      console.log("Smart AI Backend Started Successfully");
-      console.log(`Environment : ${process.env.NODE_ENV}`);
-      console.log(`Server URL  : ${BASE_URL}`);
-      console.log(`Health      : ${BASE_URL}/health`);
-      console.log(`API Info    : ${BASE_URL}/api/info`);
-      console.log(`Socket.IO   : Enabled`);
-      console.log("==========================================");
+      logger.info(
+        { port: PORT, env, url: BASE_URL },
+        'Smart AI Backend started',
+      );
     });
   } catch (error) {
-    console.error("Failed to start server");
-    console.error(error);
+    logger.error({ err: error }, 'Failed to start server');
     process.exit(1);
   }
 };
+
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'Uncaught exception');
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled rejection');
+});
 
 initializeServer();
 
