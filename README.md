@@ -647,3 +647,5 @@ Dự án sử dụng:
 Distributed under the **MIT License**.
 
 See **LICENSE** for more information.
+
+Branch protection test
