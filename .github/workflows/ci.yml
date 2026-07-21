@@ -3,12 +3,24 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - Smart_AI_backend/**
+      - Smart_AI_frontend/**
+      - .github/workflows/ci.yml
   pull_request:
     branches: [main]
+    paths:
+      - Smart_AI_backend/**
+      - Smart_AI_frontend/**
+      - .github/workflows/ci.yml
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  backend-lint-and-test:
-    name: Backend Lint & Test
+  backend-tests:
+    name: Backend Tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -19,15 +31,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: Smart_AI_backend/package-lock.json
 
-      - run: npm ci
-      - run: npm test
+      - name: Install backend dependencies
+        run: npm ci
 
-  frontend-lint-and-build:
-    name: Frontend Lint & Build
+      - name: Run backend tests
+        run: npm test
+
+  frontend-typecheck-tests-build:
+    name: Frontend Type Check, Tests & Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,9 +53,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: Smart_AI_frontend/package-lock.json
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Run frontend tests
+        run: npx vitest run
+
+      - name: Build frontend
+        run: npm run build
