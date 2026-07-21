@@ -49,6 +49,7 @@ const recommendByVector = async (sourceProduct, safeLimit) => {
     {
       $project: {
         embedding_vector: 0,
+        embeddingError: 0,
         score: { $meta: "vectorSearchScore" },
       },
     },

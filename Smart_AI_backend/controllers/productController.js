@@ -1,95 +1,15 @@
 const Product = require("../models/Product");
 const Review = require("../models/Review");
-const { generateEmbedding } = require("../utils/openai");
 const cache = require("../services/cacheService");
 const { search: semanticSearch } = require("../services/productSearchService");
 const { recommend: productRecommend } = require("../services/productRecommendationService");
-
-const createProductDescription = (productData) => {
-  const { name, brand, price, specs, description, colors } = productData;
-
-  let descriptionParts = [];
-
-  descriptionParts.push(`${name}`);
-  descriptionParts.push(`${brand}`);
-  descriptionParts.push(`${price}`);
-
-  if (description) {
-    descriptionParts.push(`${description}`);
-  }
-
-  if (specs) {
-    if (specs.screen) {
-      if (specs.screen.size) descriptionParts.push(`${specs.screen.size}`);
-      if (specs.screen.technology)
-        descriptionParts.push(`${specs.screen.technology}`);
-      if (specs.screen.resolution)
-        descriptionParts.push(`${specs.screen.resolution}`);
-    }
-
-    if (specs.processor) {
-      if (specs.processor.chipset)
-        descriptionParts.push(`${specs.processor.chipset}`);
-      if (specs.processor.cpu) descriptionParts.push(`${specs.processor.cpu}`);
-      if (specs.processor.gpu) descriptionParts.push(`${specs.processor.gpu}`);
-    }
-
-    if (specs.memory) {
-      if (specs.memory.ram) descriptionParts.push(`${specs.memory.ram}`);
-      if (specs.memory.storage)
-        descriptionParts.push(`${specs.memory.storage}`);
-    }
-
-    if (specs.camera) {
-      if (specs.camera.rear) {
-        if (specs.camera.rear.primary)
-          descriptionParts.push(`${specs.camera.rear.primary}`);
-        if (specs.camera.rear.secondary)
-          descriptionParts.push(`${specs.camera.rear.secondary}`);
-        if (specs.camera.rear.tertiary)
-          descriptionParts.push(`${specs.camera.rear.tertiary}`);
-      }
-      if (specs.camera.front) descriptionParts.push(`${specs.camera.front}`);
-      if (specs.camera.features && specs.camera.features.length > 0) {
-        descriptionParts.push(`${specs.camera.features.join(", ")}`);
-      }
-    }
-
-    if (specs.battery) {
-      if (specs.battery.capacity)
-        descriptionParts.push(`${specs.battery.capacity}`);
-      if (specs.battery.charging) {
-        if (specs.battery.charging.wired)
-          descriptionParts.push(`${specs.battery.charging.wired}`);
-        if (specs.battery.charging.wireless)
-          descriptionParts.push(`${specs.battery.charging.wireless}`);
-      }
-    }
-
-    if (specs.os) descriptionParts.push(`${specs.os}`);
-
-    if (specs.dimensions) descriptionParts.push(`${specs.dimensions}`);
-    if (specs.weight) descriptionParts.push(`${specs.weight}`);
-
-    if (specs.connectivity) {
-      if (specs.connectivity.network && specs.connectivity.network.length > 0) {
-        descriptionParts.push(`${specs.connectivity.network.join(", ")}`);
-      }
-      if (specs.connectivity.ports && specs.connectivity.ports.length > 0) {
-        descriptionParts.push(`${specs.connectivity.ports.join(", ")}`);
-      }
-    }
-  }
-
-  if (colors && colors.length > 0) {
-    descriptionParts.push(`${colors.join(", ")}`);
-  }
-  return descriptionParts.join(". ");
-};
+const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddingContent");
+const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
+const logger = require("../utils/logger");
 
 const createProduct = async (req, res) => {
+  const log = req.logger || logger;
   try {
-    console.log("Tạo sản phẩm mới:", req.body.name);
 
     const {
       name,
@@ -122,22 +42,6 @@ const createProduct = async (req, res) => {
       });
     }
 
-    const fullDescription = createProductDescription(req.body);
-    console.log(
-      "Description được tạo:",
-      fullDescription.substring(0, 200) + "...",
-    );
-
-    let embeddingVector;
-    try {
-      console.log("Đang tạo embedding vector...");
-      embeddingVector = await generateEmbedding(fullDescription);
-      console.log("Embedding vector đã được tạo");
-    } catch (error) {
-      console.error("Không thể tạo embedding, tiếp tục tạo sản phẩm mà không có vector:", error.message);
-      embeddingVector = undefined;
-    }
-
     const newProduct = new Product({
       name,
       brand: brand.toLowerCase(),
@@ -147,13 +51,21 @@ const createProduct = async (req, res) => {
       inStock: inStock || 0,
       colors: colors || [],
       tags: tags || [],
-      embedding_vector: embeddingVector,
       image: image || "",
+      embeddingStatus: 'pending',
     });
 
-    const saveOptions = embeddingVector ? {} : { validateBeforeSave: false };
-    const savedProduct = await newProduct.save(saveOptions);
-    console.log("Sản phẩm đã được lưu với ID:", savedProduct._id);
+    const savedProduct = await newProduct.save();
+    log.info({ productId: savedProduct._id.toString(), requestId: req.requestId }, 'Product created');
+
+    const canonicalText = buildEmbeddingContent(savedProduct);
+
+    enqueueProductEmbedding(
+      savedProduct._id.toString(),
+      canonicalText,
+      'create',
+      req.requestId || null,
+    );
 
     await cache.invalidatePattern("products:*");
 
@@ -163,7 +75,7 @@ const createProduct = async (req, res) => {
       data: savedProduct,
     });
   } catch (error) {
-    console.error("Lỗi khi tạo sản phẩm:", error.message);
+    log.error({ err: { message: error.message } }, 'Failed to create product');
 
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => err.message);
@@ -294,6 +206,7 @@ const getAllProducts = async (req, res) => {
       {
         $project: {
           embedding_vector: 0,
+          embeddingError: 0,
           reviews: 0,
         },
       },
@@ -535,9 +448,10 @@ const deleteProduct = async (req, res) => {
  * Update product
  */
 const updateProduct = async (req, res) => {
+  const log = req.logger || logger;
   try {
     const productId = req.params.id;
-    console.log("Cập nhật sản phẩm:", productId);
+    log.info({ productId, requestId: req.requestId }, 'Updating product');
 
     const existing = await Product.findById(productId);
     if (!existing) {
@@ -569,46 +483,43 @@ const updateProduct = async (req, res) => {
       });
     }
 
-    // Build update payload
+    // Build update payload — only include explicitly provided fields
     const updateData = {
       name,
       brand: brand.toLowerCase(),
       price,
-      specs: specs || {},
       description,
       inStock: inStock !== undefined ? inStock : existing.inStock,
-      colors: colors || [],
-      tags: tags || [],
-      image: image !== undefined ? image : existing.image,
+      ...(specs !== undefined && { specs }),
+      ...(colors !== undefined && { colors }),
+      ...(tags !== undefined && { tags }),
+      ...(image !== undefined && { image }),
     };
 
-    // Regenerate embedding if name / brand / description / specs / price changed
+    // Enqueue embedding if embedding-relevant fields changed
     const embeddingRelevantFieldsChanged =
       name !== existing.name ||
       brand.toLowerCase() !== existing.brand ||
       description !== existing.description ||
       price !== existing.price ||
-      JSON.stringify(specs) !== JSON.stringify(existing.specs);
+      (specs !== undefined && JSON.stringify(specs) !== JSON.stringify(existing.specs)) ||
+      (colors !== undefined && JSON.stringify(colors) !== JSON.stringify(existing.colors));
+
+    let shouldEnqueue = false;
 
     if (embeddingRelevantFieldsChanged) {
-      try {
-        const fullDescription = createProductDescription(req.body);
-        console.log("Đang tạo lại embedding vector...");
-        updateData.embedding_vector = await generateEmbedding(fullDescription);
-        console.log("Embedding vector đã được tạo lại");
-      } catch (error) {
-        // Only log — omit embedding_vector from updateData entirely.
-        // This preserves the existing vector (or its absence if the
-        // product was created when AI was down) and avoids Mongoose
-        // validating a required field that shouldn't be touched.
-        console.error("Không thể tạo lại embedding, giữ nguyên vector cũ:", error.message);
+      const existingData = existing._doc || existing;
+      const prospectiveData = { ...existingData, ...updateData };
+      const contentHash = computeContentHash(buildEmbeddingContent(prospectiveData));
+
+      if (existing.embeddingContentHash === contentHash && existing.embeddingStatus === 'ready') {
+        // Canonical content hasn't genuinely changed; keep ready status, skip enqueue
+      } else {
+        updateData.embeddingStatus = 'pending';
+        shouldEnqueue = true;
       }
     }
 
-    // Use explicit $set to control exactly which fields are validated.
-    // embedding_vector is deliberately NOT included when generation
-    // failed or was unnecessary — this prevents the schema's required
-    // validator from blocking the update of other fields.
     const updatedProduct = await Product.findByIdAndUpdate(productId, { $set: updateData }, {
       new: true,
       runValidators: true,
@@ -624,6 +535,16 @@ const updateProduct = async (req, res) => {
       });
     }
 
+    if (shouldEnqueue) {
+      const canonicalText = buildEmbeddingContent(updatedProduct);
+      enqueueProductEmbedding(
+        productId,
+        canonicalText,
+        'update',
+        req.requestId || null,
+      );
+    }
+
     // Invalidate cache
     await cache.del("product:" + productId);
     await cache.invalidatePattern("products:*");
@@ -634,7 +555,7 @@ const updateProduct = async (req, res) => {
       data: updatedProduct,
     });
   } catch (error) {
-    console.error("Lỗi khi cập nhật sản phẩm:", error.message);
+    log.error({ err: { message: error.message } }, 'Failed to update product');
 
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => err.message);

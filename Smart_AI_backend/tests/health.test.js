@@ -13,9 +13,27 @@ jest.mock('pino', () => {
   return jest.fn(() => mockInstance);
 });
 
-jest.mock('mongoose', () => ({
-  connection: { readyState: 1 },
-}));
+jest.mock('mongoose', () => {
+  const Schema = function() {};
+  Schema.prototype.pre = jest.fn().mockReturnThis();
+  Schema.prototype.virtual = jest.fn().mockReturnValue({ get: jest.fn() });
+  Schema.prototype.index = jest.fn().mockReturnThis();
+  Schema.prototype.statics = {};
+  Schema.prototype.methods = {};
+  Schema.Types = { ObjectId: String, Number: Number, String: String, Boolean: Boolean, Date: Date };
+  const model = jest.fn(() => {
+    function Model(doc) { if (doc) Object.assign(this, doc); }
+    Model.findById = jest.fn();
+    Model.findByIdAndUpdate = jest.fn();
+    Model.findOne = jest.fn();
+    Model.aggregate = jest.fn();
+    Model.countDocuments = jest.fn();
+    Model.prototype.validateSync = jest.fn();
+    Model.prototype.save = jest.fn().mockResolvedValue(true);
+    return Model;
+  });
+  return { connection: { readyState: 1 }, Schema, model };
+});
 
 jest.mock('../configs/redis', () => ({
   getRedisClient: jest.fn(),

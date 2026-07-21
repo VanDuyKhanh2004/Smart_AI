@@ -161,13 +161,31 @@ const productSchema = new mongoose.Schema({
   
   embedding_vector: {
     type: [Number],
-    required: [true, 'Vector embedding là bắt buộc'],
+    default: undefined,
     validate: {
-      validator: function(v) {
-        return v && v.length === 1536; // OpenAI text-embedding-3-small có 1536 dimensions
+      validator(value) {
+        return value == null || value.length === 1536;
       },
       message: 'Vector embedding phải có đúng 1536 dimensions'
     }
+  },
+  embeddingStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'ready', 'failed'],
+    default: 'pending',
+  },
+  embeddingContentHash: {
+    type: String,
+    default: null,
+  },
+  embeddingUpdatedAt: {
+    type: Date,
+    default: null,
+  },
+  embeddingError: {
+    type: String,
+    default: null,
+    select: false,
   },
   
   isActive: {
@@ -196,6 +214,8 @@ const productSchema = new mongoose.Schema({
       ret.id = ret._id;
       delete ret._id;
       delete ret.__v;
+      delete ret.embedding_vector;
+      delete ret.embeddingError;
       return ret;
     }
   },
@@ -205,6 +225,8 @@ const productSchema = new mongoose.Schema({
       ret.id = ret._id;
       delete ret._id;
       delete ret.__v;
+      delete ret.embedding_vector;
+      delete ret.embeddingError;
       return ret;
     }
   }
