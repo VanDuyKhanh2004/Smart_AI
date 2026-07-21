@@ -1,11 +1,14 @@
+const sanitizeUrl = require('../utils/sanitizeUrl');
+
 const requestLogger = (req, res, next) => {
   const start = Date.now();
+  const sanitized = sanitizeUrl(req.originalUrl);
 
   res.on('finish', () => {
     const logData = {
       requestId: req.requestId,
       method: req.method,
-      url: req.originalUrl,
+      url: sanitized,
       statusCode: res.statusCode,
       durationMs: Date.now() - start,
     };
@@ -20,7 +23,7 @@ const requestLogger = (req, res, next) => {
     const level =
       res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
 
-    req.logger[level](logData, '%s %s %d', req.method, req.originalUrl, res.statusCode);
+    req.logger[level](logData, '%s %s %d', req.method, sanitized, res.statusCode);
   });
 
   next();
