@@ -36,6 +36,7 @@ const path = require("path");
 
 const { startBullMQ, stopBullMQ } = require("./bullmq/bootstrap");
 const { shutdownStep } = require("./utils/shutdown");
+const sanitizeUrl = require("./utils/sanitizeUrl");
 
 const app = express();
 const server = http.createServer(app);
@@ -163,7 +164,8 @@ app.use(
 
 app.use((err, req, res, next) => {
   const log = req.logger || logger;
-  log.error({ err }, 'Unhandled error on %s %s', req.method, req.originalUrl);
+  const sanitized = sanitizeUrl(req.originalUrl);
+  log.error({ err }, 'Unhandled error on %s %s', req.method, sanitized);
 
   res.status(err.status || 500).json({
     error: {
@@ -174,17 +176,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.use("*", (req, res) => {
-  const log = req.logger || logger;
-  log.warn({ requestId: req.requestId }, 'Route not found: %s %s', req.method, req.originalUrl);
-  res.status(404).json({
-    error: {
-      message: `Route ${req.originalUrl} not found`,
-      status: 404,
-      timestamp: new Date().toISOString(),
-    },
+  app.use("*", (req, res) => {
+    const log = req.logger || logger;
+    const sanitized = sanitizeUrl(req.originalUrl);
+    log.warn({ requestId: req.requestId }, 'Route not found: %s %s', req.method, sanitized);
+    const qIndex = req.originalUrl.indexOf('?');
+    const pathname = qIndex === -1 ? req.originalUrl : req.originalUrl.slice(0, qIndex);
+    res.status(404).json({
+      error: {
+        message: `Route ${pathname} not found`,
+        status: 404,
+        timestamp: new Date().toISOString(),
+      },
+    });
   });
-});
 
 let shuttingDown = false;
 

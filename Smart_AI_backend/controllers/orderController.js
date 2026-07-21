@@ -3,7 +3,7 @@ const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const Promotion = require('../models/Promotion');
-const { fireAndForget, sendOrderConfirmationEmail } = require('../services/emailService');
+const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -254,10 +254,8 @@ const createOrder = async (req, res) => {
       .populate('user', 'name email');
 
     // Send order confirmation email
-    fireAndForget(sendOrderConfirmationEmail(
-      { name: populatedOrder.user.name, email: populatedOrder.user.email },
-      populatedOrder
-    ), "Order confirmation email failed");
+    const orderUser = { name: populatedOrder.user.name, email: populatedOrder.user.email, _id: req.user?._id };
+    enqueueOrderConfirmationEmail(orderUser, populatedOrder, req.requestId);
 
     res.status(201).json({
       success: true,

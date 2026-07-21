@@ -6,7 +6,12 @@ const {
 } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
 const crypto = require('crypto');
-const { fireAndForget, sendWelcomeEmail, sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
+const {
+  enqueueWelcomeEmail,
+  enqueueVerificationEmail,
+  enqueuePasswordResetEmail,
+  enqueueUnlockAccountEmail,
+} = require('../services/emailQueueService');
 
 // Validate required environment variables for Google Login
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -92,7 +97,7 @@ const register = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     const verifyUrl = buildVerifyUrl(verificationToken, user.email);
-    fireAndForget(sendVerificationEmail(user, verifyUrl), "Verification email failed");
+    enqueueVerificationEmail(user, verifyUrl, req.requestId);
 
     res.status(201).json({
       success: true,
@@ -223,7 +228,7 @@ const login = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     if (!user.welcomeEmailSent && (user.emailVerified || user.googleId)) {
-      fireAndForget(sendWelcomeEmail(user), "Welcome email failed");
+      enqueueWelcomeEmail(user, req.requestId);
       user.welcomeEmailSent = true;
       user.firstLoginAt = new Date();
       await user.save({ validateBeforeSave: false });
@@ -510,7 +515,7 @@ const googleLogin = async (req, res) => {
 
     // Send welcome email if first time
     if (!user.welcomeEmailSent) {
-      fireAndForget(sendWelcomeEmail(user), "Welcome email failed");
+      enqueueWelcomeEmail(user, req.requestId);
       user.welcomeEmailSent = true;
       user.firstLoginAt = new Date();
       await user.save({ validateBeforeSave: false });
@@ -726,7 +731,7 @@ const verifyEmail = async (req, res) => {
     user.emailVerificationExpires = undefined;
 
     if (!user.welcomeEmailSent) {
-      fireAndForget(sendWelcomeEmail(user), "Welcome email failed");
+      enqueueWelcomeEmail(user, req.requestId);
       user.welcomeEmailSent = true;
       user.firstLoginAt = new Date();
     }
@@ -804,7 +809,7 @@ const resendVerification = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     const verifyUrl = buildVerifyUrl(verificationToken);
-    fireAndForget(sendVerificationEmail(user, verifyUrl), "Verification email failed");
+    enqueueVerificationEmail(user, verifyUrl, req.requestId);
 
     res.status(200).json({
       success: true,
@@ -864,7 +869,7 @@ const requestPasswordReset = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     const resetUrl = buildResetPasswordUrl(resetToken, user.email);
-    fireAndForget(sendPasswordResetEmail(user, resetUrl), "Password reset email failed");
+    enqueuePasswordResetEmail(user, resetUrl, req.requestId);
 
     res.status(200).json({
       success: true,
@@ -1001,8 +1006,7 @@ const requestUnlockAccount = async (req, res) => {
     const unlockUrl = `${baseUrl}/unlock-account?token=${unlockToken}&email=${encodeURIComponent(email)}`;
 
     // Gửi email
-    const { fireAndForget: f2, sendUnlockAccountEmail } = require('../services/emailService');
-    f2(sendUnlockAccountEmail(user, unlockUrl), "Unlock account email failed");
+    enqueueUnlockAccountEmail(user, unlockUrl, req.requestId);
 
     res.status(200).json({
       success: true,
