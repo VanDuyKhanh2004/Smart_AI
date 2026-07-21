@@ -1,3 +1,4 @@
+const logger = require('./logger');
 const { GoogleGenAI } = require('@google/genai');
 
 if (!process.env.GEMINI_API_KEY) {
@@ -17,7 +18,7 @@ const cleanText = (text) => {
     .trim();
 
   if (cleaned.length > 8000) {
-    console.warn(`Text quá dài (${cleaned.length} chars), sẽ truncate`);
+    logger.warn({ textLength: cleaned.length }, 'Text too long, truncating');
     cleaned = cleaned.substring(0, 8000);
   }
 
@@ -36,7 +37,7 @@ const generateEmbedding = async (text) => {
       throw new Error('Text không thể rỗng sau khi clean');
     }
 
-    console.log(`Generating embedding cho text: "${cleanedText.substring(0, 100)}..."`);
+    logger.info({ textLength: cleanedText.length, expectedDimensions: TARGET_DIM, model: EMBEDDING_MODEL }, 'Generating embedding');
 
     const response = await ai.models.embedContent({
       model: EMBEDDING_MODEL,
@@ -56,14 +57,14 @@ const generateEmbedding = async (text) => {
       throw new Error(`Embedding dimensions không đúng: ${embedding ? embedding.length : 'undefined'}, mong đợi ${TARGET_DIM}`);
     }
 
-    console.log(`Embedding generated thành công (${embedding.length} dimensions)`);
+    logger.info({ dimensions: embedding.length }, 'Embedding generated successfully');
 
     return embedding;
   } catch (error) {
-    console.error('Lỗi khi tạo embedding:', error.message);
+    logger.error({ err: { message: error.message } }, 'Embedding generation failed');
 
     if (process.env.NODE_ENV === 'development') {
-      console.error('Error details:', error);
+      logger.debug({ err: error }, 'Embedding error details');
     }
 
     if (error.message.includes('API key')) {
@@ -91,7 +92,7 @@ const generateEmbeddingsBatch = async (texts) => {
       return cleanText(text);
     });
 
-    console.log(`Generating embeddings cho ${cleanedTexts.length} texts`);
+    logger.info({ textCount: cleanedTexts.length, expectedDimensions: TARGET_DIM, model: EMBEDDING_MODEL }, 'Generating batch embeddings');
 
     const response = await ai.models.embedContent({
       model: EMBEDDING_MODEL,
@@ -112,11 +113,11 @@ const generateEmbeddingsBatch = async (texts) => {
       return e.values;
     });
 
-    console.log(`Batch embeddings generated thành công (${embeddings.length} items)`);
+    logger.info({ itemCount: embeddings.length }, 'Batch embeddings generated successfully');
 
     return embeddings;
   } catch (error) {
-    console.error('Lỗi khi tạo batch embeddings:', error.message);
+    logger.error({ err: { message: error.message } }, 'Batch embedding generation failed');
     throw error;
   }
 };
@@ -145,25 +146,25 @@ const calculateSimilarity = (vectorA, vectorB) => {
 
     return similarity;
   } catch (error) {
-    console.error('Lỗi khi tính similarity:', error.message);
+    logger.error({ err: { message: error.message } }, 'Similarity calculation failed');
     throw error;
   }
 };
 
 const testOpenAIConnection = async () => {
   try {
-    console.log('Testing Gemini API connection...');
+    logger.info('Testing Gemini API connection');
 
     const testEmbedding = await generateEmbedding('test connection');
 
     if (testEmbedding && testEmbedding.length === TARGET_DIM) {
-      console.log('Gemini API connection thành công');
+      logger.info('Gemini API connection successful');
       return true;
     } else {
       throw new Error('Test embedding không hợp lệ');
     }
   } catch (error) {
-    console.error('Gemini API connection failed:', error.message);
+    logger.error({ err: { message: error.message } }, 'Gemini API connection failed');
     return false;
   }
 };

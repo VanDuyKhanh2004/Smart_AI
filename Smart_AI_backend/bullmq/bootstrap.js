@@ -31,9 +31,22 @@ const startBullMQ = async () => {
   const emailWorker = createWorker('emailQueue', processJob, { concurrency: emailConcurrency });
   workerRegistry.register('emailQueue', emailWorker);
 
+  const embeddingConcurrency = parseInt(process.env.EMBEDDING_QUEUE_CONCURRENCY, 10) || 2;
+  const embeddingLockDuration = parseInt(process.env.EMBEDDING_WORKER_LOCK_DURATION, 10) || 60000;
+  const embeddingQueue = createQueue('embeddingQueue');
+  queueRegistry.register('embeddingQueue', embeddingQueue);
+
+  const { processEmbeddingJob } = require('../jobs/embeddingJobs');
+  const embeddingWorker = createWorker('embeddingQueue', processEmbeddingJob, {
+    concurrency: embeddingConcurrency,
+    lockDuration: embeddingLockDuration,
+  });
+  workerRegistry.register('embeddingQueue', embeddingWorker);
+
   started = true;
   logger.info('BullMQ system queue and worker initialized');
   logger.info({ concurrency: emailConcurrency }, 'BullMQ email queue and worker initialized');
+  logger.info({ concurrency: embeddingConcurrency, lockDuration: embeddingLockDuration }, 'BullMQ embedding queue and worker initialized');
 };
 
 const stopBullMQ = async () => {
@@ -50,6 +63,8 @@ const getBullMQHealth = () => {
     initialized: started && queueRegistry.isInitialized(),
     emailQueueEnabled: process.env.EMAIL_QUEUE_ENABLED !== 'false',
     emailQueueInitialized: started && queueRegistry.get('emailQueue') != null,
+    embeddingQueueEnabled: process.env.EMBEDDING_QUEUE_ENABLED !== 'false',
+    embeddingQueueInitialized: started && queueRegistry.get('embeddingQueue') != null,
   };
 };
 

@@ -29,6 +29,7 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
       {
         $project: {
           embedding_vector: 0,
+          embeddingError: 0,
           score: { $meta: 'vectorSearchScore' },
         },
       },

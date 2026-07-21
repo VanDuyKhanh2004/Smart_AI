@@ -401,6 +401,7 @@ describe('Email queue and worker registration in bootstrap', () => {
     jest.resetModules();
     jest.clearAllMocks();
     process.env.REDIS_URL = 'redis://localhost:6379';
+    process.env.GEMINI_API_KEY = 'test-key';
   });
 
   it('registers emailQueue and emailWorker in bootstrap', async () => {
