@@ -72,7 +72,7 @@ const createOrder = async (req, res) => {
     for (const item of cart.items) {
       const product = item.product;
       
-      if (!product) {
+      if (!product || !product.isActive) {
         await session.abortTransaction();
         return res.status(400).json({
           success: false,
