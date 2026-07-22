@@ -14,6 +14,17 @@ jest.mock('../services/cacheService', () => ({
   invalidatePattern: mockCacheInvalidatePattern,
 }));
 
+jest.mock('pino', () => {
+  const mockInstance = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    child: jest.fn(() => mockInstance),
+  };
+  return jest.fn(() => mockInstance);
+});
+
 const mockSession = {
   startTransaction: jest.fn(),
   commitTransaction: jest.fn().mockResolvedValue(),
@@ -52,7 +63,13 @@ const mockCartSave = jest.fn().mockResolvedValue();
 
 jest.mock('../models/Cart', () => {
   const MockCart = {
-    findOne: jest.fn(),
+    findOne: jest.fn().mockReturnValue({
+      populate: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
+      session: jest.fn().mockResolvedValue(null),
+      catch: jest.fn().mockResolvedValue(null),
+    }),
   };
   return MockCart;
 });
@@ -75,12 +92,41 @@ jest.mock('../models/Promotion', () => {
   return MockPromotion;
 });
 
+jest.mock('../utils/checkoutFingerprint', () => ({
+  computeRequestFingerprint: jest.fn().mockReturnValue('request-fingerprint-hash'),
+  computeCheckoutFingerprint: jest.fn().mockReturnValue('checkout-fingerprint-hash'),
+}));
+
+const mockIdempotencySave = jest.fn().mockResolvedValue();
+const mockIdempotencyFindByIdAndUpdate = jest.fn().mockResolvedValue({});
+const mockIdempotencyFindOneAndUpdate = jest.fn().mockResolvedValue({ _id: 'idempotency-123', status: 'processing', attemptId: 'mock-attempt' });
+
+jest.mock('../models/IdempotencyRecord', () => {
+  const MockIdempotencyRecord = jest.fn().mockImplementation((data) => ({
+    ...data,
+    _id: 'idempotency-123',
+    save: mockIdempotencySave,
+  }));
+  MockIdempotencyRecord.findOne = jest.fn().mockResolvedValue(null);
+  MockIdempotencyRecord.create = jest.fn().mockImplementation((data) =>
+    Promise.resolve({ ...data, _id: 'idempotency-123', save: mockIdempotencySave })
+  );
+  MockIdempotencyRecord.findOneAndUpdate = mockIdempotencyFindOneAndUpdate;
+  MockIdempotencyRecord.findByIdAndUpdate = mockIdempotencyFindByIdAndUpdate;
+  MockIdempotencyRecord.ttlMs = jest.fn(() => 168 * 60 * 60 * 1000);
+  MockIdempotencyRecord.processingTimeoutMs = jest.fn(() => 30000);
+  return MockIdempotencyRecord;
+});
+
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const Promotion = require('../models/Promotion');
 const cache = require('../services/cacheService');
+const IdempotencyRecord = require('../models/IdempotencyRecord');
+const { computeRequestFingerprint, computeCheckoutFingerprint } = require('../utils/checkoutFingerprint');
+const logger = require('../utils/logger');
 const {
   createOrder,
   cancelOrder,
@@ -92,9 +138,10 @@ const {
 } = require('../controllers/orderController');
 
 const mockJson = jest.fn();
-const mockStatus = jest.fn().mockReturnValue({ json: mockJson });
+const mockSet = jest.fn().mockReturnValue({ json: mockJson });
+const mockStatus = jest.fn().mockReturnValue({ json: mockJson, set: mockSet });
 function mockRes() {
-  return { status: mockStatus, json: mockJson };
+  return { status: mockStatus, json: mockJson, set: mockSet };
 }
 
 function defaultCartDoc() {
@@ -227,7 +274,10 @@ function defaultOrderDoc(overrides = {}) {
 function setupCartFindOne(cartDoc) {
   Cart.findOne.mockReturnValue({
     populate: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockReturnThis(),
     session: jest.fn().mockResolvedValue(cartDoc),
+    catch: jest.fn().mockResolvedValue(null),
   });
 }
 
@@ -255,6 +305,26 @@ function setupOrderFindByIdForCreate(populatedOrder) {
   });
 }
 
+function defaultIdempotencyRecord(overrides = {}) {
+  return {
+    _id: 'idempotency-123',
+    user: 'user-123',
+    idempotencyKey: '11111111-1111-4111-8111-111111111111',
+    requestFingerprint: 'request-fingerprint-hash',
+    status: 'processing',
+    attemptId: 'test-attempt-id',
+    processingExpiresAt: new Date(Date.now() + 30000),
+    errorCode: null,
+    order: null,
+    responseStatus: null,
+    responseOrderNumber: null,
+    errorMessage: null,
+    expiresAt: new Date(Date.now() + IdempotencyRecord.ttlMs()),
+    save: mockIdempotencySave,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockSession.startTransaction.mockReset();
@@ -269,6 +339,19 @@ beforeEach(() => {
   mockOrderSave.mockResolvedValue();
   mockOrderAddStatusHistory.mockReset();
   mockProductFindByIdAndUpdate.mockResolvedValue({});
+  mockSet.mockReturnValue({ json: mockJson });
+  mockIdempotencySave.mockResolvedValue();
+  mockIdempotencyFindByIdAndUpdate.mockResolvedValue({});
+  mockIdempotencyFindOneAndUpdate.mockReset();
+  mockIdempotencyFindOneAndUpdate.mockResolvedValue({ _id: 'idempotency-123', status: 'processing', attemptId: 'mock-attempt' });
+  IdempotencyRecord.findOne.mockResolvedValue(null);
+  IdempotencyRecord.create.mockImplementation((data) =>
+    Promise.resolve({ ...data, _id: 'idempotency-123', save: mockIdempotencySave })
+  );
+  IdempotencyRecord.ttlMs.mockReturnValue(168 * 60 * 60 * 1000);
+  IdempotencyRecord.processingTimeoutMs.mockReturnValue(30000);
+  computeRequestFingerprint.mockReturnValue('request-fingerprint-hash');
+  computeCheckoutFingerprint.mockReturnValue('checkout-fingerprint-hash');
 });
 
 describe('createOrder', () => {
@@ -282,16 +365,446 @@ describe('createOrder', () => {
   };
 
   function makeReq(overrides = {}) {
+    const { body: bodyOverride, ...rest } = overrides;
     return {
-      body: {
-        shippingAddress: validShippingAddress,
-        ...overrides.body,
-      },
+      body: { shippingAddress: validShippingAddress, ...bodyOverride },
       user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'user' },
       requestId: 'test-cid',
-      ...overrides,
+      headers: {},
+      ...rest,
     };
   }
+
+  function makeIdempotentReq(overrides = {}) {
+    const { body: bodyOverride, ...rest } = overrides;
+    return makeReq({
+      body: bodyOverride,
+      headers: { 'idempotency-key': '11111111-1111-4111-8111-111111111111' },
+      ...rest,
+    });
+  }
+
+  describe('idempotency', () => {
+    it('first request succeeds and creates processing then completed record', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(IdempotencyRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user: 'user-123',
+          idempotencyKey: '11111111-1111-4111-8111-111111111111',
+          requestFingerprint: 'request-fingerprint-hash',
+          status: 'processing',
+          attemptId: expect.any(String),
+          processingExpiresAt: expect.any(Date),
+          expiresAt: expect.any(Date),
+        })
+      );
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash', checkoutFingerprint: 'checkout-fingerprint-hash' },
+        { $set: expect.objectContaining({ status: 'completed', responseStatus: 201 }) },
+        { session: mockSession }
+      );
+      expect(mockStatus).toHaveBeenCalledWith(201);
+    });
+
+    it('replay returns existing order (200, not 201)', async () => {
+      const completedRecord = defaultIdempotencyRecord({
+        status: 'completed',
+        order: 'order-123',
+        responseOrderNumber: 'ORD-20241209-001',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(200);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({ orderNumber: 'ORD-20241209-001' }),
+        })
+      );
+    });
+
+    it('replay returns Idempotent-Replay header', async () => {
+      const completedRecord = defaultIdempotencyRecord({
+        status: 'completed',
+        order: 'order-123',
+        responseOrderNumber: 'ORD-20241209-001',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockSet).toHaveBeenCalledWith('Idempotent-Replay', 'true');
+    });
+
+    it('replay does not create duplicate order or stock decrement or email', async () => {
+      const completedRecord = defaultIdempotencyRecord({
+        status: 'completed',
+        order: 'order-123',
+        responseOrderNumber: 'ORD-20241209-001',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(Order).not.toHaveBeenCalled();
+      expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
+      expect(mockSession.commitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('completed replay with mismatched requestFingerprint returns 422', async () => {
+      const completedRecord = defaultIdempotencyRecord({
+        status: 'completed',
+        requestFingerprint: 'different-fingerprint',
+        order: 'order-123',
+        responseOrderNumber: 'ORD-20241209-001',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(422);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_KEY_MISMATCH' })
+      );
+    });
+
+    it('completed replay with matching requestFingerprint returns 200', async () => {
+      const completedRecord = defaultIdempotencyRecord({
+        status: 'completed',
+        order: 'order-123',
+        responseOrderNumber: 'ORD-20241209-001',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(200);
+      expect(mockSet).toHaveBeenCalledWith('Idempotent-Replay', 'true');
+    });
+
+    it('replay returns 410 when original order is gone', async () => {
+      const completedRecord = defaultIdempotencyRecord({
+        status: 'completed',
+        order: 'order-123',
+        responseOrderNumber: 'ORD-20241209-001',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+      Order.findById.mockReturnValue({
+        populate: jest.fn().mockResolvedValue(null),
+        session: jest.fn().mockResolvedValue(null),
+      });
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(410);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, code: 'IDEMPOTENT_ORDER_GONE' })
+      );
+    });
+
+    it('processing record returns 409 with Retry-After', async () => {
+      const processingRecord = defaultIdempotencyRecord({ status: 'processing' });
+      IdempotencyRecord.findOne.mockResolvedValue(processingRecord);
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(409);
+      expect(mockSet).toHaveBeenCalledWith('Retry-After', '5');
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_IN_PROGRESS' })
+      );
+    });
+
+    it('retry after failed (matching fingerprint) creates new order', async () => {
+      const failedRecord = defaultIdempotencyRecord({
+        status: 'failed',
+        errorMessage: 'Previous failure',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(failedRecord);
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenNthCalledWith(
+        1,
+        { _id: 'idempotency-123', status: 'failed', requestFingerprint: 'request-fingerprint-hash' },
+        { $set: expect.objectContaining({ status: 'processing', attemptId: expect.any(String), processingExpiresAt: expect.any(Date), checkoutFingerprint: null }) },
+        { new: true }
+      );
+      expect(mockStatus).toHaveBeenCalledWith(201);
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenLastCalledWith(
+        { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash', checkoutFingerprint: 'checkout-fingerprint-hash' },
+        { $set: expect.objectContaining({ status: 'completed' }) },
+        { session: mockSession }
+      );
+    });
+
+    it('fingerprint mismatch on failed record returns 422', async () => {
+      const failedRecord = defaultIdempotencyRecord({
+        status: 'failed',
+        requestFingerprint: 'other-fingerprint',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(failedRecord);
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(422);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_KEY_MISMATCH' })
+      );
+    });
+
+    it('missing idempotency key works during soft rollout', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeReq(), mockRes());
+
+      expect(logger.warn).toHaveBeenCalledWith('Missing Idempotency-Key header');
+      expect(IdempotencyRecord.findOne).not.toHaveBeenCalled();
+      expect(mockStatus).toHaveBeenCalledWith(201);
+    });
+
+    it('invalid UUID format returns 400', async () => {
+      const req = makeIdempotentReq({ headers: { 'idempotency-key': 'not-a-uuid' } });
+
+      await createOrder(req, mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(400);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, code: 'INVALID_IDEMPOTENCY_KEY' })
+      );
+    });
+
+    it('duplicate create race condition returns 409', async () => {
+      IdempotencyRecord.findOne.mockResolvedValue(null);
+      IdempotencyRecord.create.mockRejectedValue({ code: 11000, message: 'Duplicate key' });
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(409);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_IN_PROGRESS' })
+      );
+    });
+
+    it('creates processing record on failed retry before transaction', async () => {
+      const failedRecord = defaultIdempotencyRecord({
+        status: 'failed',
+        errorMessage: 'Previous failure',
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(failedRecord);
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'idempotency-123', status: 'failed', requestFingerprint: 'request-fingerprint-hash' },
+        { $set: expect.objectContaining({
+          status: 'processing',
+          attemptId: expect.any(String),
+          processingExpiresAt: expect.any(Date),
+          checkoutFingerprint: null,
+          errorCode: null,
+          errorMessage: null,
+          order: null,
+          responseStatus: null,
+          responseOrderNumber: null,
+        })},
+        { new: true }
+      );
+    });
+
+    it('updates to failed on validation error', async () => {
+      IdempotencyRecord.findOne.mockResolvedValue(null);
+      const req = makeIdempotentReq({ body: { shippingAddress: null } });
+
+      await createOrder(req, mockRes());
+
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash' },
+        { $set: expect.objectContaining({ status: 'failed', errorCode: 'INVALID_SHIPPING_ADDRESS' }) }
+      );
+    });
+
+    it('updates to failed on server error', async () => {
+      IdempotencyRecord.findOne.mockResolvedValue(null);
+      setupCartFindOne(defaultCartDoc());
+      mockOrderSave.mockRejectedValue(new Error('DB error'));
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash' },
+        { $set: expect.objectContaining({ status: 'failed', errorCode: 'SERVER_ERROR' }) }
+      );
+    });
+
+    it('stock decremented once on first request', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it('email queued once on first request', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockEnqueueOrderConfirmationEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('promotion incremented once on first request', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+      Promotion.findOne.mockReturnValue({
+        session: jest.fn().mockResolvedValue(defaultPromotionDoc()),
+      });
+
+      await createOrder(makeIdempotentReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST10' } }), mockRes());
+
+      expect(Promotion.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('processingExpiresAt and attemptId set on create', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(IdempotencyRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attemptId: expect.any(String),
+          processingExpiresAt: expect.any(Date),
+        })
+      );
+    });
+
+    it('stale processing record is reclaimed', async () => {
+      const staleRecord = defaultIdempotencyRecord({
+        status: 'processing',
+        processingExpiresAt: new Date(Date.now() - 1000),
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(staleRecord);
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenNthCalledWith(
+        1,
+        { _id: 'idempotency-123', status: 'processing', requestFingerprint: 'request-fingerprint-hash', $or: [{ processingExpiresAt: null }, { processingExpiresAt: { $lte: expect.any(Date) } }] },
+        { $set: expect.objectContaining({ attemptId: expect.any(String), processingExpiresAt: expect.any(Date), checkoutFingerprint: null }) },
+        { new: true }
+      );
+      expect(mockIdempotencyFindOneAndUpdate).toHaveBeenLastCalledWith(
+        { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash', checkoutFingerprint: 'checkout-fingerprint-hash' },
+        { $set: expect.objectContaining({ status: 'completed' }) },
+        { session: mockSession }
+      );
+      expect(mockStatus).toHaveBeenCalledWith(201);
+    });
+
+    it('non-stale processing record returns 409 (not reclaimed)', async () => {
+      const freshRecord = defaultIdempotencyRecord({
+        status: 'processing',
+        processingExpiresAt: new Date(Date.now() + 60000),
+      });
+      IdempotencyRecord.findOne.mockResolvedValue(freshRecord);
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockIdempotencyFindOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockStatus).toHaveBeenCalledWith(409);
+    });
+
+    it('ttlMs uses CHECKOUT_IDEMPOTENCY_TTL_HOURS env var default', async () => {
+      const orig = process.env.CHECKOUT_IDEMPOTENCY_TTL_HOURS;
+      delete process.env.CHECKOUT_IDEMPOTENCY_TTL_HOURS;
+
+      const ttl = IdempotencyRecord.ttlMs();
+
+      expect(ttl).toBe(168 * 60 * 60 * 1000);
+      process.env.CHECKOUT_IDEMPOTENCY_TTL_HOURS = orig;
+    });
+
+    it('processingTimeoutMs uses CHECKOUT_IDEMPOTENCY_PROCESSING_TIMEOUT_MS env var default', async () => {
+      const orig = process.env.CHECKOUT_IDEMPOTENCY_PROCESSING_TIMEOUT_MS;
+      delete process.env.CHECKOUT_IDEMPOTENCY_PROCESSING_TIMEOUT_MS;
+
+      const timeout = IdempotencyRecord.processingTimeoutMs();
+
+      expect(timeout).toBe(30000);
+      process.env.CHECKOUT_IDEMPOTENCY_PROCESSING_TIMEOUT_MS = orig;
+    });
+
+    it('atomic completion inside transaction via findOneAndUpdate with session', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      const call = mockIdempotencyFindOneAndUpdate.mock.calls.find(
+        ([filter]) => filter?.status === 'completed' || (filter && filter.status === 'completed')
+      );
+      // The completion call should have session
+      const completionCalls = mockIdempotencyFindOneAndUpdate.mock.calls.filter(
+        ([, update]) => update?.$set?.status === 'completed'
+      );
+      expect(completionCalls.length).toBe(1);
+      expect(completionCalls[0][2]).toEqual(expect.objectContaining({ session: mockSession }));
+    });
+
+    it('fingerprint binding inside transaction sets checkoutFingerprint', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      const bindingCalls = mockIdempotencyFindOneAndUpdate.mock.calls.filter(
+        ([, update]) => update?.$set?.checkoutFingerprint !== undefined
+      );
+      expect(bindingCalls.length).toBe(1);
+      expect(bindingCalls[0][0]).toEqual(
+        expect.objectContaining({ status: 'processing', attemptId: expect.any(String), requestFingerprint: 'request-fingerprint-hash' })
+      );
+      expect(bindingCalls[0][1]).toEqual({
+        $set: { checkoutFingerprint: 'checkout-fingerprint-hash' },
+      });
+      expect(bindingCalls[0][2]).toEqual(expect.objectContaining({ session: mockSession }));
+    });
+
+    it('fingerprint binding failure aborts transaction', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+      // Make the binding step fail by returning null for findOneAndUpdate
+      mockIdempotencyFindOneAndUpdate.mockResolvedValue(null);
+
+      await createOrder(makeIdempotentReq(), mockRes());
+
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(mockSession.commitTransaction).not.toHaveBeenCalled();
+      expect(mockStatus).toHaveBeenCalledWith(500);
+    });
+  });
 
   describe('transaction lifecycle', () => {
     it('starts a MongoDB session and transaction', async () => {

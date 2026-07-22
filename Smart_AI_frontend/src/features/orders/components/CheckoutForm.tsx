@@ -16,9 +16,10 @@ interface FormErrors {
 interface CheckoutFormProps {
   onSubmit: (shippingAddress: ShippingAddress) => void;
   isLoading?: boolean;
+  onAddressChange?: (address: ShippingAddress) => void;
 }
 
-const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false }) => {
+const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false, onAddressChange }) => {
   const [formData, setFormData] = useState<ShippingAddress>({
     fullName: '',
     phone: '',
@@ -63,7 +64,12 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
   };
 
   const handleChange = (field: keyof ShippingAddress) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({ ...prev, [field]: e.target.value }));
+    const value = e.target.value;
+    setFormData((prev) => {
+      const next = { ...prev, [field]: value };
+      onAddressChange?.(next);
+      return next;
+    });
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
