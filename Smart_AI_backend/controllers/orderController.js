@@ -1,8 +1,12 @@
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const Promotion = require('../models/Promotion');
+const IdempotencyRecord = require('../models/IdempotencyRecord');
+const { computeRequestFingerprint, computeCheckoutFingerprint } = require('../utils/checkoutFingerprint');
+const logger = require('../utils/logger');
 const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
 
 // Default shipping fee
@@ -13,8 +17,192 @@ const SHIPPING_FEE = 30000;
  * Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 5.1 (promotion usage tracking)
  */
 const createOrder = async (req, res) => {
+  const idempotencyKey = req.headers['idempotency-key'];
+  let idempotencyRecord = null;
+  const attemptId = crypto.randomUUID();
+
+  // --- Idempotency claim (before session, no cart read) ---
+  let requestFingerprint = null;
+  if (idempotencyKey) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Idempotency-Key không hợp lệ',
+        code: 'INVALID_IDEMPOTENCY_KEY'
+      });
+    }
+
+    // Compute requestFingerprint from request-owned inputs only (no cart read)
+    requestFingerprint = computeRequestFingerprint(
+      req.user._id,
+      req.body.shippingAddress,
+      req.body.promotionCode
+    );
+
+    const existingRecord = await IdempotencyRecord.findOne({
+      user: req.user._id,
+      idempotencyKey,
+    });
+
+    if (existingRecord) {
+      // All paths: validate requestFingerprint first
+      if (existingRecord.requestFingerprint !== requestFingerprint) {
+        return res.status(422).json({
+          success: false,
+          message: 'Idempotency-Key đã được sử dụng với thông tin khác',
+          code: 'IDEMPOTENCY_KEY_MISMATCH'
+        });
+      }
+
+      if (existingRecord.status === 'completed') {
+        const order = await Order.findById(existingRecord.order)
+          .populate('user', 'name email');
+        if (order) {
+          res.set('Idempotent-Replay', 'true');
+          return res.status(200).json({
+            success: true,
+            message: 'Đặt hàng thành công',
+            data: order,
+          });
+        }
+        return res.status(410).json({
+          success: false,
+          message: 'Đơn hàng gốc của yêu cầu idempotent không còn tồn tại',
+          code: 'IDEMPOTENT_ORDER_GONE'
+        });
+      }
+
+      if (existingRecord.status === 'failed') {
+        // Atomic reclaim: only one retry wins
+        const reclaimed = await IdempotencyRecord.findOneAndUpdate(
+          { _id: existingRecord._id, status: 'failed', requestFingerprint },
+          {
+            $set: {
+              status: 'processing',
+              attemptId,
+              processingExpiresAt: new Date(Date.now() + IdempotencyRecord.processingTimeoutMs()),
+              requestFingerprint,
+              checkoutFingerprint: null,
+              errorCode: null,
+              errorMessage: null,
+              order: null,
+              responseStatus: null,
+              responseOrderNumber: null,
+              expiresAt: new Date(Date.now() + IdempotencyRecord.ttlMs()),
+            },
+          },
+          { new: true }
+        );
+        if (!reclaimed) {
+          return res.status(409)
+            .set('Retry-After', '5')
+            .json({
+              success: false,
+              message: 'Yêu cầu đang được xử lý',
+              code: 'IDEMPOTENCY_IN_PROGRESS'
+            });
+        }
+        idempotencyRecord = reclaimed;
+      }
+
+      if (existingRecord.status === 'processing') {
+        const isStale = existingRecord.processingExpiresAt && existingRecord.processingExpiresAt <= new Date();
+        if (!isStale) {
+          return res.status(409)
+            .set('Retry-After', '5')
+            .json({
+              success: false,
+              message: 'Yêu cầu đang được xử lý',
+              code: 'IDEMPOTENCY_IN_PROGRESS'
+            });
+        }
+        // Stale processing — attempt atomic reclaim (only one request wins)
+        const reclaimed = await IdempotencyRecord.findOneAndUpdate(
+          {
+            _id: existingRecord._id,
+            status: 'processing',
+            requestFingerprint,
+            $or: [
+              { processingExpiresAt: null },
+              { processingExpiresAt: { $lte: new Date() } },
+            ],
+          },
+          {
+            $set: {
+              attemptId,
+              processingExpiresAt: new Date(Date.now() + IdempotencyRecord.processingTimeoutMs()),
+              requestFingerprint,
+              checkoutFingerprint: null,
+              errorCode: null,
+              errorMessage: null,
+              order: null,
+              responseStatus: null,
+              responseOrderNumber: null,
+            },
+          },
+          { new: true }
+        );
+        if (!reclaimed) {
+          return res.status(409)
+            .set('Retry-After', '5')
+            .json({
+              success: false,
+              message: 'Yêu cầu đang được xử lý',
+              code: 'IDEMPOTENCY_IN_PROGRESS'
+            });
+        }
+        idempotencyRecord = reclaimed;
+      }
+    } else {
+      try {
+        idempotencyRecord = await IdempotencyRecord.create({
+          user: req.user._id,
+          idempotencyKey,
+          requestFingerprint,
+          status: 'processing',
+          attemptId,
+          processingExpiresAt: new Date(Date.now() + IdempotencyRecord.processingTimeoutMs()),
+          expiresAt: new Date(Date.now() + IdempotencyRecord.ttlMs()),
+        });
+      } catch (err) {
+        if (err.code === 11000) {
+          return res.status(409)
+            .set('Retry-After', '5')
+            .json({
+              success: false,
+              message: 'Yêu cầu đang được xử lý',
+              code: 'IDEMPOTENCY_IN_PROGRESS'
+            });
+        }
+        logger.warn({ err }, 'Failed to create idempotency record');
+        idempotencyRecord = null;
+      }
+    }
+  } else {
+    logger.warn('Missing Idempotency-Key header');
+  }
+
+  // --- Session + transaction ---
   const session = await mongoose.startSession();
   session.startTransaction();
+
+  const abort = async (statusCode, body) => {
+    await session.abortTransaction();
+    if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
+      await IdempotencyRecord.findOneAndUpdate(
+        { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+        {
+          $set: {
+            status: 'failed',
+            errorCode: body.code,
+            errorMessage: body.message || body.code,
+            processingExpiresAt: null,
+          },
+        }
+      );
+    }
+    return res.status(statusCode).json(body);
+  };
 
   try {
     const { shippingAddress, promotionCode } = req.body;
@@ -22,8 +210,7 @@ const createOrder = async (req, res) => {
 
     // Validate shipping address
     if (!shippingAddress) {
-      await session.abortTransaction();
-      return res.status(400).json({
+      return await abort(400, {
         success: false,
         message: 'Địa chỉ giao hàng là bắt buộc',
         code: 'INVALID_SHIPPING_ADDRESS'
@@ -33,8 +220,7 @@ const createOrder = async (req, res) => {
     const requiredFields = ['fullName', 'phone', 'address', 'ward', 'district', 'city'];
     for (const field of requiredFields) {
       if (!shippingAddress[field] || !shippingAddress[field].trim()) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: `${field} là bắt buộc`,
           code: 'INVALID_SHIPPING_ADDRESS'
@@ -44,37 +230,54 @@ const createOrder = async (req, res) => {
 
     // Validate phone format
     if (!/^[0-9]{10,11}$/.test(shippingAddress.phone)) {
-      await session.abortTransaction();
-      return res.status(400).json({
+      return await abort(400, {
         success: false,
         message: 'Số điện thoại phải có 10-11 chữ số',
         code: 'INVALID_SHIPPING_ADDRESS'
       });
     }
 
-    // Get user's cart
+    // Get user's cart (authoritative read inside transaction)
     const cart = await Cart.findOne({ user: userId })
       .populate('items.product')
       .session(session);
 
-
     if (!cart || !cart.items || cart.items.length === 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
+      return await abort(400, {
         success: false,
         message: 'Giỏ hàng trống',
         code: 'CART_EMPTY'
       });
     }
 
+    // --- Compute checkoutFingerprint ONCE from authoritative cart ---
+    let checkoutFingerprint = null;
+    if (idempotencyRecord && requestFingerprint) {
+      checkoutFingerprint = computeCheckoutFingerprint(
+        requestFingerprint,
+        cart.items
+      );
+      const bound = await IdempotencyRecord.findOneAndUpdate(
+        { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+        { $set: { checkoutFingerprint } },
+        { session }
+      );
+      if (!bound) {
+        return await abort(500, {
+          success: false,
+          message: 'Lỗi server khi tạo đơn hàng',
+          code: 'IDEMPOTENCY_CONFLICT'
+        });
+      }
+    }
+
     // Check stock for all items
     const orderItems = [];
     for (const item of cart.items) {
       const product = item.product;
-      
+
       if (!product || !product.isActive) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: 'Sản phẩm không tồn tại',
           code: 'PRODUCT_NOT_FOUND'
@@ -82,8 +285,7 @@ const createOrder = async (req, res) => {
       }
 
       if (product.inStock < item.quantity) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: `Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`,
           code: 'INSUFFICIENT_STOCK'
@@ -108,24 +310,20 @@ const createOrder = async (req, res) => {
     let discountAmount = 0;
 
     if (promotionCode) {
-      const promotion = await Promotion.findOne({ 
-        code: promotionCode.toUpperCase() 
+      const promotion = await Promotion.findOne({
+        code: promotionCode.toUpperCase()
       }).session(session);
 
-      // Check if code exists
       if (!promotion) {
-        await session.abortTransaction();
-        return res.status(404).json({
+        return await abort(404, {
           success: false,
           message: 'Mã khuyến mãi không hợp lệ',
           code: 'INVALID_PROMOTION'
         });
       }
 
-      // Check if promotion is active
       if (!promotion.isActive) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: 'Mã khuyến mãi không còn hiệu lực',
           code: 'INACTIVE_PROMOTION'
@@ -134,57 +332,45 @@ const createOrder = async (req, res) => {
 
       const now = new Date();
 
-      // Check if promotion has started
       if (promotion.startDate > now) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: 'Mã khuyến mãi chưa có hiệu lực',
           code: 'PROMOTION_NOT_STARTED'
         });
       }
 
-      // Check if promotion has expired
       if (promotion.endDate < now) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: 'Mã khuyến mãi đã hết hạn',
           code: 'EXPIRED_PROMOTION'
         });
       }
 
-      // Check usage limit
       if (promotion.usedCount >= promotion.usageLimit) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: 'Mã khuyến mãi đã hết lượt sử dụng',
           code: 'PROMOTION_USAGE_LIMIT'
         });
       }
 
-      // Check minimum order value
       if (subtotal < promotion.minOrderValue) {
-        await session.abortTransaction();
-        return res.status(400).json({
+        return await abort(400, {
           success: false,
           message: `Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`,
           code: 'MIN_ORDER_NOT_MET'
         });
       }
 
-      // Calculate discount amount
       if (promotion.discountType === 'percentage') {
         discountAmount = Math.round(subtotal * promotion.discountValue / 100);
-        // Apply max discount cap if set
         if (promotion.maxDiscountAmount && discountAmount > promotion.maxDiscountAmount) {
           discountAmount = promotion.maxDiscountAmount;
         }
       } else {
-        // Fixed discount
         discountAmount = promotion.discountValue;
-        // Cap at subtotal (free order)
         if (discountAmount > subtotal) {
           discountAmount = subtotal;
         }
@@ -216,7 +402,6 @@ const createOrder = async (req, res) => {
       status: 'pending'
     };
 
-    // Add promotion data if applied
     if (promotionData) {
       orderData.promotion = promotionData;
     }
@@ -225,7 +410,6 @@ const createOrder = async (req, res) => {
 
     await order.save({ session });
 
-    // Increment promotion usedCount if promotion was applied (Requirement 5.1)
     if (promotionCode) {
       await Promotion.findOneAndUpdate(
         { code: promotionCode.toUpperCase() },
@@ -234,7 +418,6 @@ const createOrder = async (req, res) => {
       );
     }
 
-    // Decrease stock for all products
     for (const item of cart.items) {
       await Product.findByIdAndUpdate(
         item.product._id,
@@ -247,13 +430,43 @@ const createOrder = async (req, res) => {
     cart.items = [];
     await cart.save({ session });
 
+    // --- Atomic completion INSIDE transaction (reuses pre-computed checkoutFingerprint) ---
+    if (idempotencyRecord && requestFingerprint) {
+      const completedRecord = await IdempotencyRecord.findOneAndUpdate(
+        {
+          _id: idempotencyRecord._id,
+          attemptId,
+          status: 'processing',
+          requestFingerprint,
+          checkoutFingerprint,
+        },
+        {
+          $set: {
+            status: 'completed',
+            order: order._id,
+            responseStatus: 201,
+            responseOrderNumber: orderNumber,
+            processingExpiresAt: null,
+            errorCode: null,
+            errorMessage: null,
+          },
+        },
+        { session }
+      );
+      if (!completedRecord) {
+        const err = new Error('Idempotency completion conflict — attempt lost claim');
+        err.code = 'IDEMPOTENCY_CONFLICT';
+        throw err;
+      }
+    }
+
     await session.commitTransaction();
 
     // Populate user info for response
     const populatedOrder = await Order.findById(order._id)
       .populate('user', 'name email');
 
-    // Send order confirmation email
+    // Send order confirmation email (only after successful commit)
     const orderUser = { name: populatedOrder.user.name, email: populatedOrder.user.email, _id: req.user?._id };
     enqueueOrderConfirmationEmail(orderUser, populatedOrder, req.requestId);
 
@@ -264,6 +477,19 @@ const createOrder = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
+    if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
+      await IdempotencyRecord.findOneAndUpdate(
+        { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+        {
+          $set: {
+            status: 'failed',
+            errorCode: 'SERVER_ERROR',
+            errorMessage: error.message,
+            processingExpiresAt: null,
+          },
+        }
+      );
+    }
     res.status(500).json({
       success: false,
       message: 'Lỗi server khi tạo đơn hàng',

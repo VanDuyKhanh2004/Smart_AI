@@ -10,6 +10,7 @@ import CheckoutForm from '../components/CheckoutForm';
 import OrderSummary from '../components/OrderSummary';
 import { AddressSelector } from '@/features/addresses';
 import { PromotionInput } from '@/features/checkout';
+import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import type { ShippingAddress } from '@/types/order.type';
 import type { Address, CreateAddressRequest } from '@/types/address.type';
 import type { Promotion } from '@/types/promotion.type';
@@ -33,9 +34,32 @@ const CheckoutPage: React.FC = () => {
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(true);
   const [useManualEntry, setUseManualEntry] = useState(false);
-  
+  const [manualAddress, setManualAddress] = useState<ShippingAddress | null>(null);
+
+  // Shipping address derived from either saved address or manual entry (for key rotation)
+  const shippingAddress: ShippingAddress | null = useMemo(() => {
+    if (selectedAddress) {
+      return {
+        fullName: selectedAddress.fullName,
+        phone: selectedAddress.phone,
+        address: selectedAddress.address,
+        ward: selectedAddress.ward,
+        district: selectedAddress.district,
+        city: selectedAddress.city,
+      };
+    }
+    return manualAddress;
+  }, [selectedAddress, manualAddress]);
+
   // Promotion state
   const [appliedPromotion, setAppliedPromotion] = useState<AppliedPromotion | null>(null);
+
+  // Idempotency key — rotates on cart/address/promotion change, or after success
+  const { key: idempotencyKey, rotateKey } = useIdempotencyKey(
+    items,
+    shippingAddress,
+    appliedPromotion?.promotion.code,
+  );
 
   // Calculate subtotal for promotion validation
   const subtotal = useMemo(() => {
@@ -93,6 +117,7 @@ const CheckoutPage: React.FC = () => {
   // Handle address selection (Requirements 6.3)
   const handleSelectAddress = useCallback((address: Address | null) => {
     setSelectedAddress(address);
+    setManualAddress(null);
     setUseManualEntry(false);
   }, []);
 
@@ -120,10 +145,11 @@ const CheckoutPage: React.FC = () => {
       const response = await orderService.createOrder({ 
         shippingAddress,
         promotionCode: appliedPromotion?.promotion.code,
-      });
+      }, idempotencyKey);
       
       // Clear cart after successful order
       await clearCart();
+      rotateKey();
       
       // Navigate to order confirmation/history
       navigate(`/orders`, { 
@@ -162,10 +188,11 @@ const CheckoutPage: React.FC = () => {
       const response = await orderService.createOrder({ 
         shippingAddress,
         promotionCode: appliedPromotion?.promotion.code,
-      });
+      }, idempotencyKey);
       
       // Clear cart after successful order
       await clearCart();
+      rotateKey();
       
       // Navigate to order confirmation/history
       navigate(`/orders`, { 
@@ -193,10 +220,11 @@ const CheckoutPage: React.FC = () => {
       const response = await orderService.createOrder({ 
         shippingAddress,
         promotionCode: appliedPromotion?.promotion.code,
-      });
+      }, idempotencyKey);
       
       // Clear cart after successful order
       await clearCart();
+      rotateKey();
       
       // Navigate to order confirmation/history
       navigate(`/orders`, { 
@@ -301,7 +329,11 @@ const CheckoutPage: React.FC = () => {
             </div>
           ) : (
             /* CheckoutForm for users without saved addresses or manual entry */
-            <CheckoutForm onSubmit={handleManualSubmit} isLoading={isLoading} />
+            <CheckoutForm
+              onSubmit={handleManualSubmit}
+              isLoading={isLoading}
+              onAddressChange={setManualAddress}
+            />
           )}
         </div>
 

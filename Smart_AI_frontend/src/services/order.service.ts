@@ -13,8 +13,12 @@ export const orderService = {
   /**
    * Create a new order from cart
    */
-  createOrder: async (data: CreateOrderRequest): Promise<OrderResponse> => {
-    const response = await apiClient.post<OrderResponse>('/orders', data);
+  createOrder: async (data: CreateOrderRequest, idempotencyKey?: string): Promise<OrderResponse> => {
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) {
+      headers['Idempotency-Key'] = idempotencyKey;
+    }
+    const response = await apiClient.post<OrderResponse>('/orders', data, { headers });
     return response.data;
   },
 
