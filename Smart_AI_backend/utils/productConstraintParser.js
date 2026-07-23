@@ -204,9 +204,10 @@ function parseBrands(raw) {
     }
   }
 
+  const uniqueExcluded = [...new Set(excludedBrands)];
   return {
     brands: brands.length > 0 ? brands : null,
-    excludedBrands: excludedBrands.length > 0 ? excludedBrands : null,
+    excludedBrands: uniqueExcluded.length > 0 ? uniqueExcluded : null,
     cleanedQuery: working.replace(/\s+/g, ' ').trim(),
   };
 }
@@ -282,6 +283,19 @@ function parseRAM(raw) {
     ramGB.push(parseInt(m[2], 10));
   }
 
+  // Handle "RAM từ X GB đến Y GB" range
+  const rangeRe = /ram\s*(?:từ|ít\s*nhất)\s*(\d+)\s*gb\s*đến\s*(\d+)\s*gb/gi;
+  while ((m = rangeRe.exec(norm)) !== null) {
+    minRamGB = parseInt(m[1], 10);
+    maxRamGB = parseInt(m[2], 10);
+  }
+
+  // If alternatives array is populated, it takes precedence — clear min/max
+  if (ramGB.length > 0) {
+    minRamGB = null;
+    maxRamGB = null;
+  }
+
   // Remove RAM phrases
   working = working.replace(/ram\s*(\d+)\s*(?:gb)?\s*(?:hoặc|hay|\/)\s*(\d+)\s*gb/gi, '');
   working = working.replace(/ram\s*(?:ít\s*nhất|tối\s*thiểu|từ|trên|tối\s*đa|không\s*quá)?\s*(\d+)\s*gb/gi, '');
@@ -315,7 +329,9 @@ function parseStorage(raw) {
     if (val < 16) continue; // storage is usually >= 16GB, RAM is often < 16GB
 
     const prefix = norm.slice(Math.max(0, m.index - 15), m.index).toLowerCase();
-    if (/ít\s*nhất|tối\s*thiểu|từ|trên/.test(prefix)) {
+    if (/đến/.test(prefix)) {
+      maxStorageGB = val;
+    } else if (/ít\s*nhất|tối\s*thiểu|từ|trên/.test(prefix)) {
       minStorageGB = val;
     } else if (/tối đa|tối\s*đa|không\s*quá|trở\s*xuống/.test(prefix)) {
       maxStorageGB = val;
@@ -340,6 +356,22 @@ function parseStorage(raw) {
       storageGB.push(parseInt(m[1], 10));
       storageGB.push(parseInt(m[2], 10));
     }
+  }
+
+  // Handle "từ X đến Y GB" range (XB may be without GB suffix)
+  const rangeRe = /từ\s*(\d+)\s*(?:gb)?\s*đến\s*(\d+)\s*gb/gi;
+  while ((m = rangeRe.exec(norm)) !== null) {
+    const before = norm.slice(Math.max(0, m.index - 5), m.index);
+    if (!/\bram\b/i.test(before)) {
+      minStorageGB = parseInt(m[1], 10);
+      maxStorageGB = parseInt(m[2], 10);
+    }
+  }
+
+  // If alternatives array is populated, it takes precedence — clear min/max
+  if (storageGB.length > 0) {
+    minStorageGB = null;
+    maxStorageGB = null;
   }
 
   // Remove storage phrases from working

@@ -57,10 +57,9 @@ function matchesRAM(product, filters) {
   const productRam = parseGB(product.specs?.memory?.ram);
   if (productRam == null) return false;
 
-  // Exact alternatives
+  // Allowed-values array takes precedence as exact set
   if (Array.isArray(ramGB) && ramGB.length > 0) {
-    // If alternatives specified, at least one must match
-    if (!ramGB.includes(productRam)) return false;
+    return ramGB.includes(productRam);
   }
 
   // Min / max
@@ -79,8 +78,9 @@ function matchesStorage(product, filters) {
   const productStorage = parseGB(product.specs?.memory?.storage);
   if (productStorage == null) return false;
 
+  // Allowed-values array takes precedence as exact set
   if (Array.isArray(storageGB) && storageGB.length > 0) {
-    if (!storageGB.includes(productStorage)) return false;
+    return storageGB.includes(productStorage);
   }
 
   if (minStorageGB != null && productStorage < minStorageGB) return false;

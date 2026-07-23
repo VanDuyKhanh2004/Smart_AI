@@ -13,7 +13,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "jest --forceExit --detectOpenHandles",
-    "test:watch": "jest --watch --forceExit --detectOpenHandles"
+    "test:watch": "jest --watch --forceExit --detectOpenHandles",
+    "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js"
   },
   "dependencies": {
     "@getbrevo/brevo": "^6.0.2",

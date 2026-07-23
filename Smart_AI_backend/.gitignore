@@ -13,3 +13,5 @@ coverage/
 uploads/
 
 npm-debug.log*
+
+evaluation-results/

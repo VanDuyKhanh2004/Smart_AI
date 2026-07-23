@@ -90,6 +90,41 @@ describe('parseProductConstraints — RAM', () => {
     expect(r.filters.ramGB).toBeNull();
     expect(r.filters.minRamGB).toBeNull();
   });
+
+  it('RAM 8GB does not populate alternatives array', () => {
+    const r = parseProductConstraints('RAM 8GB');
+    expect(r.filters.ramGB).toBeNull();
+    expect(r.filters.minRamGB).toBe(8);
+    expect(r.filters.maxRamGB).toBe(8);
+  });
+
+  it('RAM 8 hoặc 12GB accepts exactly 8 and 12, no stale min/max', () => {
+    const r = parseProductConstraints('RAM 8 hoặc 12GB');
+    expect(r.filters.ramGB).toEqual(expect.arrayContaining([8, 12]));
+    expect(r.filters.minRamGB).toBeNull();
+    expect(r.filters.maxRamGB).toBeNull();
+  });
+
+  it('RAM ít nhất 8GB does not set max or array', () => {
+    const r = parseProductConstraints('RAM ít nhất 8GB');
+    expect(r.filters.ramGB).toBeNull();
+    expect(r.filters.minRamGB).toBe(8);
+    expect(r.filters.maxRamGB).toBeNull();
+  });
+
+  it('RAM tối đa 12GB does not set min or array', () => {
+    const r = parseProductConstraints('RAM tối đa 12GB');
+    expect(r.filters.ramGB).toBeNull();
+    expect(r.filters.minRamGB).toBeNull();
+    expect(r.filters.maxRamGB).toBe(12);
+  });
+
+  it('RAM từ 8GB đến 16GB sets both min and max', () => {
+    const r = parseProductConstraints('RAM từ 8GB đến 16GB');
+    expect(r.filters.ramGB).toBeNull();
+    expect(r.filters.minRamGB).toBe(8);
+    expect(r.filters.maxRamGB).toBe(16);
+  });
 });
 
 describe('parseProductConstraints — storage', () => {
@@ -120,6 +155,55 @@ describe('parseProductConstraints — storage', () => {
     const r = parseProductConstraints('128 hoặc 256GB');
     expect(r.filters.storageGB).toContain(128);
     expect(r.filters.storageGB).toContain(256);
+  });
+
+  it('128GB hoặc 256GB accepts both 128 and 256, rejects 64 and 512', () => {
+    const r = parseProductConstraints('128GB hoặc 256GB');
+    expect(r.filters.storageGB).toEqual(expect.arrayContaining([128, 256]));
+    expect(r.filters.minStorageGB).toBeNull();
+    expect(r.filters.maxStorageGB).toBeNull();
+  });
+
+  it('điện thoại 128 hoặc 256GB accepts both, no stale min/max', () => {
+    const r = parseProductConstraints('điện thoại 128 hoặc 256GB');
+    expect(r.filters.storageGB).toEqual(expect.arrayContaining([128, 256]));
+    expect(r.filters.minStorageGB).toBeNull();
+    expect(r.filters.maxStorageGB).toBeNull();
+  });
+
+  it('exact storage does not populate alternatives array', () => {
+    const r = parseProductConstraints('bộ nhớ 256GB');
+    expect(r.filters.storageGB).toBeNull();
+    expect(r.filters.minStorageGB).toBe(256);
+    expect(r.filters.maxStorageGB).toBe(256);
+  });
+
+  it('min storage does not set max or array', () => {
+    const r = parseProductConstraints('ít nhất 256GB');
+    expect(r.filters.storageGB).toBeNull();
+    expect(r.filters.minStorageGB).toBe(256);
+    expect(r.filters.maxStorageGB).toBeNull();
+  });
+
+  it('max storage does not set min or array', () => {
+    const r = parseProductConstraints('tối đa 512GB');
+    expect(r.filters.storageGB).toBeNull();
+    expect(r.filters.minStorageGB).toBeNull();
+    expect(r.filters.maxStorageGB).toBe(512);
+  });
+
+  it('storage range từ X đến Y sets min and max', () => {
+    const r = parseProductConstraints('từ 128GB đến 512GB');
+    expect(r.filters.storageGB).toBeNull();
+    expect(r.filters.minStorageGB).toBe(128);
+    expect(r.filters.maxStorageGB).toBe(512);
+  });
+
+  it('storage range without GB on first number still works', () => {
+    const r = parseProductConstraints('từ 128 đến 512GB');
+    expect(r.filters.storageGB).toBeNull();
+    expect(r.filters.minStorageGB).toBe(128);
+    expect(r.filters.maxStorageGB).toBe(512);
   });
 });
 
