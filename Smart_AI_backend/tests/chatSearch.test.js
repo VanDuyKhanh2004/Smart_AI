@@ -33,6 +33,25 @@ jest.mock('../utils/gemini', () => ({
   generateComplaintResponse: jest.fn(),
 }));
 
+jest.mock('../utils/productValidator', () => ({
+  matchesProductConstraints: jest.fn(() => true),
+}));
+
+jest.mock('../utils/productConstraintParser', () => ({
+  parseProductConstraints: jest.fn((query) => ({
+    cleanedQuery: query,
+    filters: {
+      minPrice: null, maxPrice: null,
+      brands: null, excludedBrands: null,
+      inStock: null,
+      ramGB: null, minRamGB: null, maxRamGB: null,
+      storageGB: null, minStorageGB: null, maxStorageGB: null,
+      colors: null,
+    },
+    preferences: { camera: false, battery: false, performance: false, compact: false },
+  })),
+}));
+
 const productSearchService = require('../services/productSearchService');
 const ChatController = require('../controllers/chatController');
 
@@ -50,7 +69,10 @@ describe('ChatController.searchRelevantProducts() — refactor compatibility', (
 
     const result = await ChatController.searchRelevantProducts('iphone 15', 5);
 
-    expect(productSearchService.search).toHaveBeenCalledWith('iphone 15', 5);
+    const callArg = productSearchService.search.mock.calls[0][2];
+    expect(callArg).toHaveProperty('minPrice');
+    expect(callArg).toHaveProperty('maxPrice');
+    expect(callArg).toHaveProperty('brands');
     expect(result).toEqual(mockProducts);
   });
 
@@ -59,7 +81,7 @@ describe('ChatController.searchRelevantProducts() — refactor compatibility', (
 
     await ChatController.searchRelevantProducts('galaxy');
 
-    expect(productSearchService.search).toHaveBeenCalledWith('galaxy', 5);
+    expect(productSearchService.search).toHaveBeenCalledWith('galaxy', 5, expect.any(Object));
   });
 
   it('forwards service errors unchanged', async () => {

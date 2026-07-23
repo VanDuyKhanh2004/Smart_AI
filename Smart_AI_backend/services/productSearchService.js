@@ -4,10 +4,52 @@ const { generateEmbedding } = require('../utils/openai');
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 10;
 
-const search = async (queryText, limit = DEFAULT_LIMIT) => {
+/**
+ * Build a MongoDB $match object from the constraints filters.
+ * Returns null if no filter applies.
+ */
+function buildMongoFilter(filters) {
+  if (!filters) return null;
+
+  const conditions = [];
+
+  // Price
+  const price = {};
+  if (filters.minPrice != null) price.$gte = filters.minPrice;
+  if (filters.maxPrice != null) price.$lte = filters.maxPrice;
+  if (Object.keys(price).length > 0) conditions.push({ price });
+
+  // Brand (inclusion)
+  if (Array.isArray(filters.brands) && filters.brands.length > 0) {
+    conditions.push({ brand: { $in: filters.brands } });
+  }
+
+  // Brand (exclusion)
+  if (Array.isArray(filters.excludedBrands) && filters.excludedBrands.length > 0) {
+    conditions.push({ brand: { $nin: filters.excludedBrands } });
+  }
+
+  // Stock
+  if (filters.inStock === true) {
+    conditions.push({ inStock: { $gt: 0 } });
+  } else if (filters.inStock === false) {
+    conditions.push({ inStock: { $lte: 0 } });
+  }
+
+  if (conditions.length === 0) return null;
+  return conditions.length === 1 ? conditions[0] : { $and: conditions };
+}
+
+const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
   const safeLimit = Math.min(Math.max(1, Math.floor(limit)), MAX_LIMIT);
 
   console.log(`[Semantic Search] Query: "${queryText}"`);
+  if (filters) {
+    const logSafe = { ...filters };
+    console.log(`[Semantic Search] Filters: ${JSON.stringify(logSafe)}`);
+  }
+
+  const mongoFilter = buildMongoFilter(filters);
 
   try {
     const queryVector = await generateEmbedding(queryText);
@@ -16,7 +58,7 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
 
     console.log(`[Semantic Search] Executing $vectorSearch on index "vector_index"`);
 
-    let products = await Product.aggregate([
+    const pipeline = [
       {
         $vectorSearch: {
           index: 'vector_index',
@@ -34,7 +76,13 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
         },
       },
       { $match: { isActive: true } },
-    ]);
+    ];
+
+    if (mongoFilter) {
+      pipeline.push({ $match: mongoFilter });
+    }
+
+    let products = await Product.aggregate(pipeline);
 
     console.log(`[Semantic Search] Vector results: ${products.length}`);
 
@@ -44,8 +92,11 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
 
     console.log(`[Semantic Search] Vector Search EMPTY — switching to text fallback`);
 
+    const textFilter = { $text: { $search: queryText }, isActive: true };
+    if (mongoFilter) Object.assign(textFilter, mongoFilter);
+
     products = await Product.find(
-      { $text: { $search: queryText }, isActive: true },
+      textFilter,
       { score: { $meta: 'textScore' } }
     )
       .select('-embedding_vector')
@@ -61,7 +112,10 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
 
     console.log(`[Semantic Search] Text also empty — using latest-products fallback`);
 
-    products = await Product.find({ isActive: true, inStock: { $gt: 0 } })
+    const latestFilter = { isActive: true, inStock: { $gt: 0 } };
+    if (mongoFilter) Object.assign(latestFilter, mongoFilter);
+
+    products = await Product.find(latestFilter)
       .sort({ createdAt: -1 })
       .select('-embedding_vector')
       .limit(safeLimit)
@@ -80,8 +134,11 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
     }
 
     try {
+      const textFilter = { $text: { $search: queryText }, isActive: true };
+      if (mongoFilter) Object.assign(textFilter, mongoFilter);
+
       const products = await Product.find(
-        { $text: { $search: queryText }, isActive: true },
+        textFilter,
         { score: { $meta: 'textScore' } }
       )
         .select('-embedding_vector')
@@ -97,7 +154,10 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
 
       console.log(`[Semantic Search] Text also empty — using latest-products fallback`);
 
-      const fallbackProducts = await Product.find({ isActive: true, inStock: { $gt: 0 } })
+      const latestFilter = { isActive: true, inStock: { $gt: 0 } };
+      if (mongoFilter) Object.assign(latestFilter, mongoFilter);
+
+      const fallbackProducts = await Product.find(latestFilter)
         .sort({ createdAt: -1 })
         .select('-embedding_vector')
         .limit(safeLimit)
@@ -113,4 +173,4 @@ const search = async (queryText, limit = DEFAULT_LIMIT) => {
   }
 };
 
-module.exports = { search };
+module.exports = { search, buildMongoFilter };

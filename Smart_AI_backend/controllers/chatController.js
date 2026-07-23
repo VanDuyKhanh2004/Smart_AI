@@ -6,6 +6,8 @@ const {
   generateChatResponse,
   generateComplaintResponse,
 } = require("../utils/gemini");
+const { parseProductConstraints } = require("../utils/productConstraintParser");
+const { matchesProductConstraints } = require("../utils/productValidator");
 
 class ChatController {
   /**
@@ -105,7 +107,16 @@ class ChatController {
    * Tìm kiếm sản phẩm liên quan bằng vector similarity
    */
   async searchRelevantProducts(clarifiedQuery, limit = 5) {
-    const result = await productSearchService.search(clarifiedQuery, limit);
+    const { cleanedQuery, filters } = parseProductConstraints(clarifiedQuery);
+    const searchQuery = cleanedQuery || clarifiedQuery;
+    const result = await productSearchService.search(searchQuery, limit, filters);
+
+    // Final validation gate — applies constraints that are hard to express in MongoDB
+    // e.g. RAM/storage/color which require string parsing.
+    if (filters) {
+      result.products = result.products.filter(p => matchesProductConstraints(p, filters));
+    }
+
     return result.products;
   }
 
