@@ -87,6 +87,41 @@ describe('matchesProductConstraints — RAM', () => {
     expect(matchesProductConstraints(makeProduct(), { maxRamGB: 6 })).toBe(false);
   });
 
+  it('RAM alternatives accepts 8 and 12, rejects 6 and 16', () => {
+    const p8 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p12 = makeProduct({ specs: { memory: { ram: '12 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p6 = makeProduct({ specs: { memory: { ram: '6 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p16 = makeProduct({ specs: { memory: { ram: '16 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const filter = { ramGB: [8, 12] };
+    expect(matchesProductConstraints(p8, filter)).toBe(true);
+    expect(matchesProductConstraints(p12, filter)).toBe(true);
+    expect(matchesProductConstraints(p6, filter)).toBe(false);
+    expect(matchesProductConstraints(p16, filter)).toBe(false);
+  });
+
+  it('RAM alternatives array takes precedence over stale min/max', () => {
+    const p8 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p12 = makeProduct({ specs: { memory: { ram: '12 GB', storage: '256 GB' }, colors: ['Black'] } });
+    // Legacy malformed filters with both array AND conflicting min
+    const filter = { ramGB: [8, 12], minRamGB: 12 };
+    expect(matchesProductConstraints(p8, filter)).toBe(true);
+    expect(matchesProductConstraints(p12, filter)).toBe(true);
+  });
+
+  it('RAM exact min=max works', () => {
+    const p8 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p6 = makeProduct({ specs: { memory: { ram: '6 GB', storage: '256 GB' }, colors: ['Black'] } });
+    expect(matchesProductConstraints(p8, { minRamGB: 8, maxRamGB: 8 })).toBe(true);
+    expect(matchesProductConstraints(p6, { minRamGB: 8, maxRamGB: 8 })).toBe(false);
+  });
+
+  it('RAM range min/max', () => {
+    const p8 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p16 = makeProduct({ specs: { memory: { ram: '16 GB', storage: '256 GB' }, colors: ['Black'] } });
+    expect(matchesProductConstraints(p8, { minRamGB: 8, maxRamGB: 16 })).toBe(true);
+    expect(matchesProductConstraints(p16, { minRamGB: 8, maxRamGB: 16 })).toBe(true);
+  });
+
   it('handles missing RAM field', () => {
     const product = makeProduct();
     delete product.specs.memory.ram;
@@ -105,6 +140,41 @@ describe('matchesProductConstraints — storage', () => {
 
   it('rejects non-matching storage', () => {
     expect(matchesProductConstraints(makeProduct(), { storageGB: [128] })).toBe(false);
+  });
+
+  it('storage alternatives accepts 128 and 256, rejects 64 and 512', () => {
+    const p128 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '128 GB' }, colors: ['Black'] } });
+    const p256 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p64 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '64 GB' }, colors: ['Black'] } });
+    const p512 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '512 GB' }, colors: ['Black'] } });
+    const filter = { storageGB: [128, 256] };
+    expect(matchesProductConstraints(p128, filter)).toBe(true);
+    expect(matchesProductConstraints(p256, filter)).toBe(true);
+    expect(matchesProductConstraints(p64, filter)).toBe(false);
+    expect(matchesProductConstraints(p512, filter)).toBe(false);
+  });
+
+  it('storage alternatives array takes precedence over stale min/max', () => {
+    const p128 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '128 GB' }, colors: ['Black'] } });
+    const p256 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    // Legacy malformed filters with both array AND conflicting min
+    const filter = { storageGB: [128, 256], minStorageGB: 256 };
+    expect(matchesProductConstraints(p128, filter)).toBe(true);
+    expect(matchesProductConstraints(p256, filter)).toBe(true);
+  });
+
+  it('storage exact min=max works', () => {
+    const p256 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] } });
+    const p128 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '128 GB' }, colors: ['Black'] } });
+    expect(matchesProductConstraints(p256, { minStorageGB: 256, maxStorageGB: 256 })).toBe(true);
+    expect(matchesProductConstraints(p128, { minStorageGB: 256, maxStorageGB: 256 })).toBe(false);
+  });
+
+  it('storage range min/max', () => {
+    const p128 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '128 GB' }, colors: ['Black'] } });
+    const p512 = makeProduct({ specs: { memory: { ram: '8 GB', storage: '512 GB' }, colors: ['Black'] } });
+    expect(matchesProductConstraints(p128, { minStorageGB: 128, maxStorageGB: 512 })).toBe(true);
+    expect(matchesProductConstraints(p512, { minStorageGB: 128, maxStorageGB: 512 })).toBe(true);
   });
 });
 
