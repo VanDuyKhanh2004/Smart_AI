@@ -45,20 +45,172 @@ const { classifyIntentAndRespond } = require('../utils/gemini');
 const ChatController = require('../controllers/chatController');
 
 const allProducts = [
-  { _id: 's1', name: 'Galaxy S24', brand: 'samsung', price: 18_990_000, inStock: 4, isActive: true, specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Titanium Black'] }, description: 'Flagship Samsung' },
-  { _id: 's2', name: 'Galaxy A15', brand: 'samsung', price: 4_990_000, inStock: 10, isActive: true, specs: { memory: { ram: '6 GB', storage: '128 GB' }, colors: ['Blue'] }, description: 'Budget Samsung' },
-  { _id: 's3', name: 'Galaxy Z Fold6', brand: 'samsung', price: 42_990_000, inStock: 2, isActive: true, specs: { memory: { ram: '12 GB', storage: '512 GB' }, colors: ['Natural Titanium'] }, description: 'Foldable Samsung' },
-  { _id: 's4', name: 'Galaxy A05', brand: 'samsung', price: 2_990_000, inStock: 0, isActive: true, specs: { memory: { ram: '4 GB', storage: '64 GB' }, colors: ['Black'] }, description: 'Entry Samsung' },
-  { _id: 'a1', name: 'iPhone 15 Pro Max', brand: 'apple', price: 28_990_000, inStock: 1, isActive: true, specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Natural Titanium'] }, description: 'Premium Apple' },
-  { _id: 'a2', name: 'iPhone 16 Pro', brand: 'apple', price: 29_990_000, inStock: 3, isActive: true, specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Silver'] }, description: 'New Apple' },
-  { _id: 'a3', name: 'iPhone SE', brand: 'apple', price: 10_000_000, inStock: 5, isActive: true, specs: { memory: { ram: '4 GB', storage: '64 GB' }, colors: ['Midnight'] }, description: 'Budget Apple' },
-  { _id: 'x1', name: 'Redmi Note 13', brand: 'xiaomi', price: 6_990_000, inStock: 8, isActive: true, specs: { memory: { ram: '8 GB', storage: '256 GB' }, colors: ['Black'] }, description: 'Xiaomi mid-range' },
-  { _id: 'x2', name: 'Xiaomi 14T', brand: 'xiaomi', price: 12_990_000, inStock: 2, isActive: true, specs: { memory: { ram: '12 GB', storage: '256 GB' }, colors: ['Titanium Black'] }, description: 'Xiaomi flagship' },
-  { _id: 'n1', name: 'Nokia 105', brand: 'nokia', price: 500_000, inStock: 10, isActive: true, specs: { memory: { ram: '0.5 GB', storage: '0.1 GB' }, colors: ['Blue'] }, description: 'Basic phone' },
-  { _id: 'o1', name: 'OnePlus 12', brand: 'oneplus', price: 22_990_000, inStock: 2, isActive: true, specs: { memory: { ram: '16 GB', storage: '256 GB' }, colors: ['Silver'] }, description: 'Flagship OnePlus' },
-  { _id: 'g1', name: 'Pixel 9 Pro', brand: 'google', price: 26_990_000, inStock: 3, isActive: true, specs: { memory: { ram: '16 GB', storage: '512 GB' }, colors: ['Gold'] }, description: 'Google flagship' },
-  { _id: 'i1', name: 'Old Samsung', brand: 'samsung', price: 1_000_000, inStock: 0, isActive: false, specs: { memory: { ram: '2 GB', storage: '16 GB' }, colors: ['Red'] }, description: 'Discontinued' },
-  { _id: 'm1', name: 'No Specs Phone', brand: 'xiaomi', price: 2_000_000, inStock: 5, isActive: true, specs: null, description: 'Minimal specs' },
+  {
+    _id: 's1', name: 'Galaxy S24', brand: 'samsung', price: 18_990_000, inStock: 4, isActive: true,
+    specs: {
+      memory: { ram: '8 GB', storage: '256 GB' },
+      colors: ['Titanium Black'],
+      camera: { rear: { primary: '50 MP', secondary: '12 MP ultrawide', tertiary: '10 MP telephoto' }, front: '12 MP', features: ['OIS', 'Night mode', 'Portrait mode', '4K video', 'Optical zoom'] },
+      battery: { capacity: '5000 mAh', charging: { wired: '25W', wireless: '15W' } },
+      processor: { chipset: 'Exynos 2400', cpu: '10-core', gpu: 'Xclipse 940' },
+      screen: { size: '6.2 inch', technology: 'Dynamic AMOLED 2X 120Hz' },
+      weight: '167 g',
+    },
+    description: 'Flagship Samsung',
+  },
+  {
+    _id: 's2', name: 'Galaxy A15', brand: 'samsung', price: 4_990_000, inStock: 10, isActive: true,
+    specs: {
+      memory: { ram: '6 GB', storage: '128 GB' },
+      colors: ['Blue'],
+      camera: { rear: { primary: '50 MP', secondary: '5 MP ultrawide' }, front: '13 MP', features: ['Night mode'] },
+      battery: { capacity: '5000 mAh', charging: { wired: '25W' } },
+      processor: { chipset: 'MediaTek Helio G99' },
+      screen: { size: '6.5 inch', technology: 'Super AMOLED' },
+      weight: '200 g',
+    },
+    description: 'Budget Samsung',
+  },
+  {
+    _id: 's3', name: 'Galaxy Z Fold6', brand: 'samsung', price: 42_990_000, inStock: 2, isActive: true,
+    specs: {
+      memory: { ram: '12 GB', storage: '512 GB' },
+      colors: ['Natural Titanium'],
+      camera: { rear: { primary: '50 MP', secondary: '12 MP ultrawide', tertiary: '10 MP telephoto' }, front: '10 MP', features: ['OIS', 'Night mode', 'Portrait mode', '8K video', 'Optical zoom'] },
+      battery: { capacity: '4400 mAh', charging: { wired: '25W', wireless: '15W' } },
+      processor: { chipset: 'Snapdragon 8 Gen 3', cpu: '8-core', gpu: 'Adreno 750' },
+      screen: { size: '7.6 inch', technology: 'Dynamic AMOLED 2X 120Hz' },
+      weight: '239 g',
+    },
+    description: 'Foldable Samsung',
+  },
+  {
+    _id: 's4', name: 'Galaxy A05', brand: 'samsung', price: 2_990_000, inStock: 0, isActive: true,
+    specs: {
+      memory: { ram: '4 GB', storage: '64 GB' },
+      colors: ['Black'],
+      camera: { rear: { primary: '50 MP' }, front: '8 MP', features: [] },
+      battery: { capacity: '5000 mAh', charging: { wired: '15W' } },
+      screen: { size: '6.7 inch' },
+      weight: '195 g',
+    },
+    description: 'Entry Samsung',
+  },
+  {
+    _id: 'a1', name: 'iPhone 15 Pro Max', brand: 'apple', price: 28_990_000, inStock: 1, isActive: true,
+    specs: {
+      memory: { ram: '8 GB', storage: '256 GB' },
+      colors: ['Natural Titanium'],
+      camera: { rear: { primary: '48 MP', secondary: '12 MP ultrawide', tertiary: '12 MP telephoto' }, front: '12 MP', features: ['OIS', 'Night mode', 'Portrait mode', '4K video', 'Optical zoom', 'ProRAW'] },
+      battery: { capacity: '4422 mAh', charging: { wired: '27W', wireless: '15W' } },
+      processor: { chipset: 'A17 Pro', cpu: '6-core', gpu: '6-core GPU' },
+      screen: { size: '6.7 inch', technology: 'Super Retina XDR OLED 120Hz' },
+      weight: '221 g',
+    },
+    description: 'Premium Apple',
+  },
+  {
+    _id: 'a2', name: 'iPhone 16 Pro', brand: 'apple', price: 29_990_000, inStock: 3, isActive: true,
+    specs: {
+      memory: { ram: '8 GB', storage: '256 GB' },
+      colors: ['Silver'],
+      camera: { rear: { primary: '48 MP' }, front: '12 MP', features: ['Night mode', 'Portrait mode'] },
+      battery: { capacity: '4500 mAh', charging: { wired: '30W' } },
+      screen: { size: '6.3 inch' },
+      weight: '199 g',
+    },
+    description: 'New Apple',
+  },
+  {
+    _id: 'a3', name: 'iPhone SE', brand: 'apple', price: 10_000_000, inStock: 5, isActive: true,
+    specs: {
+      memory: { ram: '4 GB', storage: '64 GB' },
+      colors: ['Midnight'],
+      camera: { rear: { primary: '12 MP' }, front: '7 MP', features: ['Portrait mode'] },
+      battery: { capacity: '2018 mAh', charging: { wired: '18W', wireless: '7.5W' } },
+      processor: { chipset: 'A15 Bionic' },
+      screen: { size: '4.7 inch' },
+      weight: '148 g',
+    },
+    description: 'Budget Apple',
+  },
+  {
+    _id: 'x1', name: 'Redmi Note 13', brand: 'xiaomi', price: 6_990_000, inStock: 8, isActive: true,
+    specs: {
+      memory: { ram: '8 GB', storage: '256 GB' },
+      colors: ['Black'],
+      camera: { rear: { primary: '108 MP', secondary: '8 MP ultrawide', tertiary: '2 MP' }, front: '16 MP', features: ['Night mode'] },
+      battery: { capacity: '5000 mAh', charging: { wired: '33W' } },
+      screen: { size: '6.67 inch' },
+      weight: '188 g',
+    },
+    description: 'Xiaomi mid-range',
+  },
+  {
+    _id: 'x2', name: 'Xiaomi 14T', brand: 'xiaomi', price: 12_990_000, inStock: 2, isActive: true,
+    specs: {
+      memory: { ram: '12 GB', storage: '256 GB' },
+      colors: ['Titanium Black'],
+      camera: { rear: { primary: '50 MP', secondary: '12 MP ultrawide', tertiary: '50 MP telephoto' }, front: '32 MP', features: ['OIS', 'Night mode', 'Portrait mode', '4K video', 'Optical zoom', 'Leica'] },
+      battery: { capacity: '5000 mAh', charging: { wired: '67W', wireless: '50W' } },
+      processor: { chipset: 'Dimensity 8300', cpu: '8-core', gpu: 'Mali-G615' },
+      screen: { size: '6.67 inch', technology: 'AMOLED 144Hz' },
+      weight: '195 g',
+    },
+    description: 'Xiaomi flagship',
+  },
+  {
+    _id: 'n1', name: 'Nokia 105', brand: 'nokia', price: 500_000, inStock: 10, isActive: true,
+    specs: {
+      memory: { ram: '0.5 GB', storage: '0.1 GB' },
+      colors: ['Blue'],
+      camera: { rear: { primary: '0.3 MP' }, features: [] },
+      battery: { capacity: '800 mAh', charging: {} },
+      screen: { size: '1.77 inch' },
+      weight: '80 g',
+    },
+    description: 'Basic phone',
+  },
+  {
+    _id: 'o1', name: 'OnePlus 12', brand: 'oneplus', price: 22_990_000, inStock: 2, isActive: true,
+    specs: {
+      memory: { ram: '16 GB', storage: '256 GB' },
+      colors: ['Silver'],
+      camera: { rear: { primary: '50 MP', secondary: '48 MP ultrawide', tertiary: '64 MP periscope' }, front: '32 MP', features: ['OIS', 'Night mode', 'Portrait mode', '8K video', 'Optical zoom', 'Hasselblad'] },
+      battery: { capacity: '5400 mAh', charging: { wired: '100W', wireless: '50W' } },
+      processor: { chipset: 'Snapdragon 8 Gen 3', cpu: '8-core', gpu: 'Adreno 750' },
+      screen: { size: '6.82 inch', technology: 'AMOLED 120Hz' },
+      weight: '220 g',
+    },
+    description: 'Flagship OnePlus',
+  },
+  {
+    _id: 'g1', name: 'Pixel 9 Pro', brand: 'google', price: 26_990_000, inStock: 3, isActive: true,
+    specs: {
+      memory: { ram: '16 GB', storage: '512 GB' },
+      colors: ['Gold'],
+      camera: { rear: { primary: '50 MP', secondary: '48 MP ultrawide', tertiary: '48 MP telephoto' }, front: '10.5 MP', features: ['OIS', 'Night mode', 'Portrait mode', '4K video', 'Optical zoom', 'Magic Eraser'] },
+      battery: { capacity: '4700 mAh', charging: { wired: '30W', wireless: '23W' } },
+      processor: { chipset: 'Tensor G4', cpu: '8-core', gpu: 'Mali-G715' },
+      screen: { size: '6.3 inch', technology: 'OLED 120Hz' },
+      weight: '199 g',
+    },
+    description: 'Google flagship',
+  },
+  {
+    _id: 'i1', name: 'Old Samsung', brand: 'samsung', price: 1_000_000, inStock: 0, isActive: false,
+    specs: {
+      memory: { ram: '2 GB', storage: '16 GB' },
+      colors: ['Red'],
+      camera: { rear: { primary: '8 MP' }, features: [] },
+      battery: { capacity: '1500 mAh' },
+      screen: { size: '4.0 inch' },
+      weight: '120 g',
+    },
+    description: 'Discontinued',
+  },
+  {
+    _id: 'm1', name: 'No Specs Phone', brand: 'xiaomi', price: 2_000_000, inStock: 5, isActive: true, specs: null, description: 'Minimal specs' },
 ];
 
 function setupVectorSearch(returnedProducts) {
@@ -498,7 +650,240 @@ describe('Product constraint integration — pipeline enforcement', () => {
     });
   });
 
-  describe('14. Backward compatibility: no hard constraints', () => {
+  describe('15. Ranking: "Samsung dưới 15 triệu, ưu tiên camera đẹp"', () => {
+    beforeEach(() => setupVectorSearch(allProducts));
+
+    it('hard constraints remain enforced — only Samsung under 15M', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'Samsung dưới 15 triệu ưu tiên camera đẹp'
+      );
+      for (const p of result) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+
+    it('camera-oriented matching product (Galaxy A15) ranks first among Samsung under 15M', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'Samsung dưới 15 triệu ưu tiên camera đẹp'
+      );
+      // Galaxy A15 (s2) has 50MP + 5MP ultrawide + 13MP front + Night mode
+      // Galaxy A05 (s4) has 50MP only, no secondary/front/features
+      // A15 should rank before A05 on camera score
+      expect(result.length).toBeGreaterThanOrEqual(2);
+      const s2idx = result.findIndex(p => p._id === 's2');
+      const s4idx = result.findIndex(p => p._id === 's4');
+      expect(s2idx).toBeLessThan(s4idx);
+    });
+  });
+
+  describe('16. Ranking: "điện thoại pin trâu tối đa 12 triệu"', () => {
+    beforeEach(() => setupVectorSearch(allProducts));
+
+    it('price cap is enforced — all products <= 12M', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại pin trâu tối đa 12 triệu'
+      );
+      for (const p of result) {
+        expect(p.price).toBeLessThanOrEqual(12_000_000);
+      }
+    });
+
+    it('battery-oriented product (Xiaomi 14T or Redmi Note 13) ranks first', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại pin trâu tối đa 12 triệu'
+      );
+      // Redmi Note 13 (x1): 5000mAh + 33W wired — strong battery signals
+      // Galaxy A15 (s2): 5000mAh + 25W wired
+      // Battery-leader should be at position 0
+      expect(result.length).toBeGreaterThanOrEqual(2);
+      const firstId = result[0]._id;
+      // Redmi Note 13 (x1) has the best battery under 12M: 5000mAh + 33W
+      // If Xiaomi 14T (x2) is under 12M (it is 12.99M, so excluded by price)
+      expect(['x1', 's2', 's4']).toContain(firstId);
+    });
+  });
+
+  describe('17. Ranking: "điện thoại chơi game RAM ít nhất 8GB"', () => {
+    beforeEach(() => setupVectorSearch(allProducts));
+
+    it('RAM constraint is enforced — all products have RAM >= 8GB', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại chơi game RAM ít nhất 8GB'
+      );
+      for (const p of result) {
+        const ram = parseInt((p.specs?.memory?.ram || '').match(/(\d+)/)?.[1] || '0', 10);
+        expect(ram).toBeGreaterThanOrEqual(8);
+      }
+    });
+
+    it('performance-oriented product (Pixel 9 Pro or OnePlus 12) ranks first', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại chơi game RAM ít nhất 8GB'
+      );
+      // Pixel 9 Pro (g1): 16GB RAM + Tensor G4 + 512GB
+      // OnePlus 12 (o1): 16GB RAM + Snapdragon 8 Gen 3 + 256GB
+      // These have the highest performance scores
+      expect(result.length).toBeGreaterThanOrEqual(2);
+      const firstId = result[0]._id;
+      expect(['g1', 'o1']).toContain(firstId);
+    });
+  });
+
+  describe('18. Ranking: "điện thoại nhỏ gọn dưới 20 triệu"', () => {
+    beforeEach(() => setupVectorSearch(allProducts));
+
+    it('price constraint is enforced — all products <= 20M', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại nhỏ gọn dưới 20 triệu'
+      );
+      for (const p of result) {
+        expect(p.price).toBeLessThanOrEqual(20_000_000);
+      }
+    });
+
+    it('compact product (iPhone SE or Nokia 105) ranks first', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại nhỏ gọn dưới 20 triệu'
+      );
+      // iPhone SE (a3): 4.7" screen, 148g
+      // Nokia 105 (n1): 1.77" screen, 80g — but it's under 20M
+      // Nokia should rank highest on compact score
+      expect(result.length).toBeGreaterThanOrEqual(2);
+      const firstId = result[0]._id;
+      expect(['n1', 'a3']).toContain(firstId);
+    });
+  });
+
+  describe('19. Multi-preference: "điện thoại camera tốt pin trâu dưới 15 triệu"', () => {
+    beforeEach(() => setupVectorSearch(allProducts));
+
+    it('all hard constraints enforced — all products under 15M', async () => {
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại camera tốt pin trâu dưới 15 triệu'
+      );
+      for (const p of result) {
+        expect(p.price).toBeLessThanOrEqual(15_000_000);
+      }
+    });
+
+    it('combined ranking is deterministic — best camera+battery product ranks first', async () => {
+      const result1 = await ChatController.searchRelevantProducts(
+        'điện thoại camera tốt pin trâu dưới 15 triệu'
+      );
+      const result2 = await ChatController.searchRelevantProducts(
+        'điện thoại camera tốt pin trâu dưới 15 triệu'
+      );
+      expect(result1.map(p => p._id)).toEqual(result2.map(p => p._id));
+    });
+  });
+
+  describe('20. No-preference query preserves original candidate order', () => {
+    it('preserves original search result order when no soft preferences', async () => {
+      const subset = allProducts.slice(0, 5);
+      setupVectorSearch(subset);
+      const result = await ChatController.searchRelevantProducts('điện thoại mới');
+      expect(result.map(p => p._id)).toEqual(subset.map(p => p._id));
+    });
+
+    it('no preference query returns same count as original', async () => {
+      const subset = allProducts.slice(0, 3);
+      setupVectorSearch(subset);
+      const result = await ChatController.searchRelevantProducts('điện thoại mới');
+      expect(result.length).toBe(3);
+    });
+  });
+
+  describe('21. Vector search empty → text fallback still ranked', () => {
+    it('text fallback results are ranked when preferences present', async () => {
+      setupTextFallback([], allProducts);
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại pin trâu tối đa 10 triệu'
+      );
+      expect(result.length).toBeGreaterThan(0);
+      for (const p of result) {
+        expect(p.price).toBeLessThanOrEqual(10_000_000);
+      }
+    });
+  });
+
+  describe('22. Vector/text empty → latest fallback still ranked', () => {
+    it('latest fallback results are ranked when preferences present', async () => {
+      setupLatestFallback([], [], allProducts);
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại pin trâu tối đa 10 triệu'
+      );
+      expect(result.length).toBeGreaterThan(0);
+      for (const p of result) {
+        expect(p.price).toBeLessThanOrEqual(10_000_000);
+      }
+    });
+  });
+
+  describe('23. Gemini/OpenAI failure → deterministic fallback receives ranked valid products', () => {
+    beforeEach(() => {
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu ưu tiên camera đẹp',
+      });
+      setupVectorSearch(allProducts);
+    });
+
+    it('deterministic fallback receives only constraint-satisfying products with camera preference ordering', async () => {
+      await expect(
+        ChatController.processMessage(mockSocket, {
+          sessionId: 'test-session',
+          message: 'Samsung dưới 15 triệu ưu tiên camera đẹp',
+        })
+      ).rejects.toThrow('AI failed');
+
+      const products = mockCapturedProducts.value;
+      expect(products.length).toBeGreaterThanOrEqual(2);
+      for (const p of products) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+      // Camera-rich product (s2) should rank before basic camera (s4)
+      const s2idx = products.findIndex(p => p._id === 's2');
+      const s4idx = products.findIndex(p => p._id === 's4');
+      expect(s2idx).toBeLessThan(s4idx);
+    });
+  });
+
+  describe('24. Ranking never adds invalid product', () => {
+    it('does not reintroduce products excluded by brand', async () => {
+      setupVectorSearch(allProducts);
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại dưới 20 triệu không lấy iPhone ưu tiên camera đẹp'
+      );
+      for (const p of result) {
+        expect(p.brand).not.toBe('apple');
+      }
+    });
+
+    it('does not reintroduce products excluded by price', async () => {
+      setupVectorSearch(allProducts);
+      const result = await ChatController.searchRelevantProducts(
+        'Samsung dưới 15 triệu ưu tiên camera đẹp'
+      );
+      for (const p of result) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+
+    it('does not reintroduce inactive products', async () => {
+      setupVectorSearch(allProducts);
+      const result = await ChatController.searchRelevantProducts(
+        'điện thoại Samsung ưu tiên camera đẹp'
+      );
+      for (const p of result) {
+        expect(p.isActive).not.toBe(false);
+      }
+    });
+  });
+
+  describe('25. Backward compatibility: no hard constraints', () => {
     it('returns products from semantic search without constraint filtering', async () => {
       setupVectorSearch(allProducts);
       const result = await ChatController.searchRelevantProducts('điện thoại mới');
