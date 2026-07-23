@@ -9,6 +9,8 @@ const {
 const { parseProductConstraints } = require("../utils/productConstraintParser");
 const { matchesProductConstraints } = require("../utils/productValidator");
 const { rankProducts } = require("../utils/productRanking");
+const { classifyQuery, resolveFollowUpQuery, createContextFromParsed, sanitizeConversationContext } = require("../utils/conversationContext");
+const contextService = require("../services/contextService");
 
 class ChatController {
   /**
@@ -107,26 +109,31 @@ class ChatController {
    * Phase 3: Vector Search
    * Tìm kiếm sản phẩm liên quan bằng vector similarity
    */
-  async searchRelevantProducts(clarifiedQuery, limit = 5) {
-    const { cleanedQuery, filters, preferences } = parseProductConstraints(clarifiedQuery);
+  async searchRelevantProducts(clarifiedQuery, limit = 5, mergedFilters = null, mergedPreferences = null) {
+    const { cleanedQuery, filters: parsedFilters, preferences: parsedPreferences } = parseProductConstraints(clarifiedQuery);
     const searchQuery = cleanedQuery || clarifiedQuery;
+
+    // Use merged filters/preferences when provided (from conversation context),
+    // otherwise use the parsed values from this query.
+    const effectiveFilters = mergedFilters || parsedFilters;
+    const effectivePreferences = mergedPreferences || parsedPreferences;
 
     // When soft preferences are present, fetch a larger candidate pool so
     // ranking has enough variety to reorder meaningfully.
-    const anyPref = preferences && (preferences.camera || preferences.battery || preferences.performance || preferences.compact);
+    const anyPref = effectivePreferences && (effectivePreferences.camera || effectivePreferences.battery || effectivePreferences.performance || effectivePreferences.compact);
     const searchLimit = anyPref ? Math.min(Math.max(limit * 3, limit), 20) : limit;
-    const result = await productSearchService.search(searchQuery, searchLimit, filters);
+    const result = await productSearchService.search(searchQuery, searchLimit, effectiveFilters);
 
     // Final validation gate — applies constraints that are hard to express in MongoDB
     // e.g. RAM/storage/color which require string parsing.
-    if (filters) {
-      result.products = result.products.filter(p => matchesProductConstraints(p, filters));
+    if (effectiveFilters) {
+      result.products = result.products.filter(p => matchesProductConstraints(p, effectiveFilters));
     }
 
     // Rank by soft preferences (deterministic, explainable).
     // Returns all filtered products reordered; the caller or search
     // service handles the final limit.
-    const { ranked } = rankProducts(result.products, preferences);
+    const { ranked } = rankProducts(result.products, effectivePreferences);
 
     return ranked;
   }
@@ -415,10 +422,40 @@ class ChatController {
           message
         );
       } else {
+        // ================================================================
+        // Phase A: Load and merge conversation context
+        // ================================================================
+        const clarifiedQuery = intentResult.clarifiedQuery;
+        const parsed = parseProductConstraints(clarifiedQuery);
+        const queryType = classifyQuery(clarifiedQuery, parsed);
+        const previousContext = await contextService.loadContext(sessionId);
+        let mergedFilters = parsed.filters;
+        let mergedPreferences = parsed.preferences;
+        let contextReset = false;
+
+        if (queryType.action === 'reset') {
+          await contextService.deleteContext(sessionId);
+          contextReset = true;
+        } else if (queryType.action === 'follow_up' && previousContext) {
+          const { mergedParsed } = resolveFollowUpQuery(parsed, previousContext);
+          mergedFilters = mergedParsed.filters;
+          mergedPreferences = mergedParsed.preferences;
+        }
+        // independent: use parsed values as-is (no merge)
+
+        // ================================================================
+        // Phase B: Search, filter, rank
+        // ================================================================
         const relatedProducts = await this.searchRelevantProducts(
-          intentResult.clarifiedQuery
+          clarifiedQuery,
+          5,
+          mergedFilters,
+          mergedPreferences
         );
 
+        // ================================================================
+        // Phase C: Generate response (Gemini/OpenAI or deterministic fallback)
+        // ================================================================
         responseResult = await this.generateResponse(
           socket,
           sessionId,
@@ -426,6 +463,37 @@ class ChatController {
           message,
           relatedProducts
         );
+
+        // ================================================================
+        // Phase D: Save normalized context only on valid response.
+        // A valid response has a non-empty fullResponse string.
+        // Save preserves merged filters even for no-result searches so the
+        // user can relax constraints in a follow-up.
+        //
+        // If response generation failed completely (threw, returned null,
+        // undefined, or empty string), context is NOT saved — the previous
+        // stored context remains unchanged.
+        //
+        // Save failure must not fail the chat response.
+        // ================================================================
+        if (responseResult && typeof responseResult.fullResponse === 'string' && responseResult.fullResponse.trim().length > 0) {
+          try {
+            const productIds = Array.isArray(responseResult.relatedProducts)
+              ? responseResult.relatedProducts.map(p => p.id).filter(Boolean).slice(0, 5)
+              : relatedProducts.map(p => p._id).filter(Boolean).slice(0, 5);
+
+            const newContext = createContextFromParsed(
+              { cleanedQuery: clarifiedQuery, filters: mergedFilters, preferences: mergedPreferences },
+              productIds
+            );
+            if (previousContext && !contextReset) {
+              newContext.turnCount = (previousContext.turnCount || 0) + 1;
+            }
+            await contextService.saveContext(sessionId, sanitizeConversationContext(newContext));
+          } catch (_ctxErr) {
+            // context save failure must not fail the chat response
+          }
+        }
       }
 
       const processingTime = Date.now() - startTime;
