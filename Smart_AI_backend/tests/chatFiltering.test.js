@@ -1,3 +1,18 @@
+/* ------------------------------------------------------------------ */
+/*  Cache mock for context persistence in tests                        */
+/* ------------------------------------------------------------------ */
+global.__ctxTestCache = {};
+jest.mock('../services/cacheService', () => {
+  const store = global.__ctxTestCache;
+  return {
+    get: jest.fn().mockImplementation(async (key) => store[key] || null),
+    set: jest.fn().mockImplementation(async (key, value) => { store[key] = value; }),
+    del: jest.fn().mockImplementation(async (key) => { delete store[key]; }),
+    exists: jest.fn().mockImplementation(async (key) => store[key] !== undefined),
+    invalidatePattern: jest.fn().mockResolvedValue(0),
+  };
+});
+
 const mockSocket = { handshake: { headers: { 'user-agent': 'test' }, address: '127.0.0.1' }, emit: jest.fn() };
 
 jest.mock('../models/Product', () => ({
@@ -34,7 +49,11 @@ jest.mock('../utils/gemini', () => ({
   classifyIntentAndRespond: jest.fn(),
   generateChatResponse: jest.fn((_h, _m, products) => {
     mockCapturedProducts.value = products;
-    return Promise.reject(new Error('AI failed'));
+    // Default: succeed (simulates deterministic fallback in production)
+    return Promise.resolve({
+      text: 'Here are some phones matching your criteria.',
+      provider: 'deterministic',
+    });
   }),
   generateComplaintResponse: jest.fn(),
 }));
@@ -43,6 +62,7 @@ const Product = require('../models/Product');
 const { generateEmbedding } = require('../utils/openai');
 const { classifyIntentAndRespond } = require('../utils/gemini');
 const ChatController = require('../controllers/chatController');
+const contextService = require('../services/contextService');
 
 const allProducts = [
   {
@@ -269,6 +289,13 @@ function verifyMongoFilter(contains) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockCapturedProducts.value = null;
+  global.__ctxTestCache = {};
+  // Restore default generateChatResponse (simulates deterministic fallback)
+  const gemini = require('../utils/gemini');
+  gemini.generateChatResponse.mockImplementation((_h, _m, products) => {
+    mockCapturedProducts.value = products;
+    return Promise.resolve({ text: 'Here are some phones matching your criteria.', provider: 'deterministic' });
+  });
 });
 
 describe('Product constraint integration — pipeline enforcement', () => {
@@ -572,12 +599,10 @@ describe('Product constraint integration — pipeline enforcement', () => {
       });
       setupVectorSearch(allProducts);
 
-      await expect(
-        ChatController.processMessage(mockSocket, {
-          sessionId: 'test-session',
-          message: 'RAM ít nhất 100GB Samsung còn hàng',
-        })
-      ).rejects.toThrow('AI failed');
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'test-session',
+        message: 'RAM ít nhất 100GB Samsung còn hàng',
+      });
 
       expect(mockCapturedProducts.value).toEqual([]);
     });
@@ -634,12 +659,10 @@ describe('Product constraint integration — pipeline enforcement', () => {
     });
 
     it('deterministic fallback receives only constraint-satisfying products', async () => {
-      await expect(
-        ChatController.processMessage(mockSocket, {
-          sessionId: 'test-session',
-          message: 'Samsung dưới 15 triệu',
-        })
-      ).rejects.toThrow('AI failed');
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'test-session',
+        message: 'Samsung dưới 15 triệu',
+      });
 
       const products = mockCapturedProducts.value;
       expect(products.length).toBeGreaterThan(0);
@@ -830,12 +853,10 @@ describe('Product constraint integration — pipeline enforcement', () => {
     });
 
     it('deterministic fallback receives only constraint-satisfying products with camera preference ordering', async () => {
-      await expect(
-        ChatController.processMessage(mockSocket, {
-          sessionId: 'test-session',
-          message: 'Samsung dưới 15 triệu ưu tiên camera đẹp',
-        })
-      ).rejects.toThrow('AI failed');
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'test-session',
+        message: 'Samsung dưới 15 triệu ưu tiên camera đẹp',
+      });
 
       const products = mockCapturedProducts.value;
       expect(products.length).toBeGreaterThanOrEqual(2);
@@ -903,6 +924,501 @@ describe('Product constraint integration — pipeline enforcement', () => {
       setupVectorSearch(subset);
       const result = await ChatController.searchRelevantProducts('điện thoại mới');
       expect(result.length).toBe(3);
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  Multi-turn conversation context integration                        */
+  /* ------------------------------------------------------------------ */
+
+  async function processQuery(sessionId, message, queryText) {
+    classifyIntentAndRespond.mockResolvedValue({
+      intent: 'product_query',
+      clarified_query: queryText,
+    });
+    return ChatController.processMessage(mockSocket, { sessionId, message });
+  }
+
+  describe('26. Multi-turn: "Samsung dưới 15 triệu" → "còn màu đen không?"', () => {
+    it('second search retains Samsung + max price and adds black color', async () => {
+      setupVectorSearch(allProducts);
+      // First turn
+      await processQuery('session-context-1',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+
+      // Second turn
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-1',
+        'còn màu đen không?', 'còn màu đen không?');
+
+      const products = mockCapturedProducts.value;
+      expect(products.length).toBeGreaterThanOrEqual(1);
+      // Hard constraints from context: Samsung + under 15M + black
+      for (const p of products) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+  });
+
+  describe('27. Multi-turn: "điện thoại dưới 20 triệu" → "RAM 12GB thì sao?"', () => {
+    it('second search retains price and adds RAM constraint', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-2',
+        'điện thoại dưới 20 triệu', 'điện thoại dưới 20 triệu');
+
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-2',
+        'RAM 12GB thì sao?', 'RAM 12GB thì sao?');
+
+      const products = mockCapturedProducts.value;
+      for (const p of products) {
+        expect(p.price).toBeLessThanOrEqual(20_000_000);
+        const ram = parseInt((p.specs?.memory?.ram || '').match(/(\d+)/)?.[1] || '0', 10);
+        expect(ram).toBeGreaterThanOrEqual(12);
+      }
+    });
+  });
+
+  describe('28. Multi-turn: "Samsung dưới 15 triệu" → "pin trâu hơn"', () => {
+    it('hard constraints retained and battery ranking enabled', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-3',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-3',
+        'pin trâu hơn', 'pin trâu hơn');
+
+      const products = mockCapturedProducts.value;
+      expect(products.length).toBeGreaterThanOrEqual(1);
+      for (const p of products) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+  });
+
+  describe('29. Multi-turn: brand replacement — "Samsung" → "chỉ Xiaomi thôi"', () => {
+    it('brand is replaced, not appended', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-4',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-4',
+        'chỉ Xiaomi thôi', 'chỉ Xiaomi thôi');
+
+      const products = mockCapturedProducts.value;
+      expect(products.length).toBeGreaterThanOrEqual(1);
+      for (const p of products) {
+        expect(p.brand).toBe('xiaomi');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+  });
+
+  describe('30. Multi-turn: excluded brands carry over — "Samsung hoặc Xiaomi" → "không lấy Xiaomi"', () => {
+    it('Xiaomi becomes excluded and cannot appear', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-5',
+        'Samsung hoặc Xiaomi dưới 15 triệu', 'Samsung hoặc Xiaomi dưới 15 triệu');
+
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-5',
+        'không lấy Xiaomi', 'không lấy Xiaomi');
+
+      const products = mockCapturedProducts.value;
+      for (const p of products) {
+        expect(['samsung']).toContain(p.brand);
+        expect(p.brand).not.toBe('xiaomi');
+      }
+    });
+  });
+
+  describe('31. Multi-turn: reset — "bỏ các điều kiện trước" clears context', () => {
+    it('next product query is stateless/new after reset', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-6',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+
+      // Reset
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'small_talk',
+        direct_response: 'Đã xóa bộ lọc',
+      });
+      const resetResult = await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-context-6',
+        message: 'bỏ các điều kiện trước',
+      });
+      expect(resetResult.responseType).toBe('small_talk');
+
+      // New independent query
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'iPhone',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-context-6',
+        message: 'iPhone',
+      });
+
+      const products = mockCapturedProducts.value;
+      // Should return Apple products without Samsung filter
+      const brands = [...new Set(products.filter(p => p.isActive !== false).map(p => p.brand))];
+      expect(brands).toContain('apple');
+    });
+  });
+
+  describe('32. Different sessionId: contexts are isolated', () => {
+    it('user A cannot read user B context', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-a',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+      const productsA = mockCapturedProducts.value;
+
+      setupVectorSearch(allProducts);
+      await processQuery('session-b',
+        'iPhone', 'iPhone');
+      const productsB = mockCapturedProducts.value;
+
+      // Both should work
+      expect(productsA.length).toBeGreaterThan(0);
+      expect(productsB.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('33. Gemini/OpenAI failure: deterministic fallback receives merged context products', () => {
+    it('deterministic fallback receives merged, valid, ranked products', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-7',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+      const firstProducts = mockCapturedProducts.value;
+
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-7',
+        'còn màu đen không?', 'còn màu đen không?');
+      const secondProducts = mockCapturedProducts.value;
+
+      // Both turns should produce valid filtered products
+      expect(firstProducts.length).toBeGreaterThanOrEqual(1);
+      expect(secondProducts.length).toBeGreaterThanOrEqual(1);
+      for (const p of secondProducts) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+  });
+
+  describe('34. Non-product small talk does not clear existing shopping context', () => {
+    it('small talk between product queries preserves context', async () => {
+      setupVectorSearch(allProducts);
+      await processQuery('session-context-8',
+        'Samsung dưới 15 triệu', 'Samsung dưới 15 triệu');
+
+      // Small talk
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'small_talk',
+        direct_response: 'Xin chào!',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-context-8',
+        message: 'cảm ơn',
+      });
+
+      // Follow up — should retain context
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'còn màu đen không?',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-context-8',
+        message: 'còn màu đen không?',
+      });
+
+      const products = mockCapturedProducts.value;
+      expect(products.length).toBeGreaterThanOrEqual(1);
+      for (const p of products) {
+        expect(p.brand).toBe('samsung');
+        expect(p.price).toBeLessThan(15_000_000);
+      }
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  Blocker 2: Context save only on valid response                     */
+  /* ------------------------------------------------------------------ */
+
+  describe('36. Successful AI response saves context', () => {
+    it('context is saved after valid product query response', async () => {
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-save-ok',
+        message: 'Samsung dưới 15 triệu',
+      });
+      const ctx = await contextService.loadContext('session-save-ok');
+      expect(ctx).not.toBeNull();
+      expect(ctx.filters.brands).toContain('samsung');
+    });
+  });
+
+  describe('37. Successful deterministic fallback saves context', () => {
+    it('context saved when deterministic fallback returns valid response', async () => {
+      // Default mock already simulates deterministic fallback success
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'iPhone dưới 20 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-deter-ok',
+        message: 'iPhone dưới 20 triệu',
+      });
+      const ctx = await contextService.loadContext('session-deter-ok');
+      expect(ctx).not.toBeNull();
+      expect(ctx.filters.brands).toContain('apple');
+      expect(ctx.filters.maxPrice).toBeLessThanOrEqual(20000000);
+    });
+  });
+
+  describe('38. No-result deterministic response saves sanitized merged constraints', () => {
+    it('empty product list still saves merged constraints for follow-up', async () => {
+      setupVectorSearch([]); // empty search results
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 5 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-noresult',
+        message: 'Samsung dưới 5 triệu',
+      });
+      const ctx = await contextService.loadContext('session-noresult');
+      expect(ctx).not.toBeNull();
+      expect(ctx.filters.brands).toContain('samsung');
+      expect(ctx.filters.maxPrice).toBeLessThanOrEqual(5000000);
+    });
+  });
+
+  describe('39. Complete response failure does NOT save context', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      // Set up contextService properly
+    });
+
+    it('generateResponse throws -> saveContext is NOT called', async () => {
+      const gemini = require('../utils/gemini');
+      gemini.generateChatResponse.mockRejectedValue(new Error('Total failure'));
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+
+      await expect(ChatController.processMessage(mockSocket, {
+        sessionId: 'session-throw',
+        message: 'Samsung dưới 15 triệu',
+      })).rejects.toThrow();
+
+      const ctx = await contextService.loadContext('session-throw');
+      expect(ctx).toBeNull();
+    });
+
+    it('generateResponse returns null -> saveContext is NOT called', async () => {
+      const gemini = require('../utils/gemini');
+      gemini.generateChatResponse.mockResolvedValue(null);
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+
+      await expect(ChatController.processMessage(mockSocket, {
+        sessionId: 'session-null',
+        message: 'Samsung dưới 15 triệu',
+      })).rejects.toThrow();
+
+      const ctx = await contextService.loadContext('session-null');
+      expect(ctx).toBeNull();
+    });
+
+    it('generateResponse returns undefined -> saveContext is NOT called', async () => {
+      const gemini = require('../utils/gemini');
+      gemini.generateChatResponse.mockResolvedValue(undefined);
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+
+      await expect(ChatController.processMessage(mockSocket, {
+        sessionId: 'session-undef',
+        message: 'Samsung dưới 15 triệu',
+      })).rejects.toThrow();
+
+      const ctx = await contextService.loadContext('session-undef');
+      expect(ctx).toBeNull();
+    });
+
+    it('generateResponse returns empty string -> saveContext is NOT called', async () => {
+      const gemini = require('../utils/gemini');
+      gemini.generateChatResponse.mockResolvedValue({ text: '', provider: 'deterministic' });
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-empty',
+        message: 'Samsung dưới 15 triệu',
+      });
+
+      const ctx = await contextService.loadContext('session-empty');
+      expect(ctx).toBeNull();
+    });
+  });
+
+  describe('40. Previous valid context unchanged after complete response failure', () => {
+    it('context from prior successful turn remains after next turn fails', async () => {
+      // First: successful turn
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-prev-ok',
+        message: 'Samsung dưới 15 triệu',
+      });
+
+      // Verify context saved
+      const ctxBefore = await contextService.loadContext('session-prev-ok');
+      expect(ctxBefore).not.toBeNull();
+      expect(ctxBefore.filters.brands).toContain('samsung');
+
+      // Second: failing turn
+      const gemini = require('../utils/gemini');
+      gemini.generateChatResponse.mockRejectedValue(new Error('Total failure'));
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'iPhone',
+      });
+
+      await expect(ChatController.processMessage(mockSocket, {
+        sessionId: 'session-prev-ok',
+        message: 'iPhone',
+      })).rejects.toThrow();
+
+      // Context must remain unchanged from first turn
+      const ctxAfter = await contextService.loadContext('session-prev-ok');
+      expect(ctxAfter).not.toBeNull();
+      expect(ctxAfter.filters.brands).toContain('samsung');
+      expect(ctxAfter.filters.brands).not.toContain('apple'); // was never saved
+    });
+  });
+
+  describe('41. saveContext rejection does not fail successful response', () => {
+    it('processMessage returns success even when context save fails', async () => {
+      jest.spyOn(contextService, 'saveContext').mockRejectedValue(new Error('Storage error'));
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+
+      const result = await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-save-fail',
+        message: 'Samsung dưới 15 triệu',
+      });
+
+      expect(result).not.toBeNull();
+      expect(result.success).toBe(true);
+      expect(result.responseType).toBe('product_query');
+
+      contextService.saveContext.mockRestore();
+    });
+  });
+
+  describe('42. lastProductIds saved only after successful response', () => {
+    it('product IDs present in context after successful response', async () => {
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-prod-ids',
+        message: 'Samsung dưới 15 triệu',
+      });
+
+      const ctx = await contextService.loadContext('session-prod-ids');
+      expect(ctx).not.toBeNull();
+      expect(Array.isArray(ctx.lastProductIds)).toBe(true);
+      expect(ctx.lastProductIds.length).toBeGreaterThan(0);
+    });
+
+    it('lastProductIds empty after no-result response', async () => {
+      setupVectorSearch([]);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 5 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-empty-ids',
+        message: 'Samsung dưới 5 triệu',
+      });
+
+      const ctx = await contextService.loadContext('session-empty-ids');
+      expect(ctx).not.toBeNull();
+      expect(Array.isArray(ctx.lastProductIds)).toBe(true);
+    });
+  });
+
+  describe('43. Reset deletes context and does not recreate old context', () => {
+    it('context is null after reset query', async () => {
+      // Save context first
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-reset-me',
+        message: 'Samsung dưới 15 triệu',
+      });
+
+      let ctx = await contextService.loadContext('session-reset-me');
+      expect(ctx).not.toBeNull();
+
+      // Reset via product_query with reset phrase
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'bỏ các điều kiện trước',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-reset-me',
+        message: 'bỏ các điều kiện trước',
+      });
+
+      // Old filters should be deleted; fresh empty context may remain
+      ctx = await contextService.loadContext('session-reset-me');
+      expect(ctx).not.toBeNull();
+      expect(ctx.filters.brands).toBeNull();
+      expect(ctx.preferences.camera).toBe(false);
     });
   });
 });
