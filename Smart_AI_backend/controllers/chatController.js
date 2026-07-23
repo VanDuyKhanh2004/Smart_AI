@@ -8,6 +8,7 @@ const {
 } = require("../utils/gemini");
 const { parseProductConstraints } = require("../utils/productConstraintParser");
 const { matchesProductConstraints } = require("../utils/productValidator");
+const { rankProducts } = require("../utils/productRanking");
 
 class ChatController {
   /**
@@ -107,9 +108,14 @@ class ChatController {
    * Tìm kiếm sản phẩm liên quan bằng vector similarity
    */
   async searchRelevantProducts(clarifiedQuery, limit = 5) {
-    const { cleanedQuery, filters } = parseProductConstraints(clarifiedQuery);
+    const { cleanedQuery, filters, preferences } = parseProductConstraints(clarifiedQuery);
     const searchQuery = cleanedQuery || clarifiedQuery;
-    const result = await productSearchService.search(searchQuery, limit, filters);
+
+    // When soft preferences are present, fetch a larger candidate pool so
+    // ranking has enough variety to reorder meaningfully.
+    const anyPref = preferences && (preferences.camera || preferences.battery || preferences.performance || preferences.compact);
+    const searchLimit = anyPref ? Math.min(Math.max(limit * 3, limit), 20) : limit;
+    const result = await productSearchService.search(searchQuery, searchLimit, filters);
 
     // Final validation gate — applies constraints that are hard to express in MongoDB
     // e.g. RAM/storage/color which require string parsing.
@@ -117,7 +123,12 @@ class ChatController {
       result.products = result.products.filter(p => matchesProductConstraints(p, filters));
     }
 
-    return result.products;
+    // Rank by soft preferences (deterministic, explainable).
+    // Returns all filtered products reordered; the caller or search
+    // service handles the final limit.
+    const { ranked } = rankProducts(result.products, preferences);
+
+    return ranked;
   }
 
   /**
