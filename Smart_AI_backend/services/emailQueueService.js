@@ -113,14 +113,16 @@ function enqueueUnlockAccountEmail(user, unlockUrl, correlationId) {
 }
 
 function enqueueOrderConfirmationEmail(user, order, correlationId) {
+  const orderId = order && order._id ? order._id.toString() : null;
   const payload = {
     jobType: 'email.order-confirmation',
     to: user.email,
-    name: user.name || order.shippingAddress?.fullName,
+    name: user.name || (order && order.shippingAddress ? order.shippingAddress.fullName : null),
     order,
+    orderId,
     correlationId,
   };
-  return enqueue('email.order-confirmation', payload, `order-confirmation-${order._id || order.orderNumber}`);
+  return enqueue('email.order-confirmation', payload, `order-confirmation-${orderId || (order && order.orderNumber) || 'unknown'}`);
 }
 
 module.exports = {
