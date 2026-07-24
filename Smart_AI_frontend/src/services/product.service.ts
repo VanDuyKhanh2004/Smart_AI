@@ -19,7 +19,7 @@ export const productService = {
       const response = await apiClient.get<GetAllProductsResponse>('/products', {
         params: {
           page: params.page || 1,
-          limit: params.limit ||20,
+          limit: params.limit || 20,
           ...(params.brand && { brand: params.brand }),
           ...(params.minPrice && { minPrice: params.minPrice }),
           ...(params.maxPrice && { maxPrice: params.maxPrice }),
@@ -31,7 +31,19 @@ export const productService = {
         },
       });
 
-      return response.data;
+      const body = response.data;
+      if (!body || typeof body !== 'object') {
+        throw new Error('API returned unexpected response format');
+      }
+      const data = (body as GetAllProductsResponse).data;
+      if (!data || typeof data !== 'object') {
+        throw new Error('API returned unexpected response format');
+      }
+      if (!Array.isArray(data.products)) {
+        throw new Error('API returned unexpected response format');
+      }
+
+      return body;
     } catch (error) {
       throw new Error(error as string);
     }

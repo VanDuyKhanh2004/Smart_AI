@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { useAuthStore } from "@/stores/authStore";
 import { initGoogleIdentity, setGoogleCallback, renderGoogleButton } from "@/lib/googleIdentity";
+import { resolveBackendOrigin } from "@/lib/apiBaseUrl";
 
 const GoogleLoginButton: React.FC = () => {
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -23,10 +24,7 @@ const GoogleLoginButton: React.FC = () => {
     setError("");
 
     try {
-      const api = `${import.meta.env.VITE_API_BASE_URL.replace(
-        "/api",
-        "",
-      )}/api/auth/google-login`;
+      const api = `${resolveBackendOrigin()}/api/auth/google-login`;
 
       const res = await axios.post(api, { credential });
 

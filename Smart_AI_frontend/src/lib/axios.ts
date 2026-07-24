@@ -1,11 +1,12 @@
 import axios from 'axios';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { resolveApiBaseUrl } from './apiBaseUrl';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+  baseURL: resolveApiBaseUrl(),
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -44,8 +45,37 @@ apiClient.interceptors.request.use(
 );
 
 
+function hasHeaderGetMethod(headers: unknown): headers is { get(name: string): unknown } {
+  return typeof headers === 'object' && headers !== null &&
+    'get' in headers && typeof (headers as Record<string, unknown>).get === 'function';
+}
+
+function normalizeHeaderValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return String(value[0] ?? '');
+  return String(value);
+}
+
+export function isHtmlResponse(response: { headers?: unknown }): boolean {
+  const headers = response.headers;
+  if (!headers || typeof headers !== 'object') return false;
+
+  const contentType = hasHeaderGetMethod(headers)
+    ? headers.get('content-type')
+    : (headers as Record<string, unknown>)['content-type'] ?? (headers as Record<string, unknown>)['Content-Type'] ?? '';
+
+  return normalizeHeaderValue(contentType).includes('text/html');
+}
+
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (isHtmlResponse(response)) {
+      return Promise.reject(new Error(
+        'API returned HTML instead of JSON. Check that VITE_API_BASE_URL points to the backend, not the frontend origin.'
+      ));
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
