@@ -183,6 +183,103 @@ describe('Email job processor', () => {
     await expect(realModule.sendOrderConfirmationEmail(user, order)).rejects.toThrow('missing order ID');
   });
 
+  describe('image rendering', () => {
+    const commonOrder = {
+      _id: 'oid', orderNumber: 'ORD-IMG', orderId: 'oid',
+      items: [
+        { product: 'p1', name: 'Product 1', price: 100000, quantity: 1, color: 'Black', image: 'https://example.com/img1.jpg' },
+      ],
+      total: 100000, subtotal: 100000, shippingFee: 0,
+      shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' },
+      createdAt: new Date(),
+    };
+
+    it('renders img tag with HTTPS image URL', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const { html } = realModule.buildOrderConfirmationEmail(user, commonOrder);
+      expect(html).toContain('<img src="https://example.com/img1.jpg"');
+      expect(html).toContain('alt="Product 1"');
+    });
+
+    it('falls back to item.product.image when item.image is empty', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: null, product: { image: 'https://example.com/fallback.jpg' } }],
+      };
+      const { html } = realModule.buildOrderConfirmationEmail(user, order);
+      expect(html).toContain('https://example.com/fallback.jpg');
+    });
+
+    it('falls back to item.productImage when item.image and item.product are missing', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: null, product: undefined, productImage: 'https://example.com/v2.jpg' }],
+      };
+      const { html } = realModule.buildOrderConfirmationEmail(user, order);
+      expect(html).toContain('https://example.com/v2.jpg');
+    });
+
+    it('renders placeholder div when no image URL is available', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: null, product: { image: null }, productImage: null }],
+      };
+      const { html } = realModule.buildOrderConfirmationEmail(user, order);
+      expect(html).not.toContain('<img');
+      expect(html).toContain('background-color: #f1f5f9');
+    });
+
+    it('rejects relative image URLs, renders placeholder instead', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: '/uploads/product.jpg' }],
+      };
+      const { html } = realModule.buildOrderConfirmationEmail(user, order);
+      expect(html).not.toContain('/uploads/product.jpg');
+      expect(html).toContain('background-color: #f1f5f9');
+    });
+
+    it('rejects javascript: and data: URLs', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order1 = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: 'javascript:alert(1)' }],
+      };
+      const order2 = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: 'data:image/svg+xml,<script>alert(1)</script>' }],
+      };
+      const html1 = realModule.buildOrderConfirmationEmail(user, order1).html;
+      const html2 = realModule.buildOrderConfirmationEmail(user, order2).html;
+      expect(html1).not.toContain('src="');
+      expect(html2).not.toContain('src="');
+      expect(html1).toContain('background-color: #f1f5f9');
+      expect(html2).toContain('background-color: #f1f5f9');
+    });
+
+    it('HTML-escapes alt text', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], name: 'Product <script>alert("xss")</script> & More' }],
+      };
+      const { html } = realModule.buildOrderConfirmationEmail(user, order);
+      expect(html).toContain('alt="Product &lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt; &amp; More"');
+      expect(html).not.toContain('<script>alert(');
+    });
+  });
+
   it('throws on unknown job type', async () => {
     const { processJob } = require('../jobs/emailJobs');
     const job = {

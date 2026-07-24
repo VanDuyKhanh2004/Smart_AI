@@ -6,7 +6,7 @@ import { CartPage } from '@/features/cart';
 import { WishlistPage } from '@/features/wishlist';
 import { LoginPage, RegisterPage, VerifyEmailPage, ForgotPasswordPage, ResetPasswordPage } from '@/features/auth';
 import { AdminProductPage, AdminReviewsPage, AdminQAPage, AdminDashboardPage, AdminPromotionPage, AdminStoresPage, AdminAppointmentsPage } from '@/features/admin';
-import { CheckoutPage, OrderHistoryPage, AdminOrderPage } from '@/features/orders';
+import { CheckoutPage, OrderHistoryPage, OrderDetailPage, AdminOrderPage } from '@/features/orders';
 import { ComparePage, CompareHistoryPage } from '@/features/compare';
 import { AddressManagementPage } from '@/features/addresses';
 import { ProfilePage } from '@/features/profile';
@@ -103,6 +103,16 @@ const AppRouter: React.FC = () => {
               </Layout>
             </ProtectedRoute>
           } 
+        />
+        <Route
+          path="/orders/:id"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <OrderDetailPage />
+              </Layout>
+            </ProtectedRoute>
+          }
         />
         {/* Compare routes - Requirements: 3.1, 5.3 */}
         <Route 

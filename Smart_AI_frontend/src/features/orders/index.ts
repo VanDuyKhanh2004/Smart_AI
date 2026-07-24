@@ -15,4 +15,5 @@ export { CancelOrderModal } from './components/CancelOrderModal';
 // Pages - mixed exports
 export { default as CheckoutPage } from './pages/CheckoutPage';
 export { OrderHistoryPage } from './pages/OrderHistoryPage';
+export { OrderDetailPage } from './pages/OrderDetailPage';
 export { AdminOrderPage } from './pages/AdminOrderPage';
