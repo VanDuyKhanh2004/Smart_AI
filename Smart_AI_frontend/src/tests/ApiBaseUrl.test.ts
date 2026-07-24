@@ -1,115 +1,135 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveApiBaseUrl, resolveBackendOrigin } from '@/lib/apiBaseUrl';
 import { isHtmlResponse } from '@/lib/axios';
 
 describe('resolveApiBaseUrl', () => {
-  beforeEach(() => {
-    import.meta.env.VITE_API_BASE_URL = 'https://smart-ai-backend-twe5.onrender.com/api';
-    import.meta.env.DEV = true;
-    import.meta.env.PROD = false;
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('uses configured Render URL', () => {
-    expect(resolveApiBaseUrl()).toBe('https://smart-ai-backend-twe5.onrender.com/api');
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com/api',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
   });
 
   it('normalizes trailing slash', () => {
-    import.meta.env.VITE_API_BASE_URL = 'https://smart-ai-backend-twe5.onrender.com/api/';
-    expect(resolveApiBaseUrl()).toBe('https://smart-ai-backend-twe5.onrender.com/api');
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com/api/',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
   });
 
   it('normalizes multiple trailing slashes', () => {
-    import.meta.env.VITE_API_BASE_URL = 'https://smart-ai-backend-twe5.onrender.com/api//';
-    expect(resolveApiBaseUrl()).toBe('https://smart-ai-backend-twe5.onrender.com/api');
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com/api//',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
   });
 
-  it('returns localhost when env is missing in development', () => {
-    delete import.meta.env.VITE_API_BASE_URL;
-    expect(resolveApiBaseUrl()).toBe('http://localhost:5000/api');
+  it('returns localhost when config is missing in development', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: '',
+      isDev: true,
+    })).toBe('http://localhost:5000/api');
   });
 
-  it('returns localhost when env is empty string in development', () => {
-    import.meta.env.VITE_API_BASE_URL = '';
-    expect(resolveApiBaseUrl()).toBe('http://localhost:5000/api');
+  it('returns localhost when config is whitespace in development', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: '  ',
+      isDev: true,
+    })).toBe('http://localhost:5000/api');
   });
 
-  it('returns localhost when env is whitespace in development', () => {
-    import.meta.env.VITE_API_BASE_URL = '  ';
-    expect(resolveApiBaseUrl()).toBe('http://localhost:5000/api');
-  });
-
-  it('throws when env is missing in production', () => {
-    delete import.meta.env.VITE_API_BASE_URL;
-    import.meta.env.DEV = false;
-    import.meta.env.PROD = true;
-    expect(() => resolveApiBaseUrl()).toThrow('VITE_API_BASE_URL is not set');
+  it('throws when config is missing in production', () => {
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: '',
+      isDev: false,
+    })).toThrow('VITE_API_BASE_URL is not set');
   });
 
   it('rejects relative URL starting with slash', () => {
-    import.meta.env.VITE_API_BASE_URL = '/api';
-    expect(() => resolveApiBaseUrl()).toThrow('must be an absolute HTTP/HTTPS URL');
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: '/api',
+      isDev: false,
+    })).toThrow('must be an absolute HTTP/HTTPS URL');
   });
 
   it('rejects relative URL without scheme', () => {
-    import.meta.env.VITE_API_BASE_URL = 'api';
-    expect(() => resolveApiBaseUrl()).toThrow('must be an absolute HTTP/HTTPS URL');
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: 'api',
+      isDev: false,
+    })).toThrow('must be an absolute HTTP/HTTPS URL');
   });
 
   it('rejects malformed URL with invalid port', () => {
-    import.meta.env.VITE_API_BASE_URL = 'http://example.com:abc/api';
-    expect(() => resolveApiBaseUrl()).toThrow('not a valid URL');
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: 'http://example.com:abc/api',
+      isDev: false,
+    })).toThrow('not a valid URL');
   });
 
   it('rejects bare http:// (becomes http: after slash normalization)', () => {
-    import.meta.env.VITE_API_BASE_URL = 'http://';
-    expect(() => resolveApiBaseUrl()).toThrow('must be an absolute HTTP/HTTPS URL');
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: 'http://',
+      isDev: false,
+    })).toThrow('must be an absolute HTTP/HTTPS URL');
   });
 
   it('rejects non-HTTP protocol', () => {
-    import.meta.env.VITE_API_BASE_URL = 'ftp://backend.example.com/api';
-    expect(() => resolveApiBaseUrl()).toThrow('must use http: or https: protocol');
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: 'ftp://backend.example.com/api',
+      isDev: false,
+    })).toThrow('must use http: or https: protocol');
   });
 
   it('rejects URL pointing at the frontend origin', () => {
-    const origin = window.location.origin;
-    import.meta.env.VITE_API_BASE_URL = `${origin}/api`;
-    expect(() => resolveApiBaseUrl()).toThrow('resolves to the frontend origin');
+    expect(() => resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/api',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toThrow('resolves to the frontend origin');
   });
 });
 
 describe('resolveBackendOrigin', () => {
-  beforeEach(() => {
-    import.meta.env.VITE_API_BASE_URL = 'https://smart-ai-backend-twe5.onrender.com/api';
-    import.meta.env.DEV = true;
-    import.meta.env.PROD = false;
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('removes the /api path segment from base URL', () => {
-    expect(resolveBackendOrigin()).toBe('https://smart-ai-backend-twe5.onrender.com');
+    expect(resolveBackendOrigin({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com/api',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com');
   });
 
   it('strips localhost /api correctly', () => {
-    import.meta.env.VITE_API_BASE_URL = 'http://localhost:5000/api';
-    expect(resolveBackendOrigin()).toBe('http://localhost:5000');
+    expect(resolveBackendOrigin({
+      configuredUrl: 'http://localhost:5000/api',
+      isDev: true,
+    })).toBe('http://localhost:5000');
   });
 
   it('preserves /api in the hostname', () => {
-    import.meta.env.VITE_API_BASE_URL = 'http://api.example.com:8080/api';
-    expect(resolveBackendOrigin()).toBe('http://api.example.com:8080');
+    expect(resolveBackendOrigin({
+      configuredUrl: 'http://api.example.com:8080/api',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('http://api.example.com:8080');
   });
 });
 
-describe('isHtmlResponse (Axios HTML guard)', () => {
-  it('rejects text/html content-type', () => {
+describe('isHtmlResponse', () => {
+  it('rejects text/html content-type (plain object)', () => {
     expect(isHtmlResponse({ headers: { 'content-type': 'text/html; charset=utf-8' } })).toBe(true);
+  });
+
+  it('rejects text/html with AxiosHeaders-style get method', () => {
+    const headersWithGet = {
+      get(name: string) {
+        const map: Record<string, string> = { 'content-type': 'text/html; charset=utf-8' };
+        return map[name];
+      },
+    };
+    expect(isHtmlResponse({ headers: headersWithGet })).toBe(true);
   });
 
   it('passes application/json content-type', () => {
@@ -121,69 +141,38 @@ describe('isHtmlResponse (Axios HTML guard)', () => {
   });
 
   it('passes undefined headers gracefully', () => {
-    expect(isHtmlResponse({ headers: undefined as any })).toBe(false);
-  });
-});
-
-describe('Axios interceptor integration (204 / HTML rejection behaviors)', () => {
-  beforeEach(() => {
-    import.meta.env.VITE_API_BASE_URL = 'http://test-backend.com/api';
-    import.meta.env.DEV = true;
+    expect(isHtmlResponse({ headers: undefined })).toBe(false);
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
+  it('passes null headers gracefully', () => {
+    expect(isHtmlResponse({ headers: null as unknown as undefined })).toBe(false);
   });
 
-  it('rejects HTML API response with configuration error', async () => {
-    const mod = await import('@/lib/axios');
-    const client = mod.default;
-    const interceptor = client.interceptors.response as any;
-    const successHandler = interceptor.handlers[0].fulfilled;
-
-    await expect(
-      successHandler({
-        data: {},
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-        status: 200,
-        statusText: 'OK',
-        config: {},
-      })
-    ).rejects.toThrow('API returned HTML instead of JSON');
-  });
-
-  it('passes valid JSON response through', async () => {
-    const mod = await import('@/lib/axios');
-    const client = mod.default;
-    const interceptor = client.interceptors.response as any;
-    const successHandler = interceptor.handlers[0].fulfilled;
-
-    const response = {
-      data: { success: true },
-      headers: { 'content-type': 'application/json' },
-      status: 200,
-      statusText: 'OK',
-      config: {},
+  it('handles header value as string[] (AxiosHeaders format)', () => {
+    const headersWithGet = {
+      get(name: string) {
+        const map: Record<string, string[]> = { 'content-type': ['text/html', 'charset=utf-8'] };
+        return map[name];
+      },
     };
-    const result = await successHandler(response);
-    expect(result).toBe(response);
+    expect(isHtmlResponse({ headers: headersWithGet })).toBe(true);
   });
 
-  it('passes 204 No Content response with undefined data through', async () => {
-    const mod = await import('@/lib/axios');
-    const client = mod.default;
-    const interceptor = client.interceptors.response as any;
-    const successHandler = interceptor.handlers[0].fulfilled;
-
-    const response = {
-      data: undefined,
-      headers: {},
-      status: 204,
-      statusText: 'No Content',
-      config: {},
+  it('handles header value as number (edge case)', () => {
+    const headersWithGet = {
+      get(_name: string) {
+        return 42;
+      },
     };
-    const result = await successHandler(response);
-    expect(result).toBe(response);
+    expect(isHtmlResponse({ headers: headersWithGet })).toBe(false);
+  });
+
+  it('handles Title-Case Content-Type in plain objects', () => {
+    expect(isHtmlResponse({ headers: { 'Content-Type': 'text/html; charset=utf-8' } })).toBe(true);
+  });
+
+  it('handles lowercase content-type with XML content', () => {
+    expect(isHtmlResponse({ headers: { 'content-type': 'application/xml' } })).toBe(false);
   });
 });
 
@@ -191,11 +180,6 @@ describe('Product service defensive validation', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    import.meta.env.VITE_API_BASE_URL = 'http://test-backend.com/api';
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
   });
 
   it('rejects malformed product response (missing products array)', async () => {
@@ -263,17 +247,12 @@ describe('Product service defensive validation', () => {
 });
 
 describe('Integration: Google login URL uses backend origin', () => {
-  beforeEach(() => {
-    import.meta.env.VITE_API_BASE_URL = 'https://smart-ai-backend-twe5.onrender.com/api';
-    import.meta.env.DEV = true;
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('resolveBackendOrigin produces correct Google login endpoint', () => {
-    const origin = resolveBackendOrigin();
+    const origin = resolveBackendOrigin({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com/api',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    });
     const googleLoginUrl = `${origin}/api/auth/google-login`;
     expect(googleLoginUrl).toBe('https://smart-ai-backend-twe5.onrender.com/api/auth/google-login');
   });

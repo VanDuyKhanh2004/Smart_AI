@@ -45,9 +45,26 @@ apiClient.interceptors.request.use(
 );
 
 
-export function isHtmlResponse(response: { headers?: Record<string, string> }): boolean {
-  const contentType = response.headers?.['content-type'] || '';
-  return contentType.includes('text/html');
+function hasHeaderGetMethod(headers: unknown): headers is { get(name: string): unknown } {
+  return typeof headers === 'object' && headers !== null &&
+    'get' in headers && typeof (headers as Record<string, unknown>).get === 'function';
+}
+
+function normalizeHeaderValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return String(value[0] ?? '');
+  return String(value);
+}
+
+export function isHtmlResponse(response: { headers?: unknown }): boolean {
+  const headers = response.headers;
+  if (!headers || typeof headers !== 'object') return false;
+
+  const contentType = hasHeaderGetMethod(headers)
+    ? headers.get('content-type')
+    : (headers as Record<string, unknown>)['content-type'] ?? (headers as Record<string, unknown>)['Content-Type'] ?? '';
+
+  return normalizeHeaderValue(contentType).includes('text/html');
 }
 
 apiClient.interceptors.response.use(

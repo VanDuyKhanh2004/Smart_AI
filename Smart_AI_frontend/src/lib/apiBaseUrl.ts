@@ -1,10 +1,18 @@
 const DEFAULT_DEV_API_BASE = 'http://localhost:5000/api';
 
-export function resolveApiBaseUrl(): string {
-  const raw = import.meta.env.VITE_API_BASE_URL as string | undefined;
+export interface ResolveApiBaseUrlOptions {
+  configuredUrl?: string;
+  isDev?: boolean;
+  frontendOrigin?: string;
+}
+
+export function resolveApiBaseUrl(options?: ResolveApiBaseUrlOptions): string {
+  const raw = options?.configuredUrl ?? import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const isDev = options?.isDev ?? import.meta.env.DEV;
+  const frontendOrigin = options?.frontendOrigin ?? window.location.origin;
 
   if (!raw || !raw.trim()) {
-    if (import.meta.env.DEV) {
+    if (isDev) {
       return DEFAULT_DEV_API_BASE;
     }
     throw new Error(
@@ -44,7 +52,7 @@ export function resolveApiBaseUrl(): string {
     );
   }
 
-  if (url.origin === window.location.origin) {
+  if (url.origin === frontendOrigin) {
     throw new Error(
       'VITE_API_BASE_URL resolves to the frontend origin. ' +
       'API requests to this URL would be rewritten to index.html by Vercel.'
@@ -54,6 +62,6 @@ export function resolveApiBaseUrl(): string {
   return value;
 }
 
-export function resolveBackendOrigin(): string {
-  return new URL(resolveApiBaseUrl()).origin;
+export function resolveBackendOrigin(options?: ResolveApiBaseUrlOptions): string {
+  return new URL(resolveApiBaseUrl(options)).origin;
 }
