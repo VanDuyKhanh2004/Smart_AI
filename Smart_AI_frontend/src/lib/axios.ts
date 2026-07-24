@@ -1,11 +1,12 @@
 import axios from 'axios';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { resolveApiBaseUrl } from './apiBaseUrl';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+  baseURL: resolveApiBaseUrl(),
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -44,8 +45,20 @@ apiClient.interceptors.request.use(
 );
 
 
+export function isHtmlResponse(response: { headers?: Record<string, string> }): boolean {
+  const contentType = response.headers?.['content-type'] || '';
+  return contentType.includes('text/html');
+}
+
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (isHtmlResponse(response)) {
+      return Promise.reject(new Error(
+        'API returned HTML instead of JSON. Check that VITE_API_BASE_URL points to the backend, not the frontend origin.'
+      ));
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
