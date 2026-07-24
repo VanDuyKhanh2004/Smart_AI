@@ -16,6 +16,7 @@ jest.mock('../services/emailService', () => ({
   sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
   sendUnlockAccountEmail: jest.fn().mockResolvedValue(undefined),
   sendOrderConfirmationEmail: jest.fn().mockResolvedValue(undefined),
+  buildOrderConfirmationEmail: jest.fn(),
 }));
 
 const mockEmailService = () => require('../services/emailService');
@@ -99,7 +100,7 @@ describe('Email job processor', () => {
     const job = {
       id: 'e5',
       name: 'email.order-confirmation',
-      data: { jobType: 'email.order-confirmation', to: 'a@b.com', name: 'A', order, correlationId: 'cid-5' },
+      data: { jobType: 'email.order-confirmation', to: 'a@b.com', name: 'A', order, orderId: 'order-1', correlationId: 'cid-5' },
       attemptsMade: 0,
       timestamp: Date.now(),
     };
@@ -109,6 +110,77 @@ describe('Email job processor', () => {
       { name: 'A', email: 'a@b.com' },
       order,
     );
+  });
+
+  it('email template URL contains the expected order ID and no undefined/null/missing', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    const order = { _id: 'order-1', orderNumber: 'ORD-001', orderId: 'order-1', items: [], total: 100000, subtotal: 50000, shippingFee: 30000, shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' }, createdAt: new Date() };
+    const { html } = realModule.buildOrderConfirmationEmail(user, order);
+    expect(html).toContain('/orders/order-1');
+    expect(html).not.toContain('/orders/undefined');
+    expect(html).not.toContain('/orders/null');
+    expect(html).not.toContain('/orders/missing');
+  });
+
+  it('template URL links to /orders list when orderId is missing', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    const order = { _id: null, orderNumber: 'ORD-001', items: [], total: 100000, subtotal: 50000, shippingFee: 30000, shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' }, createdAt: new Date() };
+    const { html } = realModule.buildOrderConfirmationEmail(user, order);
+    const hrefMatch = html.match(/href="([^"]+)"[^>]*>/);
+    expect(hrefMatch).not.toBeNull();
+    expect(hrefMatch[1]).toContain('/orders');
+    expect(hrefMatch[1]).not.toContain('/orders/undefined');
+    expect(hrefMatch[1]).not.toContain('/orders/null');
+    expect(hrefMatch[1]).not.toContain('/orders/missing');
+    expect(hrefMatch[1]).toMatch(/\/orders$/);
+  });
+
+  it('top-level orderId takes precedence over order._id and order.id', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    const order = { _id: 'should-not-use', id: 'should-not-use-either', orderId: 'wins', orderNumber: 'ORD-001', items: [], total: 100000, subtotal: 50000, shippingFee: 30000, shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' }, createdAt: new Date() };
+    const { html } = realModule.buildOrderConfirmationEmail(user, order);
+    expect(html).toContain('/orders/wins');
+    expect(html).not.toContain('/orders/should-not-use');
+  });
+
+  it('serialized order.id works for backward compatibility', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    // Simulate a Mongoose-toJSON payload where _id was deleted and id was set
+    const order = { id: 'backward-compat-id', orderNumber: 'ORD-001', items: [], total: 100000, subtotal: 50000, shippingFee: 30000, shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' }, createdAt: new Date() };
+    const { html } = realModule.buildOrderConfirmationEmail(user, order);
+    expect(html).toContain('/orders/backward-compat-id');
+  });
+
+  it('orderId is URI-encoded in the tracking URL', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    const order = { _id: '507f1f77bcf86cd799439011', orderId: '507f/1f77+bcf=', orderNumber: 'ORD-001', items: [], total: 100000, subtotal: 50000, shippingFee: 30000, shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' }, createdAt: new Date() };
+    const { html } = realModule.buildOrderConfirmationEmail(user, order);
+    expect(html).toContain('/orders/507f%2F1f77%2Bbcf%3D');
+    expect(html).not.toContain('/orders/507f/1f77+bcf=');
+  });
+
+  it('FRONTEND_URL trailing slash is normalized', async () => {
+    const prev = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = 'https://example.com/';
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    const order = { _id: 'oid', orderNumber: 'ORD-001', orderId: 'oid', items: [], total: 100000, subtotal: 50000, shippingFee: 30000, shippingAddress: { fullName: 'Test', phone: '0123456789', address: '123 St', ward: 'W', district: 'D', city: 'C' }, createdAt: new Date() };
+    const { html } = realModule.buildOrderConfirmationEmail(user, order);
+    expect(html).toContain('https://example.com/orders/oid');
+    expect(html).not.toContain('https://example.com//orders/oid');
+    if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
+  });
+
+  it('sendOrderConfirmationEmail rejects missing orderId', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const user = { name: 'Test', email: 'a@b.com' };
+    const order = { orderNumber: 'ORD-001', items: [] };
+    await expect(realModule.sendOrderConfirmationEmail(user, order)).rejects.toThrow('missing order ID');
   });
 
   it('throws on unknown job type', async () => {
@@ -318,15 +390,35 @@ describe('Email queue service', () => {
     );
   });
 
-  it('enqueues order confirmation with order-based jobId', async () => {
+  it('enqueues order confirmation with orderId and order-based jobId', async () => {
     const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
     const user = { name: 'A', email: 'a@b.com' };
     const order = { _id: 'order-1', orderNumber: 'ORD-001' };
     await enqueueOrderConfirmationEmail(user, order, 'cid-3');
     expect(mockAdd).toHaveBeenCalledWith(
       'email.order-confirmation',
-      expect.objectContaining({ jobType: 'email.order-confirmation', order }),
+      expect.objectContaining({
+        jobType: 'email.order-confirmation',
+        order,
+        orderId: 'order-1',
+      }),
       expect.objectContaining({ jobId: 'order-confirmation-order-1' }),
+    );
+  });
+
+  it('enqueues order confirmation without orderId when order has no _id', async () => {
+    const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
+    const user = { name: 'A', email: 'a@b.com' };
+    const order = { orderNumber: 'ORD-002' };
+    await enqueueOrderConfirmationEmail(user, order, 'cid-4');
+    expect(mockAdd).toHaveBeenCalledWith(
+      'email.order-confirmation',
+      expect.objectContaining({
+        jobType: 'email.order-confirmation',
+        order,
+        orderId: null,
+      }),
+      expect.objectContaining({ jobId: 'order-confirmation-ORD-002' }),
     );
   });
 

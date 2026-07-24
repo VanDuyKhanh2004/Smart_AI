@@ -585,8 +585,11 @@ const sendUnlockAccountEmail = async (user, unlockUrl) => {
 
 const buildOrderConfirmationEmail = (user, order) => {
   const displayName =
-    user.name || order.shippingAddress.fullName || "Quý khách";
+    user.name || (order.shippingAddress && order.shippingAddress.fullName) || "Quý khách";
   const subject = `✅ Đơn hàng #${order.orderNumber} đã được tiếp nhận`;
+  const orderId = order.orderId || order._id || order.id;
+  const baseUrl = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, '');
+  const trackingUrl = orderId ? `${baseUrl}/orders/${encodeURIComponent(orderId)}` : `${baseUrl}/orders`;
 
   // Format currency
   const formatCurrency = (amount) => {
@@ -787,7 +790,7 @@ const buildOrderConfirmationEmail = (user, order) => {
                   <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                     <tr>
                       <td align="center" style="padding: 20px 0;">
-                        <a href="${process.env.FRONTEND_URL || "http://localhost:5173"}/orders/${order._id}" 
+                        <a href="${trackingUrl}" 
                            style="display: inline-block; padding: 14px 40px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
                           Theo dõi đơn hàng
                         </a>
@@ -830,6 +833,11 @@ const buildOrderConfirmationEmail = (user, order) => {
 };
 
 const sendOrderConfirmationEmail = async (user, order) => {
+  const orderId = order.orderId || order._id || order.id;
+  if (!orderId) {
+    throw new Error('Cannot send order confirmation email: missing order ID');
+  }
+
   const { subject, text, html } = buildOrderConfirmationEmail(user, order);
 
   await sendMail({
@@ -847,4 +855,5 @@ module.exports = {
   sendPasswordResetEmail,
   sendUnlockAccountEmail,
   sendOrderConfirmationEmail,
+  buildOrderConfirmationEmail,
 };
