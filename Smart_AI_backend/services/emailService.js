@@ -607,23 +607,44 @@ const buildOrderConfirmationEmail = (user, order) => {
     });
   };
 
+  const resolveImageUrl = (item) => {
+    const url = item.image || (item.product && item.product.image) || item.productImage;
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return url;
+    } catch {}
+    return null;
+  };
+
+  const escapeHtml = (str) => {
+    if (typeof str !== 'string') return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+  };
+
   // Build items HTML
   const itemsHtml = order.items
     .map(
-      (item) => `
+      (item) => {
+        const imageUrl = resolveImageUrl(item);
+        const safeAlt = escapeHtml(item.name);
+        const imageCell = imageUrl
+          ? `<img src="${imageUrl}" alt="${safeAlt}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0;">`
+          : `<div style="width: 50px; height: 50px; border-radius: 8px; background-color: #f1f5f9; border: 1px solid #e2e8f0;"></div>`;
+        return `
     <tr>
       <td style="padding: 15px; border-bottom: 1px solid #e2e8f0;">
         <table role="presentation" style="width: 100%; border-collapse: collapse;">
           <tr>
             <td style="width: 60px; vertical-align: top;">
-              ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0;">` : ""}
+              ${imageCell}
             </td>
             <td style="padding-left: 15px; vertical-align: top;">
               <p style="margin: 0 0 5px; color: #2d3748; font-weight: 600; font-size: 15px;">
-                ${item.name}
+                ${escapeHtml(item.name)}
               </p>
               <p style="margin: 0; color: #718096; font-size: 13px;">
-                Màu: ${item.color} | Số lượng: ${item.quantity}
+                Màu: ${escapeHtml(item.color)} | Số lượng: ${item.quantity}
               </p>
             </td>
             <td style="text-align: right; vertical-align: top; white-space: nowrap;">
@@ -635,7 +656,8 @@ const buildOrderConfirmationEmail = (user, order) => {
         </table>
       </td>
     </tr>
-  `,
+  `;
+      },
     )
     .join("");
 
