@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AdminOrderDetailDialog } from '@/features/orders/components/AdminOrderDetailDialog';
-import type { Order, UpdateOrderStatusRequest } from '@/types/order.type';
+import type { Order } from '@/types/order.type';
 
 function buildOrder(overrides: Partial<Order> = {}): Order {
   return {
