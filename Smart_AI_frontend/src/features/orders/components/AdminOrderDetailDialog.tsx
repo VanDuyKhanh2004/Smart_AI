@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,22 +17,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { OrderStatusBadge, getOrderStatusLabel } from "./OrderStatusBadge";
 import type { Order, OrderStatus, UpdateOrderStatusRequest } from "@/types/order.type";
 import { Loader2 } from "lucide-react";
+import { getAllowedNextStatuses } from "../utils/orderStatusTransitions";
+import type { AxiosError } from "axios";
 
 interface AdminOrderDetailDialogProps {
   order: Order | null;
   isOpen: boolean;
   onClose: () => void;
   onUpdateStatus: (orderId: string, data: UpdateOrderStatusRequest) => Promise<void>;
+  onRefreshOrder?: (orderId: string) => Promise<void>;
 }
-
-const statusOptions: OrderStatus[] = [
-  "pending",
-  "confirmed",
-  "processing",
-  "shipping",
-  "delivered",
-  "cancelled",
-];
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString("vi-VN", {
@@ -60,24 +54,23 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-
-/**
- * AdminOrderDetailDialog displays full order details with status update
- * Requirements 3.3: Display full order details in a dialog
- * Requirements 4.1: Update order status
- * Requirements 4.6: Handle status update with optimistic UI
- */
 export function AdminOrderDetailDialog({
   order,
   isOpen,
   onClose,
   onUpdateStatus,
+  onRefreshOrder,
 }: AdminOrderDetailDialogProps) {
   const [selectedStatus, setSelectedStatus] = useState<OrderStatus | null>(null);
   const [note, setNote] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const allowedNextStatuses = useMemo(() => {
+    if (!order) return [];
+    return getAllowedNextStatuses(order.status);
+  }, [order?.status]);
 
   if (!order) return null;
 
@@ -108,13 +101,20 @@ export function AdminOrderDetailDialog({
       };
 
       await onUpdateStatus(order.id || order._id!, data);
-      
-      // Reset form
+
       setSelectedStatus(null);
       setNote("");
       setCancelReason("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Cập nhật trạng thái thất bại");
+      const axiosErr = err as AxiosError<{ message?: string; code?: string }>;
+      const backendMessage = axiosErr?.response?.data?.message;
+      const backendCode = axiosErr?.response?.data?.code;
+      const displayMessage = backendMessage || (err instanceof Error ? err.message : "Cập nhật trạng thái thất bại");
+      setError(displayMessage);
+
+      if (backendCode === "INVALID_STATUS_TRANSITION" && onRefreshOrder) {
+        await onRefreshOrder(order.id || order._id!);
+      }
     } finally {
       setIsUpdating(false);
     }
@@ -151,14 +151,19 @@ export function AdminOrderDetailDialog({
                   <SelectValue placeholder="Chọn trạng thái" />
                 </SelectTrigger>
                 <SelectContent>
-                  {statusOptions.map((status) => (
+                  {/* Current status shown as first option (disabled) */}
+                  <SelectItem key={order.status} value={order.status} disabled>
+                    {getOrderStatusLabel(order.status)}
+                  </SelectItem>
+                  {/* Only valid next statuses */}
+                  {allowedNextStatuses.map((status) => (
                     <SelectItem key={status} value={status}>
                       {getOrderStatusLabel(status)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              
+
               <Button
                 onClick={handleUpdateStatus}
                 disabled={!selectedStatus || selectedStatus === order.status || isUpdating}
@@ -263,7 +268,6 @@ export function AdminOrderDetailDialog({
               <DetailRow label="Phí vận chuyển">
                 {formatCurrency(order.shippingFee)}
               </DetailRow>
-              {/* Promotion Info - Requirements 5.4 */}
               {order.promotion && (
                 <DetailRow label="Mã giảm giá">
                   <div className="flex flex-col">
@@ -271,8 +275,8 @@ export function AdminOrderDetailDialog({
                       {order.promotion.code}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      Giảm {order.promotion.discountType === 'percentage' 
-                        ? `${order.promotion.discountValue}%` 
+                      Giảm {order.promotion.discountType === 'percentage'
+                        ? `${order.promotion.discountValue}%`
                         : formatCurrency(order.promotion.discountValue)}
                     </span>
                     <span className="text-green-600">

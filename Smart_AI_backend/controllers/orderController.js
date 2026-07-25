@@ -8,6 +8,7 @@ const IdempotencyRecord = require('../models/IdempotencyRecord');
 const { computeRequestFingerprint, computeCheckoutFingerprint } = require('../utils/checkoutFingerprint');
 const logger = require('../utils/logger');
 const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
+const { STATUS_LIST, canTransition, getAllowedNextStatuses, isTerminal } = require('../services/orderStatusTransitions');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -747,8 +748,7 @@ const updateOrderStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ['pending', 'confirmed', 'processing', 'shipping', 'delivered', 'cancelled'];
-    if (!status || !validStatuses.includes(status)) {
+    if (!status || !STATUS_LIST.includes(status)) {
       await session.abortTransaction();
       return res.status(400).json({
         success: false,
@@ -768,29 +768,32 @@ const updateOrderStatus = async (req, res) => {
       });
     }
 
-    // Validate status transitions
-    const validTransitions = {
-      pending: ['confirmed', 'cancelled'],
-      confirmed: ['processing', 'cancelled'],
-      processing: ['shipping', 'cancelled'],
-      shipping: ['delivered', 'cancelled'],
-      delivered: [],
-      cancelled: []
-    };
+    // Reject same-status update
+    if (order.status === status) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: `Đơn hàng đã ở trạng thái "${status}"`,
+        code: 'INVALID_STATUS_TRANSITION',
+        allowedNextStatuses: getAllowedNextStatuses(order.status),
+      });
+    }
 
-    if (!validTransitions[order.status].includes(status)) {
+    // Reject invalid transition
+    if (!canTransition(order.status, status)) {
       await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: `Không thể chuyển từ trạng thái "${order.status}" sang "${status}"`,
-        code: 'INVALID_STATUS_TRANSITION'
+        code: 'INVALID_STATUS_TRANSITION',
+        allowedNextStatuses: getAllowedNextStatuses(order.status),
       });
     }
 
     // Update status
     order.status = status;
 
-    // Record timestamps based on status (Requirements 4.2, 4.3, 4.4)
+    // Record timestamps based on status
     const now = new Date();
     if (status === 'confirmed') {
       order.confirmedAt = now;
@@ -804,7 +807,7 @@ const updateOrderStatus = async (req, res) => {
         order.cancelReason = cancelReason;
       }
 
-      // Restore stock for cancelled orders (Requirement 4.5)
+      // Restore stock for cancelled orders
       for (const item of order.items) {
         await Product.findByIdAndUpdate(
           item.product,
@@ -814,8 +817,11 @@ const updateOrderStatus = async (req, res) => {
       }
     }
 
+    // Trim note before storing
+    const trimmedNote = note ? note.trim() : '';
+
     // Add to status history
-    order.addStatusHistory(status, note || '');
+    order.addStatusHistory(status, trimmedNote);
 
     await order.save({ session });
     await session.commitTransaction();
