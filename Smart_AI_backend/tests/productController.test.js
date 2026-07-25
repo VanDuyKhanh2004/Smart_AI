@@ -51,6 +51,15 @@ jest.mock('../services/embeddingQueueService', () => ({
   enqueueProductEmbedding: mockEnqueueProductEmbedding,
 }));
 
+const mockUploadProductImageIfNeeded = jest.fn();
+class MockProductImageValidationError extends Error {
+  constructor(message) { super(message); this.name = 'ProductImageValidationError'; this.statusCode = 400; this.code = 'INVALID_PRODUCT_IMAGE'; }
+}
+jest.mock('../services/productImageService', () => ({
+  uploadProductImageIfNeeded: mockUploadProductImageIfNeeded,
+  ProductImageValidationError: MockProductImageValidationError,
+}));
+
 const { createProduct, updateProduct } = require('../controllers/productController');
 const Product = require('../models/Product');
 const cache = require('../services/cacheService');
@@ -67,6 +76,7 @@ function mockReq(body, params = {}, query = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockComputeContentHash.mockReturnValue('changed-hash');
+  mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: '', imagePublicId: null });
 });
 
 describe('createProduct', () => {
@@ -788,5 +798,288 @@ describe('updateProduct', () => {
       expect.objectContaining({ err: expect.objectContaining({ message: 'Find failed' }) }),
       'Failed to update product',
     );
+  });
+});
+
+/* ============================================================
+   Product image upload integration tests
+============================================================ */
+describe('createProduct — image upload integration', () => {
+  it('calls uploadProductImageIfNeeded with Base64 input and stores imageUrl', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/test.jpg',
+      imagePublicId: 'smart-ai/products/test',
+    });
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn().mockResolvedValue({
+      _id: 'prod-img-1', name: 'Test', brand: 'test', image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/test.jpg',
+      imagePublicId: 'smart-ai/products/test',
+    });
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'prod-img-1', save: mockSave }));
+
+    const req = mockReq({ name: 'Test Phone', brand: 'Test', price: 100, description: 'A phone', image: 'data:image/jpeg;base64,/9j/4AAQ' });
+    const res = mockRes();
+    await createProduct(req, res);
+
+    expect(mockUploadProductImageIfNeeded).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4AAQ');
+    expect(mockStatus).toHaveBeenCalledWith(201);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/test.jpg',
+        }),
+      }),
+    );
+  });
+
+  it('preserves HTTPS URL without calling Cloudinary upload', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://cdn.example.com/phone.jpg', imagePublicId: null,
+    });
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn().mockResolvedValue({ _id: 'prod-2', name: 'Test', brand: 'test', image: 'https://cdn.example.com/phone.jpg' });
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'prod-2', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'https://cdn.example.com/phone.jpg' });
+    const res = mockRes();
+    await createProduct(req, res);
+
+    expect(mockUploadProductImageIfNeeded).toHaveBeenCalledWith('https://cdn.example.com/phone.jpg');
+    expect(mockStatus).toHaveBeenCalledWith(201);
+  });
+
+  it('accepts empty image for backward compatibility', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: '', imagePublicId: null });
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn().mockResolvedValue({ _id: 'prod-3', name: 'Test', brand: 'test', image: '' });
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'prod-3', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc' });
+    const res = mockRes();
+    await createProduct(req, res);
+
+    expect(mockUploadProductImageIfNeeded).toHaveBeenCalledWith(undefined);
+    expect(mockStatus).toHaveBeenCalledWith(201);
+  });
+
+  it('returns 400 with INVALID_PRODUCT_IMAGE code on validation error', async () => {
+    const { ProductImageValidationError } = require('../services/productImageService');
+    mockUploadProductImageIfNeeded.mockRejectedValue(new ProductImageValidationError('HTTP image URLs are not allowed'));
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn();
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'id', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'http://example.com/phone.jpg' });
+    const res = mockRes();
+    await createProduct(req, res);
+
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(400);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'INVALID_PRODUCT_IMAGE' }),
+    );
+  });
+
+  it('does not treat plain Error with matching name as validation error', async () => {
+    const fakeError = new Error('faux validation');
+    fakeError.name = 'ProductImageValidationError';
+    fakeError.statusCode = 400;
+    mockUploadProductImageIfNeeded.mockRejectedValue(fakeError);
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn();
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'id', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'http://example.com/phone.jpg' });
+    const res = mockRes();
+    await createProduct(req, res);
+
+    expect(mockStatus).toHaveBeenCalledWith(500);
+  });
+
+  it('returns controlled error when Cloudinary upload fails', async () => {
+    mockUploadProductImageIfNeeded.mockRejectedValue(new Error('Cloudinary is not configured'));
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn();
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'id', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'data:image/jpeg;base64,/9j/4AAQ' });
+    const res = mockRes();
+    await createProduct(req, res);
+
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('updateProduct — image upload integration', () => {
+  const existingProduct = {
+    _id: 'prod-update-img',
+    name: 'Old Phone',
+    brand: 'test',
+    price: 100,
+    description: 'Old desc',
+    image: 'https://cdn.example.com/old.jpg',
+    imagePublicId: null,
+    inStock: 5,
+    colors: [],
+    tags: [],
+    specs: {},
+    embeddingStatus: 'ready',
+    embeddingContentHash: 'abc',
+  };
+
+  it('calls upload once for new Base64 image and stores imageUrl and imagePublicId', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    Product.findById.mockResolvedValue({ ...existingProduct });
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingProduct, image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg', imagePublicId: 'smart-ai/products/new' });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockUploadProductImageIfNeeded).toHaveBeenCalledTimes(1);
+    expect(mockUploadProductImageIfNeeded).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4AAQ');
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-update-img',
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+          imagePublicId: 'smart-ai/products/new',
+        }),
+      }),
+      expect.any(Object),
+    );
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('does not upload when image is not provided in update', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: 'https://cdn.example.com/old.jpg', imagePublicId: null });
+    Product.findById.mockResolvedValue({ ...existingProduct });
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingProduct });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockUploadProductImageIfNeeded).not.toHaveBeenCalled();
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-update-img',
+      expect.not.objectContaining({ $set: expect.objectContaining({ image: expect.any(String) }) }),
+      expect.any(Object),
+    );
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('preserves existing image when image is unchanged HTTPS URL', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://cdn.example.com/old.jpg', imagePublicId: null,
+    });
+    Product.findById.mockResolvedValue({ ...existingProduct });
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingProduct });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'https://cdn.example.com/old.jpg' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockUploadProductImageIfNeeded).toHaveBeenCalledWith('https://cdn.example.com/old.jpg');
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('clears stale imagePublicId when external HTTPS URL is provided', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://cdn.example.com/new.jpg', imagePublicId: null,
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingWithCloudinary, image: 'https://cdn.example.com/new.jpg' });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'https://cdn.example.com/new.jpg' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-update-img',
+      expect.objectContaining({
+        $set: expect.objectContaining({ image: 'https://cdn.example.com/new.jpg' }),
+        $unset: { imagePublicId: '' },
+      }),
+      expect.any(Object),
+    );
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('clears stale imagePublicId when image is set to empty string', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: '', imagePublicId: null,
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingWithCloudinary, image: '' });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: '' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-update-img',
+      expect.objectContaining({
+        $set: expect.objectContaining({ image: '' }),
+        $unset: { imagePublicId: '' },
+      }),
+      expect.any(Object),
+    );
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('does not update product when upload validation fails — returns 400 with INVALID_PRODUCT_IMAGE', async () => {
+    const { ProductImageValidationError } = require('../services/productImageService');
+    mockUploadProductImageIfNeeded.mockRejectedValue(new ProductImageValidationError('HTTP image URLs are not allowed'));
+    Product.findById.mockResolvedValue({ ...existingProduct });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'http://example.com/bad.jpg' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(400);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'INVALID_PRODUCT_IMAGE' }),
+    );
+  });
+
+  it('does not treat plain Error with matching name as validation error in update', async () => {
+    const fakeError = new Error('faux validation');
+    fakeError.name = 'ProductImageValidationError';
+    fakeError.statusCode = 400;
+    mockUploadProductImageIfNeeded.mockRejectedValue(fakeError);
+    Product.findById.mockResolvedValue({ ...existingProduct });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'http://example.com/bad.jpg' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockStatus).toHaveBeenCalledWith(500);
+  });
+
+  it('leaves existing image unchanged on Cloudinary failure', async () => {
+    mockUploadProductImageIfNeeded.mockRejectedValue(new Error('Cloudinary is not configured'));
+    Product.findById.mockResolvedValue({ ...existingProduct });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(500);
   });
 });

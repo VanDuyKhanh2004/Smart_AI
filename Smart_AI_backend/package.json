@@ -14,7 +14,9 @@
     "dev": "nodemon index.js",
     "test": "jest --forceExit --detectOpenHandles",
     "test:watch": "jest --watch --forceExit --detectOpenHandles",
-    "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js"
+    "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js",
+    "migrate:product-images:dry-run": "node scripts/migrateProductImagesToCloudinary.js --dry-run",
+    "migrate:product-images": "node scripts/migrateProductImagesToCloudinary.js"
   },
   "dependencies": {
     "@getbrevo/brevo": "^6.0.2",
@@ -22,6 +24,7 @@
     "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.80.9",
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",

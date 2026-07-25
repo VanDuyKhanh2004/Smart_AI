@@ -248,6 +248,36 @@ describe('Email job processor', () => {
       expect(html).toContain('background-color: #f1f5f9');
     });
 
+    it('rejects HTTP image URL, renders placeholder instead', () => {
+      const realModule = jest.requireActual('../services/emailService');
+      const user = { name: 'Test', email: 'a@b.com' };
+      const order = {
+        ...commonOrder,
+        items: [{ ...commonOrder.items[0], image: 'http://example.com/phone.jpg' }],
+      };
+      const { html } = realModule.buildOrderConfirmationEmail(user, order);
+      expect(html).not.toContain('http://example.com/phone.jpg');
+      expect(html).toContain('background-color: #f1f5f9');
+    });
+
+    it('rejects localhost HTTPS URL in production', () => {
+      const prevNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        const realModule = jest.requireActual('../services/emailService');
+        const user = { name: 'Test', email: 'a@b.com' };
+        const order = {
+          ...commonOrder,
+          items: [{ ...commonOrder.items[0], image: 'https://localhost:5000/phone.jpg' }],
+        };
+        const { html } = realModule.buildOrderConfirmationEmail(user, order);
+        expect(html).not.toContain('<img');
+        expect(html).toContain('background-color: #f1f5f9');
+      } finally {
+        if (prevNodeEnv) process.env.NODE_ENV = prevNodeEnv; else delete process.env.NODE_ENV;
+      }
+    });
+
     it('rejects javascript: and data: URLs', () => {
       const realModule = jest.requireActual('../services/emailService');
       const user = { name: 'Test', email: 'a@b.com' };
