@@ -1816,4 +1816,132 @@ describe('updateOrderStatus', () => {
       expect(mockSession.endSession).toHaveBeenCalled();
     });
   });
+
+  describe('status transition hardening', () => {
+    it('rejects same-status update', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'confirmed' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(400);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'INVALID_STATUS_TRANSITION' })
+      );
+      expect(mockOrderAddStatusHistory).not.toHaveBeenCalled();
+      expect(orderDoc.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects pending -> delivered directly', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+
+      expect(mockStatus).toHaveBeenCalledWith(400);
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'INVALID_STATUS_TRANSITION' })
+      );
+      expect(mockOrderAddStatusHistory).not.toHaveBeenCalled();
+    });
+
+    it('returns allowedNextStatuses in the error response', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+
+      expect(mockJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: 'INVALID_STATUS_TRANSITION',
+          allowedNextStatuses: ['confirmed', 'cancelled'],
+        })
+      );
+    });
+
+    it('trims whitespace from note', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '  payment verified  ' } }), mockRes());
+
+      expect(mockOrderAddStatusHistory).toHaveBeenCalledWith('confirmed', 'payment verified');
+      expect(mockStatus).toHaveBeenCalledWith(200);
+    });
+
+    it('stores empty string note when note is whitespace only', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '   ' } }), mockRes());
+
+      expect(mockOrderAddStatusHistory).toHaveBeenCalledWith('confirmed', '');
+      expect(mockStatus).toHaveBeenCalledWith(200);
+    });
+
+    it('does not append status history on failed transition', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+      mockOrderSave.mockRejectedValue(new Error('Save failed'));
+
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+
+      expect(mockOrderAddStatusHistory).toHaveBeenCalledTimes(1);
+      expect(orderDoc.save).toHaveBeenCalled();
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('does not change order status on invalid transition', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+
+      expect(orderDoc.status).toBe('pending');
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('does not enqueue email on failed transition', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+
+      expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
+    });
+
+    it('correctly allows transitions per status', async () => {
+      const transitionMap = {
+        pending: ['confirmed', 'cancelled'],
+        confirmed: ['processing', 'cancelled'],
+        processing: ['shipping', 'cancelled'],
+        shipping: ['delivered', 'cancelled'],
+        delivered: [],
+        cancelled: [],
+      };
+
+      for (const [current, allowed] of Object.entries(transitionMap)) {
+        const orderDoc = defaultOrderDoc({ status: current });
+        for (const target of allowed) {
+          orderDoc.status = current; // reset
+          setupOrderFindByIdForStatus({ ...orderDoc, status: current });
+          await updateOrderStatus(makeReq({ body: { status: target } }), mockRes());
+          expect(mockStatus).toHaveBeenCalledWith(200);
+          mockStatus.mockClear();
+          mockJson.mockClear();
+        }
+        // test reject unexpected
+        const notAllowed = ['pending', 'confirmed', 'processing', 'shipping', 'delivered', 'cancelled']
+          .filter(s => s !== current && !allowed.includes(s));
+        for (const target of notAllowed) {
+          const doc = defaultOrderDoc({ status: current });
+          setupOrderFindByIdForStatus(doc);
+          await updateOrderStatus(makeReq({ body: { status: target } }), mockRes());
+          expect(mockStatus).toHaveBeenCalledWith(400);
+          mockStatus.mockClear();
+          mockJson.mockClear();
+        }
+      }
+    });
+  });
 });

@@ -197,6 +197,16 @@ export function AdminOrderPage() {
     }
   }, [orders, selectedOrder, fetchStats]);
 
+  // Refresh a single order from server (used after INVALID_STATUS_TRANSITION)
+  const handleRefreshOrder = useCallback(async (orderId: string) => {
+    try {
+      const response = await orderService.getOrderById(orderId);
+      setSelectedOrder(response.data);
+    } catch {
+      // Silently fail; dialog stays with previous order data
+    }
+  }, []);
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -235,6 +245,7 @@ export function AdminOrderPage() {
         isOpen={isDialogOpen}
         onClose={handleDialogClose}
         onUpdateStatus={handleUpdateStatus}
+        onRefreshOrder={handleRefreshOrder}
       />
     </div>
   );
