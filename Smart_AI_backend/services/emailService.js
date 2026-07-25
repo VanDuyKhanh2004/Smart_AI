@@ -609,11 +609,26 @@ const buildOrderConfirmationEmail = (user, order) => {
 
   const resolveImageUrl = (item) => {
     const url = item.image || (item.product && item.product.image) || item.productImage;
-    if (!url) return null;
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return url;
-    } catch {}
+    if (!url || typeof url !== 'string') return null;
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith('https://')) {
+      try {
+        const parsed = new URL(trimmed);
+        const hostname = parsed.hostname.toLowerCase();
+        if (hostname === 'localhost' || hostname === '127.0.0.1' ||
+            hostname.startsWith('192.168.') || hostname.startsWith('10.') ||
+            hostname.startsWith('172.')) {
+          const env = process.env.NODE_ENV || 'development';
+          if (env === 'production') return null;
+        }
+        return trimmed;
+      } catch {
+        return null;
+      }
+    }
+
     return null;
   };
 

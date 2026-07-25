@@ -5,6 +5,7 @@ const { search: semanticSearch } = require("../services/productSearchService");
 const { recommend: productRecommend } = require("../services/productRecommendationService");
 const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddingContent");
 const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
+const { uploadProductImageIfNeeded, ProductImageValidationError } = require("../services/productImageService");
 const logger = require("../utils/logger");
 
 const createProduct = async (req, res) => {
@@ -42,6 +43,8 @@ const createProduct = async (req, res) => {
       });
     }
 
+    const { imageUrl: processedImage, imagePublicId: processedPublicId } = await uploadProductImageIfNeeded(image);
+
     const newProduct = new Product({
       name,
       brand: brand.toLowerCase(),
@@ -51,7 +54,8 @@ const createProduct = async (req, res) => {
       inStock: inStock || 0,
       colors: colors || [],
       tags: tags || [],
-      image: image || "",
+      image: processedImage,
+      imagePublicId: processedPublicId || undefined,
       embeddingStatus: 'pending',
     });
 
@@ -83,6 +87,14 @@ const createProduct = async (req, res) => {
         success: false,
         message: "Dữ liệu không hợp lệ",
         errors,
+      });
+    }
+
+    if (error instanceof ProductImageValidationError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
       });
     }
 
@@ -484,7 +496,15 @@ const updateProduct = async (req, res) => {
     }
 
     // Build update payload — only include explicitly provided fields
-    const updateData = {
+    let processedImage;
+    let processedPublicId;
+    if (image !== undefined) {
+      const result = await uploadProductImageIfNeeded(image);
+      processedImage = result.imageUrl;
+      processedPublicId = result.imagePublicId;
+    }
+
+    const $set = {
       name,
       brand: brand.toLowerCase(),
       price,
@@ -493,8 +513,17 @@ const updateProduct = async (req, res) => {
       ...(specs !== undefined && { specs }),
       ...(colors !== undefined && { colors }),
       ...(tags !== undefined && { tags }),
-      ...(image !== undefined && { image }),
     };
+    const $unset = {};
+
+    if (image !== undefined) {
+      $set.image = processedImage;
+      if (processedPublicId) {
+        $set.imagePublicId = processedPublicId;
+      } else {
+        $unset.imagePublicId = '';
+      }
+    }
 
     // Enqueue embedding if embedding-relevant fields changed
     const embeddingRelevantFieldsChanged =
@@ -509,18 +538,23 @@ const updateProduct = async (req, res) => {
 
     if (embeddingRelevantFieldsChanged) {
       const existingData = existing._doc || existing;
-      const prospectiveData = { ...existingData, ...updateData };
+      const prospectiveData = { ...existingData, ...$set };
       const contentHash = computeContentHash(buildEmbeddingContent(prospectiveData));
 
       if (existing.embeddingContentHash === contentHash && existing.embeddingStatus === 'ready') {
         // Canonical content hasn't genuinely changed; keep ready status, skip enqueue
       } else {
-        updateData.embeddingStatus = 'pending';
+        $set.embeddingStatus = 'pending';
         shouldEnqueue = true;
       }
     }
 
-    const updatedProduct = await Product.findByIdAndUpdate(productId, { $set: updateData }, {
+    const updateOp = { $set };
+    if (Object.keys($unset).length > 0) {
+      updateOp.$unset = $unset;
+    }
+
+    const updatedProduct = await Product.findByIdAndUpdate(productId, updateOp, {
       new: true,
       runValidators: true,
     });
@@ -563,6 +597,14 @@ const updateProduct = async (req, res) => {
         success: false,
         message: "Dữ liệu không hợp lệ",
         errors,
+      });
+    }
+
+    if (error instanceof ProductImageValidationError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
       });
     }
 
