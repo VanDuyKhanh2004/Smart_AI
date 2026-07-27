@@ -15,7 +15,7 @@ npm test -- --runInBand                    # Sequential (recommended for DB conn
 npm test -- --watch                        # Watch mode
 ```
 
-### Test Suite (27 files, 959 tests, snapshot verified at base commit `82a333a`)
+### Test Suite (28 files, 1216 tests, snapshot verified on branch `feat/swagger-openapi`, no commit hash yet)
 
 > Documentation-only changes do not alter these totals. Update the hash after each merged PR when tests are modified.
 
@@ -47,6 +47,7 @@ npm test -- --watch                        # Watch mode
 | `chatSearch.test.js` | Chat search functionality |
 | `preclassifyIntent.test.js` | Intent pre-classification |
 | `openai.test.js` | OpenAI/Gemini integration |
+| `route-accuracy.test.js` | Swagger path-to-route validation (257 tests: route map, auth docs, OpenAPI structure, Bearer scheme, tags, schemas, secret-safety, Swagger UI mount) |
 | `checkoutFingerprint.test.js` | Idempotency fingerprint computation |
 
 ### Mocking Strategy

@@ -58,9 +58,10 @@
 - [x] Correlation ID middleware for request tracing
 - [x] Pino structured logging with sensitive data redaction
 - [x] BullMQ job queues (email, embeddings, system ping) with concurrency control
+- [x] OpenAPI 3.1 documentation with swagger-jsdoc + swagger-ui-express at `/api-docs`
 
 ### Testing
-- [x] Backend test suite (959 tests, 27 suites, snapshot verified at base commit `82a333a`)
+- [x] Backend test suite (1216 tests, 28 suites, snapshot verified on branch `feat/swagger-openapi`, no commit hash yet)
 - [x] Frontend test suite (119 tests, 8 files, snapshot verified at base commit `82a333a`)
 - [x] CI-enforced TypeScript strict mode check
 
@@ -79,7 +80,7 @@ Then:
 - [ ] Add Redis auto-reconnect (currently `reconnectStrategy = false`)
 - [ ] Add rate limiting on admin endpoints
 - [ ] Add environment variable validation at startup
-- [ ] Generate API documentation (OpenAPI/Swagger)
+- [x] Generate API documentation (OpenAPI/Swagger)
 - [ ] Add end-to-end tests (Cypress or Playwright)
 - [ ] Increase frontend test coverage
 
@@ -114,3 +115,4 @@ Then:
 - [ ] Frontend test coverage limited to select components (8 test files)
 - [ ] Rate limiting only on login endpoint — admin endpoints unprotected
 - [ ] No automated performance or load testing
+- [ ] **Complaint management routes lack authentication/admin middleware** — all complaint endpoints are public. Fix in a dedicated security PR.

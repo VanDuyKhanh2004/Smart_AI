@@ -77,6 +77,18 @@ app.use(
 app.use(requestLogger);
 
 /* ============================================================
+   Swagger API Documentation
+============================================================ */
+
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./configs/swagger");
+
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: ".swagger-ui .topbar { display: none }",
+  customSiteTitle: "Smart AI API Docs",
+}));
+
+/* ============================================================
    Basic Routes
 ============================================================ */
 

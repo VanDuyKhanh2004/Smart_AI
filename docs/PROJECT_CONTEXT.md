@@ -4,11 +4,11 @@
 |-------|-------|
 | **Last updated** | 2026-07-27 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
-| **Current branch** | `docs/project-living-documentation` |
+| **Current branch** | `feat/swagger-openapi` |
 | **Last merged PR** | #38 - `fix/admin-order-status-flow` |
 | **Current production status** | Frontend on Vercel, backend on Render, MongoDB Atlas, Redis managed |
-| **Current task** | Add and verify living project documentation |
-| **Next task** | Add `CONTRIBUTING.md` and `SECURITY.md` |
+| **Current task** | Harden Swagger/OpenAPI test suite route accuracy checks |
+| **Next task** | Implement centralized backend error middleware per ROADMAP |
 | **Known blockers** | None |
 
 > Update this block after each merged PR.
@@ -32,6 +32,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 - **Admin order status transition flow**: Centralized `orderStatusTransitions.js` module mirrored in frontend, filtered dropdown, same-status rejection, `allowedNextStatuses` in error response.
 - **Customer order detail page**: `/orders/:id` with loading skeleton and error states.
 - **AI chatbot**: RAG pipeline (intent classification via OpenAI `gpt-4o` → vector search → constraint parsing → ranking → OpenAI `gpt-4o` primary chat completion with Gemini `gemini-2.0-flash` fallback), complaint handling via OpenAI, embeddings via Gemini (`gemini-embedding-001`), multi-turn context (Redis, 30min TTL, 20 max turns), evaluation framework at `evaluation/chatbot/`.
+- **API documentation**: OpenAPI 3.1 spec with swagger-jsdoc + swagger-ui-express mounted at `/api-docs`. Documents Auth, Products, Orders, Cart, Chat, Reviews, Promotions, Complaints, Wishlist, Compare, Questions, Stores, Addresses, Profile, Appointments, Dashboard, Health. Includes reusable schemas (User, Product, Order, Review, Promotion, Error) and Bearer JWT auth. Route accuracy test suite (`tests/route-accuracy.test.js`) validates every swagger path matches a real Express route with correct auth documentation, plus OpenAPI structure and secret-safety checks.
 
 # Current Production State
 
@@ -50,6 +51,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 - No SMS provider — email only via Brevo
 - Some controller tests tightly coupled to mocks
 - `.env.docker.example` contains old SMTP vars but app uses Brevo API
+- **Complaint management routes lack authentication/admin middleware** — all complaint endpoints (`GET /api/complaints`, `POST /api/complaints/:id/resolve`, etc.) are publicly accessible. Fix in a dedicated security PR.
 
 # Documentation Maintenance
 
