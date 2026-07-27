@@ -296,7 +296,7 @@ docker compose up --build
 
 ```bash
 cd Smart_AI_backend
-npm test                           # Full suite (959 tests, 27 suites; snapshot base commit 82a333a)
+npm test                           # Full suite (1216 tests, 28 suites; snapshot base commit 82a333a)
 npm test -- --runInBand            # Sequential (recommended)
 ```
 
@@ -352,6 +352,7 @@ Triggers on push to `main` with frontend changes.
 | [CODING_STANDARD.md](./docs/CODING_STANDARD.md) | Code style, naming conventions, documentation workflow |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch strategy, commit conventions, PR checklist, testing, doc policy |
 | [SECURITY.md](./SECURITY.md) | Supported versions, vulnerability reporting, secrets, env vars, dependency policy |
+| [API_OVERVIEW.md](./docs/API_OVERVIEW.md) | Endpoint groups, authentication, Swagger UI link, common errors |
 
 ---
 
