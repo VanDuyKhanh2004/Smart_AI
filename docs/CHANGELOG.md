@@ -1,0 +1,37 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project intends to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Cloudinary product-image integration: upload, validate, migrate 21 Base64 images to Cloudinary
+- Product image validation (Base64 decoding limits, private IP rejection in production, HTTPS-only URLs)
+- Product image migration script (`scripts/migrateProductImagesToCloudinary.js`)
+- API base URL production fix with validation for VITE_API_BASE_URL
+- Customer order detail page (`/orders/:id`) with loading skeleton and error states
+- Order confirmation email with safe HTTPS image rendering, reliable order tracking links, and private-IP filtering
+- Centralized order status transition module (`services/orderStatusTransitions.js`)
+- Frontend mirror of status transitions (`features/orders/utils/orderStatusTransitions.ts`)
+- Admin order detail dialog with filtered status dropdown and error handling
+- Backend tests for transition hardening (same-status rejection, note trimming, allowedNextStatuses)
+- Frontend tests for `AdminOrderDetailDialog` and `orderStatusTransitions` utility
+- Chatbot constraint parsing, product ranking by soft preferences, and conversation context management
+- Chatbot evaluation framework (`evaluation/chatbot/`)
+- Backend tests for chatbot evaluation, intent classification, context merging, and fallback behavior
+- Documentation files under `docs/`
+
+### Changed
+- Order controller `updateOrderStatus` uses centralized transition module
+- AdminOrderDetailDialog status dropdown only shows allowed next states
+- Update button disabled when no valid selection or in progress
+- INVALID_STATUS_TRANSITION error triggers `onRefreshOrder` to refetch order
+- Order confirmation email renders HTTPS images safely and verifies tracking link resolution
+
+### Fixed
+- TypeScript `noUnusedLocals` CI error (removed unused import in test file)
+- Private IP detection: 172.16/12 range only (not full 172.x block)
+- Order image URLs filtered in production to prevent hosting private-IP images in email HTML

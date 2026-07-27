@@ -1,649 +1,360 @@
-# 🤖 Smart AI Agent
+# Smart AI Agent
 
-> AI-powered E-commerce Platform built with **React**, **Node.js**, **MongoDB**, **Socket.IO**, **Docker** and **OpenAI API**.
+> AI-powered E-commerce Platform
 
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Node.js](https://img.shields.io/badge/Node.js-18+-brightgreen)
-![React](https://img.shields.io/badge/React-18-blue)
-![MongoDB](https://img.shields.io/badge/MongoDB-7-green)
-![Docker](https://img.shields.io/badge/Docker-Supported-blue)
-![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o-purple)
 
 ---
 
-# 📸 Demo
+## Features
 
-> Thêm ảnh chụp màn hình của dự án tại thư mục `docs/images`
+### Authentication & Security
+- JWT authentication with access/refresh tokens
+- Google OAuth login
+- Email verification flow
+- Password reset with secure tokens
+- Account lock protection (5 failed attempts, 15min lockout)
+- Account unlock via email token
+- Login rate limiting (Redis-backed, 20 attempts/15min)
 
-## Home Page
-
-<img src="docs/images/home.png" width="900">
-
----
-
-## AI Assistant
-
-<img src="docs/images/chat.png" width="900">
-
----
-
-## Shopping Cart
-
-<img src="docs/images/cart.png" width="900">
-
----
-
-## Order Management
-
-<img src="docs/images/orders.png" width="900">
-
----
-
-# 📖 Table of Contents
-
-- Overview
-- Features
-- Tech Stack
-- System Architecture
-- AI Workflow
-- Project Structure
-- Database
-- Installation
-- Docker Deployment
-- Local Development
-- Environment Variables
-- API
-- Socket.IO
-- Security
-- Roadmap
-- Troubleshooting
-- Contributing
-- Author
-- License
-
----
-
-# 📌 Overview
-
-Smart AI Agent là hệ thống thương mại điện tử tích hợp AI hỗ trợ tư vấn và chăm sóc khách hàng.
-
-Repository bao gồm hai phần:
-
-- **Backend API**
-- **Frontend Web**
-
-Hệ thống hỗ trợ:
-
-- Đăng nhập JWT
-- Google OAuth
-- Quản lý sản phẩm
-- Giỏ hàng
+### E-commerce Core
+- Product catalog with image upload (Cloudinary)
+- Semantic product search (vector + text + fallback)
+- Product recommendations (vector + brand/price + fallback)
+- Shopping cart (server + guest local cart merge on login)
+- Checkout with idempotency (UUID v4 key, fingerprint validation)
+- Order management (create/view/cancel; admin: list/stats/update status)
+- Centralized order status transitions with validated rules
+- Customer reviews with moderation (pending/approved/rejected)
 - Wishlist
-- Đơn hàng
-- Promotion
-- Complaint
-- AI Chat
-- Realtime Notification
-- Docker Deployment
+- Product comparison tool
+- Promotion/discount application (percentage/fixed, date range, usage limits)
+- Customer order detail page with loading skeleton and error states
+- Order confirmation emails with safe HTTPS image rendering
+
+### AI Chatbot
+- RAG pipeline: intent classification (product_query|small_talk|complaint) → MongoDB Atlas `$vectorSearch` → text fallback → constraint parsing (price range, brands, specs) → ranking by soft preferences → response via OpenAI `gpt-4o` (primary) or Gemini `gemini-2.0-flash` (fallback), streamed via Socket.IO
+- Multi-turn conversation context (Redis-backed, 30-min TTL, 20 max turns)
+- Complaint handling agent (structured: priority, tags, contact info)
+- Content-hash based embedding deduplication
+- Evaluation framework at `evaluation/chatbot/`
+
+### Admin Dashboard
+- Product management
+- Order management with status transitions
+- Review moderation
+- Q&A management
+- Promotion management
+- Store management
+- Appointment management
+- Complaint management
+- Charts and stats
+
+### Infrastructure
+- Docker Compose (MongoDB 7, Redis 7, backend, frontend with nginx)
+- BullMQ job queues (email, embeddings, system ping) with concurrency control
+- Graceful shutdown sequence
+- Health check endpoints (liveness, readiness, dependency status)
+- Correlation ID middleware for request tracing
+- Pino structured logging with sensitive data redaction
 
 ---
 
-# ✨ Features
+## Tech Stack
 
-## Authentication
+### Frontend
+| Package | Version |
+|---------|---------|
+| React | 18 |
+| TypeScript | 5.8 (strict mode, `noUnusedLocals`, `noUnusedParameters`) |
+| Vite | 7 |
+| Tailwind CSS | 4 |
+| shadcn/ui | Radix UI primitives + CVA + clsx + tailwind-merge |
+| Zustand | 5 (auth, cart, compare, wishlist stores) |
+| TanStack React Query | 5 (server state) |
+| React Router DOM | 7 |
+| Axios | 1 |
+| Socket.IO Client | 4 |
+| Recharts | 3 |
+| React Markdown | 10 + remark-gfm + remark-math + rehype-katex |
+| Lucide React | icons |
+| embla-carousel-react | carousels |
+| Vitest | 4 + @testing-library/react 16 + jsdom |
 
-- ✅ JWT Authentication
-- ✅ Refresh Token
-- ✅ Google Login
-- ✅ Forgot Password
-- ✅ Account Lock Protection
+### Backend
+| Package | Version |
+|---------|---------|
+| Express | 4 |
+| Mongoose | 8 |
+| BullMQ | 5 |
+| Redis client (`redis`) | 6 |
+| OpenAI | 5 |
+| `@google/genai` / `@google/generative-ai` | 2 / 0.24 |
+| Cloudinary | 2 |
+| `@getbrevo/brevo` | 6 |
+| Socket.IO | 4 |
+| Pino | 10 |
+| `jsonwebtoken` | 9 |
+| `bcryptjs` | 3 |
+| `google-auth-library` / `googleapis` | 10 / 171 |
+| Jest | 30 + Supertest 7 |
+| Docker | Compose |
 
----
-
-## AI
-
-- ✅ OpenAI Integration
-- ✅ AI Chat Assistant
-- ✅ Conversation History
-- ✅ Intent Classification
-- ✅ Product Recommendation
-
----
-
-## E-commerce
-
-- ✅ Product Management
-
-- ✅ Shopping Cart
-
-- ✅ Wishlist
-
-- ✅ Reviews
-
-- ✅ Orders
-
-- ✅ Promotions
-
-- ✅ Stores
-
-- ✅ Address Management
-
----
-
-## Realtime
-
-- ✅ Socket.IO
-
-- ✅ Live Notification
+### AI Provider Roles
+- **OpenAI** (primary): chat completions (`gpt-4o`), intent classification, complaint handling — uses `openai` npm package (in `utils/gemini.js`)
+- **Google Gemini**: embeddings (`gemini-embedding-001`, 1536-dim), chat fallback (`gemini-2.0-flash`) — uses `@google/genai` (in `utils/openai.js`)
+- *Note: utility filenames are historically inverted relative to provider*
 
 ---
 
-## Infrastructure
+## Architecture
 
-- ✅ Docker
-
-- ✅ Docker Compose
-
-- ✅ Environment Configuration
-
----
-
-# 🛠 Tech Stack
-
-| Backend   | Frontend   | Database      | AI            | DevOps         |
-| --------- | ---------- | ------------- | ------------- | -------------- |
-| Node.js   | React      | MongoDB       | OpenAI GPT-4o | Docker         |
-| Express   | TypeScript | Mongoose      | OpenAI API    | Docker Compose |
-| Socket.IO | Vite       | MongoDB Atlas |               | Git            |
-
----
-
-# 🏗️ System Architecture
-
-```text
-                +----------------------+
-                |      Web Browser     |
-                +----------+-----------+
-                           |
-                  HTTP / Socket.IO
-                           |
-          +----------------+----------------+
-          |                                 |
-          |        React + TypeScript       |
-          +----------------+----------------+
-                           |
-                     REST API Request
-                           |
-                 Express + Node.js Server
-                           |
-        +---------+--------+---------+
-        |         |                  |
-    MongoDB   OpenAI API       Socket.IO
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Frontend (React 18 + TS)                    │
+│    Vite 7 · Tailwind 4 · shadcn/ui · Zustand 5               │
+│    TanStack Query 5 · React Router DOM 7 · Axios             │
+│    Socket.IO Client 4 · Recharts 3                           │
+│    Features: auth, products, cart, checkout, orders,          │
+│              chat, compare, wishlist, reviews, complaints,    │
+│              stores, appointments, admin, addresses, profile  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ HTTP (REST) / WebSocket (Socket.IO)
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│               Backend (Express 4 + Node.js 18+)              │
+│    Middleware: correlationId, cors, requestLogger, auth      │
+│    Controllers: auth, product, order, cart, chat, review,    │
+│                 promotion, store, appointment, complaint     │
+│    Services: productImage, productSearch, productRanking,    │
+│              recommendation, cache, conversationContext      │
+│    BullMQ Workers: system (ping), email, embedding           │
+│    Socket.IO Handlers: chat streaming, notifications         │
+└──────┬──────────────────┬──────────────────┬────────────────┘
+       │                  │                  │
+       ▼                  ▼                  ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
+│  MongoDB 7   │  │   Redis 7    │  │   Cloudinary     │
+│ (Mongoose 8) │  │  (redis v6)  │  │  (Images CDN)    │
+│              │  │              │  │                  │
+│ Atlas for    │  │ Cache/Queue  │  │ smart-ai/products│
+│ $vectorSearch│  │ Rate Limit   │  │                  │
+│              │  │ Chat Context │  │                  │
+└──────────────┘  └──────┬───────┘  └──────────────────┘
+                         │
+                         ▼
+                  ┌──────────────┐
+                  │  BullMQ 5    │
+                  │ (Redis-backed)│
+                  │              │
+                  │ systemQueue  │
+                  │ emailQueue   │
+                  │ embeddingQueue│
+                  └──────────────┘
 ```
 
 ---
 
-# 🤖 AI Workflow
+## Setup
 
-```mermaid
-sequenceDiagram
-
-User->>Frontend: Ask AI
-
-Frontend->>Backend: POST /api/chat
-
-Backend->>OpenAI: Prompt
-
-OpenAI-->>Backend: AI Response
-
-Backend-->>Frontend: JSON Response
-
-Frontend-->>User: Display Answer
-```
-
----
-
-# 🗂 Project Structure
-
-```text
-.
-├── Smart_AI_backend
-│   ├── configs
-│   ├── controllers
-│   ├── middlewares
-│   ├── models
-│   ├── routes
-│   ├── services
-│   ├── socket
-│   ├── uploads
-│   ├── utils
-│   ├── package.json
-│   └── index.js
-│
-├── Smart_AI_frontend
-│   ├── public
-│   ├── src
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── docker-compose.yml
-├── README.md
-└── LICENSE
-```
-
----
-
-# 🗄 Database Collections
-
-MongoDB gồm các collection chính:
-
-- Users
-- Products
-- Categories
-- Orders
-- OrderDetails
-- Reviews
-- Wishlist
-- Cart
-- Conversations
-- Promotions
-- Complaints
-- Stores
-- Appointments
-- Addresses
-
----
-
-# ⚙️ Requirements
-
+### Prerequisites
 - Node.js >= 18
-
 - npm >= 9
+- Docker Desktop (for Docker deployment)
+- MongoDB Atlas cluster (for `$vectorSearch`)
+- Redis instance (managed or local)
 
-- MongoDB >= 7
-
-- Docker Desktop
-
----
-
-# 🚀 Quick Start (Docker)
-
-## Clone project
-
-```bash
-git clone git@github.com:VanDuyKhanh2004/Smart_AI.git
-
-cd Smart_AI
-```
-
----
-
-## Backend
+### Backend
 
 ```bash
 cd Smart_AI_backend
-
-cp .env.docker.example .env.docker
-```
-
-Cập nhật
-
-```
-OPENAI_API_KEY
-
-JWT_SECRET
-
-JWT_REFRESH_SECRET
-```
-
----
-
-## Run
-
-```bash
-docker compose up --build
-```
-
-Sau khi chạy:
-
-Frontend
-
-```
-http://localhost:3000
-```
-
-Backend
-
-```
-http://localhost:5000
-```
-
-MongoDB
-
-```
-localhost:27017
-```
-
----
-
-# 💻 Local Development
-
-## Backend
-
-```bash
-cd Smart_AI_backend
-
 npm install
-
+# Create Smart_AI_backend/.env using the Environment Variables table below
 npm run dev
 ```
 
----
+The backend starts on `http://localhost:5000`.
 
-## Frontend
+### Frontend
 
 ```bash
 cd Smart_AI_frontend
-
 npm install
-
+cp .env.example .env  # or create .env.local
+# Set VITE_API_BASE_URL=http://localhost:5000/api
 npm run dev
 ```
 
-Frontend
+The frontend starts on `http://localhost:5173`.
 
-```
-http://localhost:5173
-```
-
-Backend
-
-```
-http://localhost:5000
-```
-
----
-
-# 🔐 Environment Variables
-
-## Backend
-
-```env
-PORT=5000
-
-NODE_ENV=development
-
-MONGO_CONNECTION_STRING=
-
-OPENAI_API_KEY=
-
-OPENAI_MODEL=gpt-4o
-
-JWT_SECRET=
-
-JWT_REFRESH_SECRET=
-
-GOOGLE_CLIENT_ID=
-
-SMTP_HOST=
-
-SMTP_PORT=
-
-SMTP_USER=
-
-SMTP_PASS=
-```
-
----
-
-## Frontend
-
-```env
-VITE_API_BASE_URL=http://localhost:5000/api
-
-VITE_API_URL=http://localhost:5000
-
-VITE_GOOGLE_CLIENT_ID=
-```
-
----
-
-# 📡 REST API
-
-| Method | Endpoint           | Description    |
-| ------ | ------------------ | -------------- |
-| POST   | /api/auth/login    | Login          |
-| POST   | /api/auth/register | Register       |
-| POST   | /api/auth/google   | Google Login   |
-| GET    | /api/products      | Get Products   |
-| GET    | /api/products/:id  | Product Detail |
-| POST   | /api/cart          | Add To Cart    |
-| GET    | /api/orders        | Order History  |
-| POST   | /api/reviews       | Review Product |
-| POST   | /api/chat          | AI Chat        |
-
----
-
-# ⚡ Socket.IO
-
-Realtime events:
-
-- Order Notification
-
-- AI Streaming
-
-- Live Chat
-
-- User Connection
-
----
-
-# 🔒 Security
-
-- JWT Authentication
-
-- Password Hashing (bcrypt)
-
-- Google OAuth
-
-- Login Rate Limiting
-
-- Account Lock Protection
-
-- Environment Variables
-
-- CORS Protection
-
----
-
-# 📈 Performance
-
-- MongoDB Index
-
-- Lazy Loading
-
-- React Query Cache
-
-- Zustand State Management
-
-- Socket.IO Realtime
-
----
-
-# 🧪 Testing
-
-Hiện tại dự án hỗ trợ:
-
-- Manual Testing
-
-- Intent Classification Evaluation
-
-Trong tương lai:
-
-- Unit Test
-
-- Integration Test
-
-- End-to-End Test
-
----
-
-# 🚧 Roadmap
-
-## Completed
-
-- ✅ Authentication
-
-- ✅ Google Login
-
-- ✅ Shopping Cart
-
-- ✅ Wishlist
-
-- ✅ Promotion
-
-- ✅ Complaint
-
-- ✅ AI Chat
-
-- ✅ Docker
-
----
-
-## In Progress
-
-- 🚧 Unit Testing
-
-- 🚧 API Documentation
-
-- 🚧 CI/CD
-
----
-
-## Future
-
-- Redis Cache
-
-- Kubernetes
-
-- Elasticsearch
-
-- Recommendation Engine
-
-- Microservice Architecture
-
----
-
-# ❗ Troubleshooting
-
-## MongoDB Connection Error
-
-Kiểm tra:
-
-- MongoDB đang chạy
-
-- Chuỗi kết nối đúng
-
----
-
-## Google Login
-
-Kiểm tra:
-
-- GOOGLE_CLIENT_ID
-
-- OAuth Redirect URI
-
----
-
-## AI không phản hồi
-
-Kiểm tra:
-
-- OPENAI_API_KEY
-
-- Internet
-
----
-
-## Docker Build Error
-
-Thử:
+### Docker
 
 ```bash
-docker compose down
+# 1. Configure environment
+cd Smart_AI_backend
+cp .env.docker.example .env.docker
+# Edit .env.docker with your API keys.
+# Add any missing vars not in the example (BREVO_API_KEY, etc.)
 
+# 2. Build and start all services
+cd ..
 docker compose up --build
 ```
 
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:5000`
+- MongoDB: `localhost:27017`
+- Redis: `localhost:6379`
+
+### Environment Variables
+
+> **Note**: `VITE_*` variables are injected at build time — never expose backend secrets in them.
+
+#### Backend
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Optional (5000) | Server port |
+| `NODE_ENV` | Optional | `development` or `production` |
+| `MONGO_CONNECTION_STRING` | **Yes** | MongoDB URI (Atlas for vector search) |
+| `REDIS_URL` | Conditional | Required when BullMQ, cache, rate limit, or chat context enabled |
+| `JWT_SECRET` | **Yes** | Access token signing secret |
+| `JWT_EXPIRE` | Optional (15m) | Access token expiry |
+| `JWT_REFRESH_SECRET` | **Yes** | Refresh token signing secret |
+| `JWT_REFRESH_EXPIRE` | Optional (7d) | Refresh token expiry |
+| `OPENAI_API_KEY` | **Yes** | OpenAI API key (primary chat provider) |
+| `GEMINI_API_KEY` | Conditional | Required for embeddings and Gemini fallback |
+| `CLOUDINARY_CLOUD_NAME` | Conditional | Required for product image upload |
+| `CLOUDINARY_API_KEY` | Conditional | Required for product image upload |
+| `CLOUDINARY_API_SECRET` | Conditional | Required for product image upload |
+| `BREVO_API_KEY` | Conditional | Required when transactional emails enabled |
+| `BREVO_FROM_EMAIL` | Conditional | Sender email for transactional emails |
+| `BREVO_FROM_NAME` | Conditional | Sender display name |
+| `GOOGLE_CLIENT_ID` | Conditional | Required for Google OAuth |
+| `GOOGLE_CLIENT_SECRET` | Conditional | Required for Google OAuth |
+| `FRONTEND_URL` | **Yes** in production | CORS and Socket.IO origin |
+| `BULLMQ_ENABLED` | Optional (true) | Enable BullMQ queues |
+| `EMAIL_QUEUE_ENABLED` | Optional (true) | Enable email queue |
+| `EMBEDDING_QUEUE_ENABLED` | Optional (true) | Enable embedding queue |
+| `LOG_LEVEL` | Optional (info) | Pino log level |
+
+#### Frontend
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_API_BASE_URL` | **Yes** | Backend API base URL (absolute, http/https, not matching frontend origin) |
+| `VITE_GOOGLE_CLIENT_ID` | Conditional | Google OAuth client ID |
+
 ---
 
-# 🤝 Contributing
+## Deployment
 
-1. Fork repository
+### Frontend (Vercel)
 
-2. Tạo branch mới
+- Auto-deployed via GitHub Actions (`.github/workflows/deploy-frontend.yml`) on push to `main` when `Smart_AI_frontend/**` changes
+- Build: `npm run build` (runs `tsc -b && vite build`), output `dist/`
+- Node version: 24
+- `VITE_*` values set in Vercel dashboard — changes require a fresh build
+
+### Backend (Render)
+
+- Detects Render environment via `RENDER_EXTERNAL_URL`
+- Build: `npm ci`
+- Start: `node index.js`
+- Environment variables configured in Render dashboard
+
+### MongoDB Atlas
+
+- Required for `$vectorSearch` functionality
+- Connection via `MONGO_CONNECTION_STRING`
+- Indexes: text indexes on `Product`, vector index on `embedding_vector`, compound indexes on orders
+
+### Redis
+
+- Managed Redis instance required for BullMQ, rate limiting, chat context
+- Connection via `REDIS_URL`
+- Note: `reconnectStrategy = false` — connection loss requires app restart
+
+### Cloudinary
+
+- Lazy-initialized singleton (`configs/cloudinary.js`)
+- Upload folder: `smart-ai/products`
+- Returns `null` if env vars not set
+- All uploads use `secure: true` (HTTPS)
+
+### Brevo
+
+- Transactional emails: welcome, verification, password-reset, unlock-account, order-confirmation
+- Queue: BullMQ `emailQueue` with direct fallback
+- Config: `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME`
+
+---
+
+## Testing
+
+### Backend (Jest + Supertest)
 
 ```bash
-git checkout -b feature/your-feature
+cd Smart_AI_backend
+npm test                           # Full suite (959 tests, 27 suites; snapshot base commit 82a333a)
+npm test -- --runInBand            # Sequential (recommended)
 ```
 
-3. Commit
+### Frontend (Vitest + @testing-library/react)
 
 ```bash
-git commit -m "Add new feature"
+cd Smart_AI_frontend
+npm test                           # Vitest run (119 tests, 8 files; snapshot base commit 82a333a)
+npx tsc --noEmit                   # TypeScript strict check
+npm run build                      # Production build (tsc -b + vite build)
 ```
 
-4. Push
+### CI Validation
 
 ```bash
-git push origin feature/your-feature
+git diff --check                   # No whitespace errors
 ```
 
-5. Tạo Pull Request
+---
+
+## CI/CD
+
+### CI Pipeline (`.github/workflows/ci.yml`)
+
+Triggers on push or PR to `main` when changes affect `Smart_AI_backend/**`, `Smart_AI_frontend/**`, or workflow files.
+
+- **Backend**: `npm ci` → `npm test` (Node 24, Ubuntu)
+- **Frontend**: `npm ci` → `npx tsc --noEmit` → `npx vitest run` → `npm run build` (Node 24, Ubuntu, cached deps)
+
+### CD Pipeline (`.github/workflows/deploy-frontend.yml`)
+
+Triggers on push to `main` with frontend changes.
+
+1. Checkout code
+2. Install Vercel CLI
+3. `vercel pull` — fetch environment
+4. `vercel build --prod`
+5. `vercel deploy --prebuilt --prod`
+6. Secrets: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VERCEL_TOKEN`
 
 ---
 
-# 👨‍💻 Author
+## Documentation
 
-**Văn Duy Khánh**
-
-GitHub
-
-https://github.com/VanDuyKhanh2004
-
-Email
-
-duykhanhpro04@gmail.com
-
----
-
-# 🙏 Acknowledgements
-
-Dự án sử dụng:
-
-- React
-
-- Express
-
-- MongoDB
-
-- Socket.IO
-
-- OpenAI API
-
-- Docker
-
-- TailwindCSS
-
-- Vite
-
-- Mongoose
+| File | Contents |
+|------|----------|
+| [PROJECT_CONTEXT.md](./docs/PROJECT_CONTEXT.md) | Handoff block, completed work, production state, known limitations |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System diagram, frontend/backend structure, AI pipeline, external services |
+| [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Render, Vercel, Docker, environment variables table, rollback checklist |
+| [TESTING.md](./docs/TESTING.md) | Test suites, mocking strategy, CI workflow, pre-merge checklist, Radix UI testing notes |
+| [ROADMAP.md](./docs/ROADMAP.md) | Completed items, next priorities, technical debt |
+| [CHANGELOG.md](./docs/CHANGELOG.md) | Keep a Changelog format — unreleased changes |
+| [CODING_STANDARD.md](./docs/CODING_STANDARD.md) | Code style, naming conventions, documentation workflow |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch strategy, commit conventions, PR checklist, testing, doc policy |
+| [SECURITY.md](./SECURITY.md) | Supported versions, vulnerability reporting, secrets, env vars, dependency policy |
 
 ---
 
-# 📄 License
+## License
 
-Distributed under the **MIT License**.
-
-See **LICENSE** for more information.
+Distributed under the MIT License.
