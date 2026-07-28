@@ -82,13 +82,14 @@ jest.mock('../models/Complaint', () => ({
 
 const Complaint = require('../models/Complaint');
 const complaintRoutes = require('../routes/complaintRoutes');
+const errorHandler = require('../middlewares/errorHandler');
 const express = require('express');
 
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use('/api/complaints', complaintRoutes);
-  app.use('*', (req, res) => res.status(404).json({ error: { message: 'Not found' } }));
+  app.use(errorHandler);
   return app;
 }
 

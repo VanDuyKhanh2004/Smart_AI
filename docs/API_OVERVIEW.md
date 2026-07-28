@@ -76,27 +76,29 @@ Rate limiting is enforced on the login endpoint (`/api/auth/login`) via Redis-ba
 }
 ```
 
-### 404 Not Found
+### 404 Not Found (centralized)
 ```json
 {
+  "success": false,
   "error": {
     "message": "Route /api/unknown not found",
-    "status": 404,
-    "timestamp": "2026-07-27T12:00:00.000Z"
+    "code": "NOT_FOUND"
   }
 }
 ```
 
-### 500 Server Error
+### 500 Server Error (centralized)
 ```json
 {
+  "success": false,
   "error": {
-    "message": "Internal Server Error",
-    "status": 500,
-    "timestamp": "2026-07-27T12:00:00.000Z"
+    "message": "Lỗi server nội bộ",
+    "code": "INTERNAL_ERROR"
   }
 }
 ```
+
+> **Transitional note**: The centralized error handler (`middlewares/errorHandler.js`) is in Phase 1. Most controllers still use legacy local error handling with varied response shapes. The centralized format above applies to routes that have been migrated (currently: complaint routes) and unmatched-route 404s. Legacy controllers may still return the old `{ error: { message, status, timestamp } }` format. See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ## See Also
 

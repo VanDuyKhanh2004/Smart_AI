@@ -171,37 +171,17 @@ app.use(
 );
 
 /* ============================================================
-   Error Handling
+   Error Handling — centralized
 ============================================================ */
 
-app.use((err, req, res, next) => {
-  const log = req.logger || logger;
-  const sanitized = sanitizeUrl(req.originalUrl);
-  log.error({ err }, 'Unhandled error on %s %s', req.method, sanitized);
+const notFoundHandler = require('./middlewares/notFoundHandler');
+const errorHandler = require('./middlewares/errorHandler');
 
-  res.status(err.status || 500).json({
-    error: {
-      message: err.message || "Internal Server Error",
-      status: err.status || 500,
-      timestamp: new Date().toISOString(),
-    },
-  });
-});
+// 404 catch-all (must be after all routes)
+app.use(notFoundHandler);
 
-  app.use("*", (req, res) => {
-    const log = req.logger || logger;
-    const sanitized = sanitizeUrl(req.originalUrl);
-    log.warn({ requestId: req.requestId }, 'Route not found: %s %s', req.method, sanitized);
-    const qIndex = req.originalUrl.indexOf('?');
-    const pathname = qIndex === -1 ? req.originalUrl : req.originalUrl.slice(0, qIndex);
-    res.status(404).json({
-      error: {
-        message: `Route ${pathname} not found`,
-        status: 404,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  });
+// Centralized error middleware (must be last)
+app.use(errorHandler);
 
 let shuttingDown = false;
 
