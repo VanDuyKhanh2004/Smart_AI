@@ -61,7 +61,7 @@
 - [x] OpenAPI 3.1 documentation with swagger-jsdoc + swagger-ui-express at `/api-docs`
 
 ### Testing
-- [x] Backend test suite (1216 tests, 28 suites, snapshot verified on branch `feat/swagger-openapi`, no commit hash yet)
+- [x] Backend test suite (1251 tests, 29 suites, snapshot verified on branch `fix/complaint-route-authorization`, base commit `87fc52d`)
 - [x] Frontend test suite (119 tests, 8 files, snapshot verified at base commit `82a333a`)
 - [x] CI-enforced TypeScript strict mode check
 
@@ -115,4 +115,4 @@ Then:
 - [ ] Frontend test coverage limited to select components (8 test files)
 - [ ] Rate limiting only on login endpoint — admin endpoints unprotected
 - [ ] No automated performance or load testing
-- [ ] **Complaint management routes lack authentication/admin middleware** — all complaint endpoints are public. Fix in a dedicated security PR.
+- [x] **Complaint route authorization gap fixed** — all 8 complaint endpoints now protected with `protect` + `adminMiddleware` (branch `fix/complaint-route-authorization`)

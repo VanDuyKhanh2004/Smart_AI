@@ -73,15 +73,15 @@ const routeMap = {
   'DELETE /api/promotions/{id}':      { auth: true },
   'PATCH /api/promotions/{id}/toggle': { auth: true },
 
-  // Complaints — no auth middleware (public)
-  'GET /api/complaints':              { auth: false },
-  'GET /api/complaints/stats':        { auth: false },
-  'GET /api/complaints/search':       { auth: false },
-  'GET /api/complaints/{id}':         { auth: false },
-  'PUT /api/complaints/{id}':         { auth: false },
-  'DELETE /api/complaints/{id}':      { auth: false },
-  'PUT /api/complaints/{id}/resolve': { auth: false },
-  'PUT /api/complaints/{id}/escalate': { auth: false },
+  // Complaints — protect + adminMiddleware
+  'GET /api/complaints':              { auth: true },
+  'GET /api/complaints/stats':        { auth: true },
+  'GET /api/complaints/search':       { auth: true },
+  'GET /api/complaints/{id}':         { auth: true },
+  'PUT /api/complaints/{id}':         { auth: true },
+  'DELETE /api/complaints/{id}':      { auth: true },
+  'PUT /api/complaints/{id}/resolve': { auth: true },
+  'PUT /api/complaints/{id}/escalate': { auth: true },
 
   // Wishlist
   'GET /api/wishlist':                  { auth: true },

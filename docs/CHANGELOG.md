@@ -35,3 +35,4 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - TypeScript `noUnusedLocals` CI error (removed unused import in test file)
 - Private IP detection: 172.16/12 range only (not full 172.x block)
 - Order image URLs filtered in production to prevent hosting private-IP images in email HTML
+- Complaint management routes now protected with `protect` + `adminMiddleware` (was unintentionally public; all 8 endpoints require admin auth)
