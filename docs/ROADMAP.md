@@ -61,7 +61,7 @@
 - [x] OpenAPI 3.1 documentation with swagger-jsdoc + swagger-ui-express at `/api-docs`
 
 ### Testing
-- [x] Backend test suite (1251 tests, 29 suites, snapshot verified on branch `fix/complaint-route-authorization`, base commit `87fc52d`)
+- [x] Backend test suite (1287 tests, 30 suites, snapshot verified on branch `refactor/centralized-error-middleware`, base commit `87fc52d`)
 - [x] Frontend test suite (119 tests, 8 files, snapshot verified at base commit `82a333a`)
 - [x] CI-enforced TypeScript strict mode check
 
@@ -73,7 +73,9 @@
 
 Highest priority:
 
-- [ ] Implement error handler middleware (`middlewares/errorHandler.js` is empty)
+- [x] Phase 1 centralized error handling foundation: `AppError` classes, `asyncHandler`, `errorHandler`, `notFoundHandler`, complaint controller pilot migration
+- [ ] Phase 2: Incremental controller migration (health → profile → address → ...)
+- [x] Implement error handler middleware (`middlewares/errorHandler.js` is empty)
 
 Then:
 
@@ -107,7 +109,7 @@ Then:
 
 ## Technical Debt
 
-- [ ] `middlewares/errorHandler.js` file is empty — error handling inlined in `index.js`
+- [x] `middlewares/errorHandler.js` file is empty — Phase 1 complete: centralized error handler, classes, asyncHandler, notFoundHandler. Remaining controllers still use local error handling.
 - [ ] Redis `reconnectStrategy = false` — manual restart required on Redis failure
 - [ ] Some controller tests mock implementation details (tight coupling to mocks)
 - [ ] No enforced commit message convention

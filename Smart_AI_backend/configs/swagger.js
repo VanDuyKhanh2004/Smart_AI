@@ -40,12 +40,10 @@ const options = {
                 code: {
                   type: 'string',
                 },
-                status: {
-                  type: 'integer',
-                },
-                timestamp: {
-                  type: 'string',
-                  format: 'date-time',
+                details: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Validation error details (migrated endpoints only)',
                 },
               },
             },

@@ -99,18 +99,27 @@ Incoming Request
     → requestLogger (method, URL, duration)
     → Route matching
         → authMiddleware (optional/protected/admin)
-        → Controller
+        → Controller (may be wrapped with asyncHandler)
             → Service(s)
             → Model(s)
+    → notFoundHandler (if no route matched)
+    → errorHandler (if next(error) called)
+        → AppError normalization
+        → Mongoose/JWT error mapping
+        → Pino logging with correlation ID
     → JSON Response
     → Response logged
 ```
 
 ### Error Handling
-- Error handler inlined in `index.js` (not via `middlewares/errorHandler.js` which is empty)
-- Logs error via Pino with sanitized URL
-- Returns `{ error: { message, status, timestamp } }`
-- 404 handler for unmatched routes
+- **Centralized error foundation** (Phase 1): `AppError` class hierarchy in `utils/errors/`, global `errorHandler` middleware, `notFoundHandler` middleware
+- **Error normalization**: AppError → status/code, Mongoose ValidationError → 400, CastError → 400, duplicate key → 409, TokenExpiredError → 401, JsonWebTokenError → 401
+- **Response format**: `{ success: false, error: { message, code, details?, timestamp? } }` (timestamp in production only)
+- **Production safety**: Generic messages for 5xx, no stack traces, no internal details
+- **Logging**: Pino with correlation ID (requestId). 4xx at warn level, 5xx at error level. Sensitive data redacted.
+- **Middleware order**: correlationId → parsers → cors → requestLogger → routes → notFoundHandler → errorHandler
+- **Pilot migration**: `complaintController` uses `asyncHandler` and `AppError` classes. Remaining controllers still use local error handling (legacy).
+- **Route-level handlers**: Some route files (e.g., complaintRoutes.js) have local error handlers that process known error types before falling through to the global handler.
 
 ### Graceful Shutdown
 On SIGTERM/SIGINT:

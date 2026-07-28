@@ -4,10 +4,10 @@
 |-------|-------|
 | **Last updated** | 2026-07-27 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
-| **Current branch** | `fix/complaint-route-authorization` |
+| **Current branch** | `refactor/centralized-error-middleware` |
 | **Base commit** | `87fc52d` |
-| **Current task** | Fix complaint-route authorization gap (add protect + adminMiddleware) |
-| **Next task** | Implement centralized backend error middleware per ROADMAP |
+| **Current task** | Phase 1 centralized error handling foundation (error classes, errorHandler, asyncHandler, notFoundHandler, complaint pilot) |
+| **Next task** | Phase 2 incremental controller migration (next controller: health or profile) |
 | **Known blockers** | None |
 
 > Update this block after each merged PR.
@@ -44,7 +44,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 # Known Limitations
 
-- `middlewares/errorHandler.js` is empty — error handling inlined in `index.js`
+- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1). Normalizes AppError, Mongoose, JWT, and unknown errors. Still needs incremental migration of remaining controllers.
 - Redis `reconnectStrategy = false` — requires restart on connection loss
 - MongoDB `$vectorSearch` requires Atlas cluster
 - No SMS provider — email only via Brevo

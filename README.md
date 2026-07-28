@@ -296,7 +296,7 @@ docker compose up --build
 
 ```bash
 cd Smart_AI_backend
-npm test                           # Full suite (1216 tests, 28 suites; snapshot base commit 82a333a)
+npm test                           # Full suite (1287 tests, 30 suites; snapshot base commit 87fc52d)
 npm test -- --runInBand            # Sequential (recommended)
 ```
 

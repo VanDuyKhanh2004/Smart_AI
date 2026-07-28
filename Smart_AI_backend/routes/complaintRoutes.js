@@ -89,40 +89,4 @@ router.put('/:id/escalate', complaintController.escalateComplaint);
  * @access Admin
  */
 router.delete('/:id', complaintController.deleteComplaint);
-
-// Error handling middleware for this router
-router.use((error, req, res, next) => {
-  console.error('Complaint routes error:', error);
-  
-  // Handle specific error types
-  if (error.name === 'ValidationError') {
-    return res.status(400).json({
-      success: false,
-      error: {
-        message: 'Dữ liệu không hợp lệ',
-        details: Object.values(error.errors).map(err => err.message)
-      }
-    });
-  }
-  
-  if (error.name === 'CastError') {
-    return res.status(400).json({
-      success: false,
-      error: {
-        message: 'ID không hợp lệ',
-        code: 'INVALID_ID'
-      }
-    });
-  }
-  
-  // Generic server error
-  res.status(500).json({
-    success: false,
-    error: {
-      message: 'Lỗi server nội bộ',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    }
-  });
-});
-
 module.exports = router;
