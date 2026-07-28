@@ -8,6 +8,12 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 ## [Unreleased]
 
 ### Added
+- Redis auto-reconnect: exponential backoff (`min(500 × 2^attempt, 30000)ms`), infinite retries, graceful shutdown isolation
+- Shared `calculateReconnectDelay(attemptIndex)` helper used by both node-redis `reconnectStrategy` and ioredis `retryStrategy`
+- Structured reconnect logging (attempt, delayMs on scheduled; shutdown stop signal)
+- `setShuttingDown()` resets status to `'disconnected'` preventing stale `'reconnecting'` health reports
+- `getRedisStatus()` returns `'connected'` / `'reconnecting'` / `'disconnected'` based on client events
+- `tests/redis.test.js` (36 tests): delay formula, client strategies, logging safety, status transitions, health integration
 - Centralized error handling foundation (Phase 1): `AppError` class hierarchy, `asyncHandler`, global `errorHandler` middleware, `notFoundHandler` middleware
 - Centralized error handling Phase 2: health, address, and profile controllers migrated to `asyncHandler` + `AppError`
 - `tests/address.test.js` (17 tests: CRUD operations, ownership checks, auth, error propagation)

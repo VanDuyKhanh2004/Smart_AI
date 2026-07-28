@@ -190,6 +190,10 @@ const gracefulShutdown = async (signal) => {
   shuttingDown = true;
   logger.info({ signal }, 'Graceful shutdown initiated');
 
+  // 0. Prevent Redis reconnect before closing connections
+  const { setShuttingDown } = require('./configs/redis');
+  setShuttingDown();
+
   // 1. BullMQ: workers first, queues second
   await shutdownStep('BullMQ', () => stopBullMQ());
 

@@ -37,6 +37,10 @@ jest.mock('mongoose', () => {
 
 jest.mock('../configs/redis', () => ({
   getRedisClient: jest.fn(),
+  getRedisStatus: jest.fn(() => 'connected'),
+  setShuttingDown: jest.fn(),
+  isShuttingDown: jest.fn(() => false),
+  reconnectStrategy: jest.fn((n) => Math.min(500 * Math.pow(2, n), 30000)),
 }));
 
 jest.mock('bullmq', () => ({
@@ -198,6 +202,21 @@ describe('Overall health endpoint GET /api/health', () => {
     expect(res.body.dependencies.mongodb.status).toBe('up');
   });
 
+  it('returns 503 when Redis is reconnecting', async () => {
+    const mongoose = require('mongoose');
+    mongoose.connection.readyState = 1;
+    const { getRedisClient, getRedisStatus } = require('../configs/redis');
+    getRedisClient.mockReturnValue({ isOpen: false });
+    getRedisStatus.mockReturnValue('reconnecting');
+
+    await buildApp();
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(503);
+    expect(res.body.dependencies.redis.status).toBe('reconnecting');
+    expect(res.body.dependencies.mongodb.status).toBe('up');
+  });
+
   it('includes dependency responseTimeMs as numbers', async () => {
     const mongoose = require('mongoose');
     mongoose.connection.readyState = 1;
@@ -343,6 +362,20 @@ describe('Readiness endpoint GET /api/health/ready', () => {
 
     expect(res.status).toBe(503);
     expect(res.body.status).toBe('not_ready');
+  });
+
+  it('returns 503 when Redis is reconnecting (readiness)', async () => {
+    const mongoose = require('mongoose');
+    mongoose.connection.readyState = 1;
+    const { getRedisClient, getRedisStatus } = require('../configs/redis');
+    getRedisClient.mockReturnValue({ isOpen: false });
+    getRedisStatus.mockReturnValue('reconnecting');
+
+    await buildApp();
+    const res = await request(app).get('/api/health/ready');
+
+    expect(res.status).toBe(503);
+    expect(res.body.dependencies.redis.status).toBe('reconnecting');
   });
 
   it('logs a structured warning when unhealthy', async () => {

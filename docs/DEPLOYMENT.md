@@ -102,7 +102,7 @@ Deployed automatically via GitHub Actions (`.github/workflows/deploy-frontend.ym
 - **Version**: Redis 7
 - **Connection**: Via `REDIS_URL`
 - **Usage**: Cache, BullMQ queue backend, login rate limiting, chat context storage
-- **Important**: `reconnectStrategy = false` in production — Redis connection loss requires application restart
+- **Reconnect**: Exponential backoff auto-reconnect (`min(500 × 2^attempt, 30000)ms`, infinite retries). Graceful shutdown disables reconnect via `setShuttingDown()`.
 
 ## Cloudinary
 

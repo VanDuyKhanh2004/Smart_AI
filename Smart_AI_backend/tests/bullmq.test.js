@@ -47,10 +47,12 @@ describe('BullMQ queueConnection', () => {
     process.env.REDIS_URL = 'redis://localhost:6379';
   });
 
-  it('returns connection object with url from REDIS_URL', () => {
+  it('returns connection object with url and retryStrategy from REDIS_URL', () => {
     const { getBullMQConnection } = require('../queues/queueConnection');
     const conn = getBullMQConnection();
-    expect(conn).toEqual({ url: 'redis://localhost:6379' });
+    expect(conn).toHaveProperty('url', 'redis://localhost:6379');
+    expect(conn).toHaveProperty('retryStrategy');
+    expect(typeof conn.retryStrategy).toBe('function');
   });
 
   it('throws when REDIS_URL is missing', () => {

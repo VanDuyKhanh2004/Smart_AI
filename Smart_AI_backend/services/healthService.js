@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { getRedisClient } = require('../configs/redis');
+const { getRedisClient, getRedisStatus } = require('../configs/redis');
 const { getBullMQHealth } = require('../bullmq/bootstrap');
 
 const SERVICE_NAME = 'smart-ai-backend';
@@ -27,7 +27,15 @@ const checkRedis = async () => {
   const start = Date.now();
   const client = getRedisClient();
 
-  if (!client || !client.isOpen) {
+  if (!client) {
+    return { status: 'down', responseTimeMs: Date.now() - start };
+  }
+
+  if (getRedisStatus() === 'reconnecting') {
+    return { status: 'reconnecting', responseTimeMs: Date.now() - start };
+  }
+
+  if (!client.isOpen) {
     return { status: 'down', responseTimeMs: Date.now() - start };
   }
 
