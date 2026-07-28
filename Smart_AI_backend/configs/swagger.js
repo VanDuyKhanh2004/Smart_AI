@@ -1326,7 +1326,8 @@ const options = {
       '/api/complaints': {
         get: {
           tags: ['Complaints'],
-          summary: 'Get complaints with pagination and filtering',
+          summary: 'Get complaints with pagination and filtering (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
             { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
@@ -1335,22 +1336,28 @@ const options = {
           ],
           responses: {
              200: { description: 'List of complaints' },
+             401: { description: 'Not authenticated' },
+             403: { description: 'Not authorized (admin only)' },
            },
         },
       },
       '/api/complaints/stats': {
         get: {
           tags: ['Complaints'],
-          summary: 'Get complaint statistics',
+          summary: 'Get complaint statistics (admin)',
+          security: [{ BearerAuth: [] }],
           responses: {
             200: { description: 'Complaint statistics' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
           },
         },
       },
       '/api/complaints/search': {
         get: {
           tags: ['Complaints'],
-          summary: 'Advanced complaint search',
+          summary: 'Advanced complaint search (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'q', in: 'query', schema: { type: 'string' } },
             { name: 'status', in: 'query', schema: { type: 'string' } },
@@ -1358,24 +1365,30 @@ const options = {
           ],
           responses: {
             200: { description: 'Search results' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
           },
         },
       },
       '/api/complaints/{id}': {
         get: {
           tags: ['Complaints'],
-          summary: 'Get complaint by ID',
+          summary: 'Get complaint by ID (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           ],
           responses: {
             200: { description: 'Complaint details' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
             404: { description: 'Complaint not found' },
           },
         },
         put: {
           tags: ['Complaints'],
-          summary: 'Update complaint',
+          summary: 'Update complaint fields (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           ],
@@ -1397,23 +1410,29 @@ const options = {
           },
           responses: {
             200: { description: 'Complaint updated' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
           },
         },
         delete: {
           tags: ['Complaints'],
-          summary: 'Delete complaint',
+          summary: 'Delete complaint (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           ],
           responses: {
             200: { description: 'Complaint deleted' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
           },
         },
       },
       '/api/complaints/{id}/resolve': {
         put: {
           tags: ['Complaints'],
-          summary: 'Quick resolve complaint',
+          summary: 'Quick resolve complaint (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           ],
@@ -1431,18 +1450,23 @@ const options = {
           },
           responses: {
             200: { description: 'Complaint resolved' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
           },
         },
       },
       '/api/complaints/{id}/escalate': {
         put: {
           tags: ['Complaints'],
-          summary: 'Escalate complaint priority',
+          summary: 'Escalate complaint priority (admin)',
+          security: [{ BearerAuth: [] }],
           parameters: [
             { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
           ],
           responses: {
             200: { description: 'Complaint escalated' },
+            401: { description: 'Not authenticated' },
+            403: { description: 'Not authorized (admin only)' },
           },
         },
       },

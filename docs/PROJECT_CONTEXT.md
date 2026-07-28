@@ -4,10 +4,9 @@
 |-------|-------|
 | **Last updated** | 2026-07-27 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
-| **Current branch** | `feat/swagger-openapi` |
-| **Last merged PR** | #38 - `fix/admin-order-status-flow` |
-| **Current production status** | Frontend on Vercel, backend on Render, MongoDB Atlas, Redis managed |
-| **Current task** | Harden Swagger/OpenAPI test suite route accuracy checks |
+| **Current branch** | `fix/complaint-route-authorization` |
+| **Base commit** | `87fc52d` |
+| **Current task** | Fix complaint-route authorization gap (add protect + adminMiddleware) |
 | **Next task** | Implement centralized backend error middleware per ROADMAP |
 | **Known blockers** | None |
 
@@ -51,7 +50,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 - No SMS provider — email only via Brevo
 - Some controller tests tightly coupled to mocks
 - `.env.docker.example` contains old SMTP vars but app uses Brevo API
-- **Complaint management routes lack authentication/admin middleware** — all complaint endpoints (`GET /api/complaints`, `POST /api/complaints/:id/resolve`, etc.) are publicly accessible. Fix in a dedicated security PR.
+- **Complaint route authorization fixed** — all 8 endpoints now protected with `protect` + `adminMiddleware` (branch `fix/complaint-route-authorization`).
 
 # Documentation Maintenance
 
