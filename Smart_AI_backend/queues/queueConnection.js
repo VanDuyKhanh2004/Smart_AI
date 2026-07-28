@@ -1,11 +1,22 @@
 const logger = require('../utils/logger');
+const { isShuttingDown, calculateReconnectDelay } = require('../configs/redis');
+
+const retryStrategy = (times) => {
+  if (isShuttingDown()) {
+    logger.warn('BullMQ Redis reconnect stopped — shutting down');
+    return null;
+  }
+  const delayMs = calculateReconnectDelay(times - 1);
+  logger.info({ attempt: times, delayMs }, 'BullMQ Redis reconnect scheduled');
+  return delayMs;
+};
 
 const getBullMQConnection = () => {
   const url = process.env.REDIS_URL;
   if (!url) {
     throw new Error('REDIS_URL environment variable is required for BullMQ');
   }
-  return { url };
+  return { url, retryStrategy };
 };
 
 const getBullMQConfig = () => {

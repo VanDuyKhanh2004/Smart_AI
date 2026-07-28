@@ -79,7 +79,7 @@ Highest priority:
 
 Then:
 
-- [ ] Add Redis auto-reconnect (currently `reconnectStrategy = false`)
+- [x] Redis auto-reconnect with exponential backoff (500ms → 30s cap, infinite retries, disabled during graceful shutdown)
 - [ ] Add rate limiting on admin endpoints
 - [ ] Add environment variable validation at startup
 - [x] Generate API documentation (OpenAPI/Swagger)
@@ -110,7 +110,7 @@ Then:
 ## Technical Debt
 
 - [x] `middlewares/errorHandler.js` file is empty — Phase 1 complete: centralized error handler, classes, asyncHandler, notFoundHandler. Remaining controllers still use local error handling.
-- [ ] Redis `reconnectStrategy = false` — manual restart required on Redis failure
+- [x] Redis `reconnectStrategy = false` — resolved: auto-reconnect with exponential backoff, graceful shutdown isolation
 - [ ] Some controller tests mock implementation details (tight coupling to mocks)
 - [ ] No enforced commit message convention
 - [ ] No database migration tool for schema changes

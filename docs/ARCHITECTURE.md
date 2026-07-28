@@ -146,7 +146,7 @@ On SIGTERM/SIGINT:
 ### Redis 7
 - **Library**: `redis` package v6
 - **Usage**: Cache (product queries, default TTL 300s), BullMQ queue backend, login rate limiting, chat context (configurable TTL 30min, max 20 turns)
-- **Note**: `reconnectStrategy = false` — no auto-reconnect on connection loss
+- **Auto-reconnect**: Exponential backoff via `reconnectStrategy` (node-redis) / `retryStrategy` (ioredis/BullMQ). Formula: `min(500 × 2^attempt, 30000)ms`, infinite retries. `setShuttingDown()` disables reconnect during graceful shutdown.
 
 ## BullMQ
 
