@@ -1,7 +1,13 @@
 const logger = require('../utils/logger');
 const { AppError } = require('../utils/errors');
 
+const VALID_FORMATS = ['centralized', 'legacy-top-level-message'];
+
 const isDevelopment = process.env.NODE_ENV !== 'production';
+
+const resolveFormat = (error, req) => {
+  return error.responseFormat || req.errorResponseFormat || 'centralized';
+};
 
 const errorHandler = (error, req, res, next) => {
   if (res.headersSent) {
@@ -57,22 +63,34 @@ const errorHandler = (error, req, res, next) => {
     );
   }
 
-  if (!isDevelopment && statusCode >= 500) {
-    message = 'Lỗi server nội bộ';
-    details = undefined;
+  const resolvedFormat = resolveFormat(error, req);
+  if (!VALID_FORMATS.includes(resolvedFormat)) {
+    log.warn({ resolvedFormat }, 'Unknown error response format, falling back to centralized');
   }
 
-  const body = {
-    success: false,
-    error: { message, code },
-  };
+  const format = VALID_FORMATS.includes(resolvedFormat) ? resolvedFormat : 'centralized';
 
-  if (details) {
-    body.error.details = details;
-  }
-
-  if (!isDevelopment) {
-    body.error.timestamp = new Date().toISOString();
+  let body;
+  if (format === 'legacy-top-level-message') {
+    if (statusCode >= 500) {
+      message = 'Đã xảy ra lỗi, vui lòng thử lại';
+    }
+    body = { success: false, message };
+  } else {
+    if (!isDevelopment && statusCode >= 500) {
+      message = 'Lỗi server nội bộ';
+      details = undefined;
+    }
+    body = {
+      success: false,
+      error: { message, code },
+    };
+    if (details) {
+      body.error.details = details;
+    }
+    if (!isDevelopment) {
+      body.error.timestamp = new Date().toISOString();
+    }
   }
 
   res.status(statusCode).json(body);

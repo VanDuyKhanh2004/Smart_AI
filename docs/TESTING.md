@@ -15,7 +15,7 @@ npm test -- --runInBand                    # Sequential (recommended for DB conn
 npm test -- --watch                        # Watch mode
 ```
 
-### Test Suite (30 files, 1287 tests, snapshot verified on branch `refactor/centralized-error-middleware`, base commit `87fc52d`)
+### Test Suite (32 files, 1326 tests, snapshot verified on branch `refactor/error-handling-phase-2`)
 
 > Documentation-only changes do not alter these totals. Update the hash after each merged PR when tests are modified.
 
@@ -50,6 +50,8 @@ npm test -- --watch                        # Watch mode
 | `route-accuracy.test.js` | Swagger path-to-route validation (257 tests: route map, auth docs, OpenAPI structure, Bearer scheme, tags, schemas, secret-safety, Swagger UI mount) |
 | `complaint-auth.test.js` | Complaint route authorization (35 tests: 401/403/200 for all endpoints, 404 handling, side-effect safety) |
 | `errorHandler.test.js` | Error handling infrastructure (36 tests: AppError classes, asyncHandler, errorHandler normalization, notFoundHandler, Express integration) |
+| `address.test.js` | Address controller centralized error handling (17 tests: CRUD, ownership, auth, error propagation, default-address reassignment) |
+| `profile.test.js` | Profile controller centralized error handling (19 tests: profile CRUD, avatar upload, password change, auth, error propagation, secret safety) |
 | `checkoutFingerprint.test.js` | Idempotency fingerprint computation |
 
 ### Mocking Strategy

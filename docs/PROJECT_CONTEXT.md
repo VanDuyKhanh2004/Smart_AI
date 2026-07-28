@@ -2,12 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Last updated** | 2026-07-27 |
+| **Last updated** | 2026-07-28 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
-| **Current branch** | `refactor/centralized-error-middleware` |
-| **Base commit** | `87fc52d` |
-| **Current task** | Phase 1 centralized error handling foundation (error classes, errorHandler, asyncHandler, notFoundHandler, complaint pilot) |
-| **Next task** | Phase 2 incremental controller migration (next controller: health or profile) |
+| **Current branch** | `refactor/error-handling-phase-2` |
+| **Current task** | Phase 2 centralized error handling — health, address, profile controller migration |
+| **Next task** | Phase 3 incremental controller migration (next controller group) |
 | **Known blockers** | None |
 
 > Update this block after each merged PR.
@@ -44,7 +43,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 # Known Limitations
 
-- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1). Normalizes AppError, Mongoose, JWT, and unknown errors. Still needs incremental migration of remaining controllers.
+- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1 + Phase 2). Migrated modules: complaint (Phase 1), health, address, profile (Phase 2). Remaining controllers (auth, product, order, cart, review, promotion, wishlist, compare, store, question, answer, dashboard, appointment) still use legacy local error handling.
 - Redis `reconnectStrategy = false` — requires restart on connection loss
 - MongoDB `$vectorSearch` requires Atlas cluster
 - No SMS provider — email only via Brevo

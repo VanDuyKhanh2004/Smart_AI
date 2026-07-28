@@ -8,9 +8,11 @@ const {
   setDefaultAddress
 } = require('../controllers/addressController');
 const { protect } = require('../middlewares/authMiddleware');
+const errorResponseFormat = require('../middlewares/errorResponseFormat');
 
 // All address routes require authentication
 router.use(protect);
+router.use(errorResponseFormat('legacy-top-level-message'));
 
 // GET /api/addresses - Get all addresses for current user
 // Requirements: 1.2
