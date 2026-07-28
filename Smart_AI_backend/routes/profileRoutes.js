@@ -8,9 +8,11 @@ const {
 } = require('../controllers/profileController');
 const { protect } = require('../middlewares/authMiddleware');
 const uploadMiddleware = require('../middlewares/uploadMiddleware');
+const errorResponseFormat = require('../middlewares/errorResponseFormat');
 
 // All profile routes require authentication
 router.use(protect);
+router.use(errorResponseFormat('legacy-top-level-message'));
 
 // GET /api/profile - Get current user profile
 // Requirements: 1.1, 1.2, 1.3

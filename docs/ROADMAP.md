@@ -61,7 +61,7 @@
 - [x] OpenAPI 3.1 documentation with swagger-jsdoc + swagger-ui-express at `/api-docs`
 
 ### Testing
-- [x] Backend test suite (1287 tests, 30 suites, snapshot verified on branch `refactor/centralized-error-middleware`, base commit `87fc52d`)
+- [x] Backend test suite (1326 tests, 32 suites, snapshot verified on branch `refactor/error-handling-phase-2`)
 - [x] Frontend test suite (119 tests, 8 files, snapshot verified at base commit `82a333a`)
 - [x] CI-enforced TypeScript strict mode check
 
@@ -74,7 +74,7 @@
 Highest priority:
 
 - [x] Phase 1 centralized error handling foundation: `AppError` classes, `asyncHandler`, `errorHandler`, `notFoundHandler`, complaint controller pilot migration
-- [ ] Phase 2: Incremental controller migration (health → profile → address → ...)
+- [x] Phase 2: health, address, profile controller migration to `asyncHandler` + `AppError`
 - [x] Implement error handler middleware (`middlewares/errorHandler.js` is empty)
 
 Then:

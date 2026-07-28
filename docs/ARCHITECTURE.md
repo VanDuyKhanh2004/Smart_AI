@@ -112,14 +112,15 @@ Incoming Request
 ```
 
 ### Error Handling
-- **Centralized error foundation** (Phase 1): `AppError` class hierarchy in `utils/errors/`, global `errorHandler` middleware, `notFoundHandler` middleware
+- **Centralized error foundation** (Phases 1 & 2): `AppError` class hierarchy in `utils/errors/`, global `errorHandler` middleware, `notFoundHandler` middleware
 - **Error normalization**: AppError → status/code, Mongoose ValidationError → 400, CastError → 400, duplicate key → 409, TokenExpiredError → 401, JsonWebTokenError → 401
 - **Response format**: `{ success: false, error: { message, code, details?, timestamp? } }` (timestamp in production only)
 - **Production safety**: Generic messages for 5xx, no stack traces, no internal details
 - **Logging**: Pino with correlation ID (requestId). 4xx at warn level, 5xx at error level. Sensitive data redacted.
 - **Middleware order**: correlationId → parsers → cors → requestLogger → routes → notFoundHandler → errorHandler
-- **Pilot migration**: `complaintController` uses `asyncHandler` and `AppError` classes. Remaining controllers still use local error handling (legacy).
-- **Route-level handlers**: Some route files (e.g., complaintRoutes.js) have local error handlers that process known error types before falling through to the global handler.
+- **Migrated modules**: complaint (Phase 1 pilot), health, address, profile (Phase 2). These controllers use `asyncHandler` and `AppError` classes. Errors flow through global `errorHandler` automatically.
+- **Remaining controllers**: auth, product, order, cart, review, promotion, wishlist, compare, store, question, answer, dashboard, appointment — still use legacy local error handling.
+- **Route-level handlers**: No route-level error middleware remains in migrated route files. Errors propagate to global `errorHandler` via Express `next(error)` (either explicitly or through `asyncHandler`).
 
 ### Graceful Shutdown
 On SIGTERM/SIGINT:

@@ -457,3 +457,56 @@ describe('Health endpoints reuse existing connections', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('Health controller — unexpected errors reach global errorHandler', () => {
+  let app;
+  const errorHandler = require('../middlewares/errorHandler');
+
+  beforeEach(() => {
+    jest.resetModules();
+    app = express();
+  });
+
+  it('health endpoint returns 500 via errorHandler when healthService throws', async () => {
+    const healthService = require('../services/healthService');
+    jest.spyOn(healthService, 'getHealthData').mockRejectedValue(new Error('DB crash'));
+
+    const correlationId = require('../middlewares/correlationId');
+    const { health } = require('../controllers/healthController');
+    app.use(correlationId);
+    app.get('/api/health', health);
+    app.use(errorHandler);
+
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toBeDefined();
+  });
+
+  it('ready endpoint returns 500 via errorHandler when healthService throws', async () => {
+    const healthService = require('../services/healthService');
+    jest.spyOn(healthService, 'getReadinessData').mockRejectedValue(new Error('Redis crash'));
+
+    const correlationId = require('../middlewares/correlationId');
+    const { ready } = require('../controllers/healthController');
+    app.use(correlationId);
+    app.get('/api/health/ready', ready);
+    app.use(errorHandler);
+
+    const res = await request(app).get('/api/health/ready');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toBeDefined();
+  });
+
+  it('live (sync) returns 200 normally, no errorHandler involvement', async () => {
+    const correlationId = require('../middlewares/correlationId');
+    const { live } = require('../controllers/healthController');
+    app.use(correlationId);
+    app.get('/health', live);
+
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});

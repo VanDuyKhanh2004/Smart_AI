@@ -331,6 +331,89 @@ describe('errorHandler', () => {
     });
   });
 
+  describe('Legacy envelope via error.responseFormat', () => {
+    it('returns exact { success: false, message } for legacy-top-level-message', () => {
+      const error = new NotFoundError('Item not found', 'ITEM_NOT_FOUND', 'legacy-top-level-message');
+      errorHandler(error, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Item not found',
+      });
+    });
+
+    it('does not include code in legacy envelope', () => {
+      const error = new BadRequestError('Invalid input', 'INVALID_INPUT', undefined, 'legacy-top-level-message');
+      errorHandler(error, req, res, next);
+
+      const callArg = res.json.mock.calls[0][0];
+      expect(callArg).not.toHaveProperty('code');
+      expect(callArg).not.toHaveProperty('error');
+    });
+
+    it('uses legacy message for 500 errors', () => {
+      const error = new AppError('Raw server error', 500, 'INTERNAL_ERROR', undefined, 'legacy-top-level-message');
+      errorHandler(error, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Đã xảy ra lỗi, vui lòng thử lại',
+      });
+    });
+
+    it('uses legacy message for unknown 500 errors with request-scoped format', () => {
+      req.errorResponseFormat = 'legacy-top-level-message';
+      const error = new Error('Database timeout');
+      errorHandler(error, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Đã xảy ra lỗi, vui lòng thử lại',
+      });
+    });
+  });
+
+  describe('Request-scoped format via req.errorResponseFormat', () => {
+    it('uses req.errorResponseFormat for non-AppError errors', () => {
+      req.errorResponseFormat = 'legacy-top-level-message';
+      const error = new Error('Validation failed');
+      error.name = 'ValidationError';
+      error.errors = { name: { message: 'Name is required' } };
+      errorHandler(error, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Dữ liệu không hợp lệ',
+      });
+    });
+
+    it('error.responseFormat overrides req.errorResponseFormat', () => {
+      req.errorResponseFormat = 'legacy-top-level-message';
+      const error = new NotFoundError('Centralized error', 'CENTRAL', 'centralized');
+      errorHandler(error, req, res, next);
+
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: { message: 'Centralized error', code: 'CENTRAL' },
+      });
+    });
+
+    it('falls back to centralized when neither is set', () => {
+      delete req.errorResponseFormat;
+      const error = new NotFoundError('Not found', 'NOT_FOUND');
+      errorHandler(error, req, res, next);
+
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: { message: 'Not found', code: 'NOT_FOUND' },
+      });
+    });
+  });
+
   describe('Logging', () => {
     it('logs 5xx errors at error level', () => {
       const error = new Error('server crash');

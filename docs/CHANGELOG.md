@@ -9,6 +9,9 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 
 ### Added
 - Centralized error handling foundation (Phase 1): `AppError` class hierarchy, `asyncHandler`, global `errorHandler` middleware, `notFoundHandler` middleware
+- Centralized error handling Phase 2: health, address, and profile controllers migrated to `asyncHandler` + `AppError`
+- `tests/address.test.js` (17 tests: CRUD operations, ownership checks, auth, error propagation)
+- `tests/profile.test.js` (19 tests: profile CRUD, avatar upload, password change, error propagation, secret safety)
 - Error normalization: Mongoose ValidationError→400, CastError→400, duplicate key→409, JWT errors→401
 - Production-safe error responses (no stack traces, no internal details)
 - Structured logging with correlation IDs for all error levels
@@ -33,6 +36,10 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 ### Changed
 - index.js error handling replaced with `notFoundHandler` + `errorHandler` middleware chain
 - complaint route-level error handler now forwards unknown errors to global handler (instead of inline 500)
+- healthController: `health` and `ready` wrapped with `asyncHandler`, local try/catch removed (errors already forwarded to `next(err)`)
+- addressController: all 5 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError)
+- profileController: all 4 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); `console.error` calls removed (handled by global errorHandler)
+- Error response shape for address and profile endpoints preserves legacy `{ success, message }` format (frontend type `ApiError` reads `response.data.message`); centralized `{ success, error: { message, code } }` only for complaint and unexpected errors
 - Order controller `updateOrderStatus` uses centralized transition module
 - AdminOrderDetailDialog status dropdown only shows allowed next states
 - Update button disabled when no valid selection or in progress

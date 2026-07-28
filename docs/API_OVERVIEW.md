@@ -98,7 +98,7 @@ Rate limiting is enforced on the login endpoint (`/api/auth/login`) via Redis-ba
 }
 ```
 
-> **Transitional note**: The centralized error handler (`middlewares/errorHandler.js`) is in Phase 1. Most controllers still use legacy local error handling with varied response shapes. The centralized format above applies to routes that have been migrated (currently: complaint routes) and unmatched-route 404s. Legacy controllers may still return the old `{ error: { message, status, timestamp } }` format. See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
+> **Transitional note**: The centralized error handler (`middlewares/errorHandler.js`) is in Phase 2. Migrated modules use `asyncHandler` + `AppError`. The **complaint** controller uses the centralized `{ success: false, error: { message, code } }` envelope. The **address** and **profile** controllers preserve the legacy `{ success: false, message }` envelope (frontend `ApiError` reads `response.data.message`). Legacy controllers (auth, product, order, cart, review, promotion, wishlist, compare, store, question, answer, dashboard, appointment) still use varied local error response shapes. See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ## See Also
 
