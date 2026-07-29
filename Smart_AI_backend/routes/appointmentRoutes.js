@@ -12,6 +12,10 @@ const {
 } = require('../controllers/appointmentController');
 const { protect, optionalAuth } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const errorResponseFormat = require('../middlewares/errorResponseFormat');
+
+// Set legacy error response format for all appointment routes
+router.use(errorResponseFormat('legacy-top-level-message'));
 
 // Public routes
 // GET available time slots for a store on a specific date
