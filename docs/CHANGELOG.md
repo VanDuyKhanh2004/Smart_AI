@@ -11,6 +11,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - `tests/appointment.test.js` (42 tests: CRUD, validation, auth, ownership, admin status transitions, `generateTimeSlots` unit tests)
 - `tests/compare.test.js` (21 tests: CRUD, validation, auth, duplicate detection, ownership, error paths)
 - `tests/question.test.js` (29 tests: CRUD, validation, auth, admin status update, ownership, upvote toggle, error paths)
+- `tests/answer.test.js` (14 tests: create answer, delete answer, validation, auth, admin-only access, error paths)
 - Redis auto-reconnect: exponential backoff (`min(500 × 2^attempt, 30000)ms`), infinite retries, graceful shutdown isolation
 - Shared `calculateReconnectDelay(attemptIndex)` helper used by both node-redis `reconnectStrategy` and ioredis `retryStrategy`
 - Structured reconnect logging (attempt, delayMs on scheduled; shutdown stop signal)
@@ -44,6 +45,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - Documentation files under `docs/`
 
 ### Changed
+- answerController: both handlers (`createAnswer`, `deleteAnswer`) migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; Mongoose `ValidationError` handling removed (handled by global errorHandler); `console.error` calls removed (handled by global errorHandler); no inner `try/catch` to preserve; response format unchanged (already centralized `{ success, error: { code, message } }`)
 - questionController: all 6 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError); manual `try/catch` eliminated; Mongoose `ValidationError` handling removed (handled by global errorHandler); request-level `console.error` handling removed (handled by global errorHandler); AI suggestion `console.error` remains intentionally inside the non-critical inner `try/catch`; response format unchanged (already centralized `{ success, error: { code, message } }`)
 - compareController: all 4 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError); manual `try/catch` eliminated; `console.error` calls removed (handled by global errorHandler); response format unchanged (already centralized `{ success, error: { code, message } }`)
 - appointmentController: all 8 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; `errorResponseFormat('legacy-top-level-message')` added to routes
