@@ -388,6 +388,7 @@ describe('errorHandler', () => {
       expect(res.json).toHaveBeenCalledWith({
         success: false,
         message: 'Dữ liệu không hợp lệ',
+        errors: ['Name is required'],
       });
     });
 

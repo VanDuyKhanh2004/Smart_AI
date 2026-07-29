@@ -76,6 +76,9 @@ const errorHandler = (error, req, res, next) => {
       message = 'Đã xảy ra lỗi, vui lòng thử lại';
     }
     body = { success: false, message };
+    if (details) {
+      body.errors = details;
+    }
   } else {
     if (!isDevelopment && statusCode >= 500) {
       message = 'Lỗi server nội bộ';

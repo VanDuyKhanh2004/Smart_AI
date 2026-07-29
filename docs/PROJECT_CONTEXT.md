@@ -5,8 +5,8 @@
 | **Last updated** | 2026-07-29 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
 | **Current branch** | `feat/question-error-handling` |
-| **Current task** | Answer controller migration to centralized error handling (Phase 2 Part E) completed |
-| **Next task** | Phase 3 incremental controller migration (next controller group: review pending controllers) |
+| **Current task** | Store controller migration to centralized error handling (Phase 2) completed |
+| **Next task** | Phase 3 incremental controller migration (next controller group: review remaining controllers) |
 | **Known blockers** | None |
 
 > Update this block after each merged PR.
@@ -44,7 +44,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 # Known Limitations
 
-- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1 + Phase 2). Migrated modules: complaint (Phase 1), health, address, profile (Phase 2). Remaining controllers (auth, product, order, cart, review, promotion, wishlist, compare, store, question, answer, dashboard, appointment) still use legacy local error handling.
+- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1 + Phase 2). Migrated modules: complaint (Phase 1), health, address, profile, appointment, compare, question, answer, store (Phase 2). Remaining controllers (auth, product, order, cart, review, promotion, wishlist, dashboard) still use legacy local error handling.
 - Redis `reconnectStrategy = false` — resolved: auto-reconnect with exponential backoff implemented (see CHANGELOG)
 - MongoDB `$vectorSearch` requires Atlas cluster
 - No SMS provider — email only via Brevo

@@ -20,6 +20,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - `tests/redis.test.js` (36 tests): delay formula, client strategies, logging safety, status transitions, health integration
 - Centralized error handling foundation (Phase 1): `AppError` class hierarchy, `asyncHandler`, global `errorHandler` middleware, `notFoundHandler` middleware
 - Centralized error handling Phase 2: health, address, and profile controllers migrated to `asyncHandler` + `AppError`
+- `tests/store.test.js` (23 tests: CRUD, validation, auth, admin-only access, geo search, error paths)
 - `tests/address.test.js` (17 tests: CRUD operations, ownership checks, auth, error propagation)
 - `tests/profile.test.js` (19 tests: profile CRUD, avatar upload, password change, error propagation, secret safety)
 - Error normalization: Mongoose ValidationError→400, CastError→400, duplicate key→409, JWT errors→401
@@ -49,6 +50,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - questionController: all 6 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError); manual `try/catch` eliminated; Mongoose `ValidationError` handling removed (handled by global errorHandler); request-level `console.error` handling removed (handled by global errorHandler); AI suggestion `console.error` remains intentionally inside the non-critical inner `try/catch`; response format unchanged (already centralized `{ success, error: { code, message } }`)
 - compareController: all 4 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError); manual `try/catch` eliminated; `console.error` calls removed (handled by global errorHandler); response format unchanged (already centralized `{ success, error: { code, message } }`)
 - appointmentController: all 8 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; `errorResponseFormat('legacy-top-level-message')` added to routes
+- storeController: all 7 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; `errorResponseFormat('legacy-top-level-message')` added to routes
 - index.js error handling replaced with `notFoundHandler` + `errorHandler` middleware chain
 - complaint route-level error handler now forwards unknown errors to global handler (instead of inline 500)
 - healthController: `health` and `ready` wrapped with `asyncHandler`, local try/catch removed (errors already forwarded to `next(err)`)
