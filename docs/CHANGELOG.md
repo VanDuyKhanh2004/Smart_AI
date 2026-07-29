@@ -20,7 +20,8 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - `tests/redis.test.js` (36 tests): delay formula, client strategies, logging safety, status transitions, health integration
 - Centralized error handling foundation (Phase 1): `AppError` class hierarchy, `asyncHandler`, global `errorHandler` middleware, `notFoundHandler` middleware
 - Centralized error handling Phase 2: health, address, and profile controllers migrated to `asyncHandler` + `AppError`
-- `tests/store.test.js` (23 tests: CRUD, validation, auth, admin-only access, geo search, error paths)
+- `tests/auth.test.js` (54 tests: register, login, logout, refresh, getMe, Google OAuth, email verification, password reset, unlock, admin unlock, link/unlink Google, validation, error paths)
+- `tests/store.test.js` (29 tests: CRUD, validation, auth, admin-only access, geo search, error paths, ValidationError errors array, CastError)
 - `tests/address.test.js` (17 tests: CRUD operations, ownership checks, auth, error propagation)
 - `tests/profile.test.js` (19 tests: profile CRUD, avatar upload, password change, error propagation, secret safety)
 - Error normalization: Mongoose ValidationError→400, CastError→400, duplicate key→409, JWT errors→401
@@ -51,6 +52,9 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - compareController: all 4 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError); manual `try/catch` eliminated; `console.error` calls removed (handled by global errorHandler); response format unchanged (already centralized `{ success, error: { code, message } }`)
 - appointmentController: all 8 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; `errorResponseFormat('legacy-top-level-message')` added to routes
 - storeController: all 7 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; `errorResponseFormat('legacy-top-level-message')` added to routes
+- authController: all 15 handlers migrated to `asyncHandler` + AppError hierarchy (BadRequestError, UnauthorizedError, ForbiddenError, NotFoundError, ConflictError); manual `try/catch` eliminated; `console.error` calls removed; inner `try/catch` preserved for `verifyRefreshToken` (refreshToken handler) and `verifyIdToken` (googleLogin handler); response format unchanged (already centralized `{ success, error: { code, message } }`); locked account returns `AppError` with status 429 for `ACCOUNT_LOCKED` (preserves original HTTP status)
+- errorHandler: ValidationError normalization now preserves field path in `details` (`{ field, message }` objects instead of plain strings)
+- `tests/errorHandler.test.js`: ValidationError mock includes `path`; legacy format test includes `errors` array with `{ field, message }` objects
 - index.js error handling replaced with `notFoundHandler` + `errorHandler` middleware chain
 - complaint route-level error handler now forwards unknown errors to global handler (instead of inline 500)
 - healthController: `health` and `ready` wrapped with `asyncHandler`, local try/catch removed (errors already forwarded to `next(err)`)

@@ -83,7 +83,7 @@ const makeValidationError = (fieldMessages) => ({
   name: 'ValidationError',
   message: 'Store validation failed',
   errors: Object.fromEntries(
-    Object.entries(fieldMessages).map(([field, msg]) => [field, { message: msg }])
+    Object.entries(fieldMessages).map(([field, msg]) => [field, { path: field, message: msg }])
   ),
 });
 

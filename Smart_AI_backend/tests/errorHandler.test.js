@@ -224,8 +224,8 @@ describe('errorHandler', () => {
       const error = new Error('Validation failed');
       error.name = 'ValidationError';
       error.errors = {
-        name: { message: 'Name is required' },
-        email: { message: 'Email is invalid' },
+        name: { path: 'name', message: 'Name is required' },
+        email: { path: 'email', message: 'Email is invalid' },
       };
 
       errorHandler(error, req, res, next);
@@ -236,7 +236,7 @@ describe('errorHandler', () => {
         error: {
           message: 'Dữ liệu không hợp lệ',
           code: 'VALIDATION_ERROR',
-          details: ['Name is required', 'Email is invalid'],
+          details: [{ field: 'name', message: 'Name is required' }, { field: 'email', message: 'Email is invalid' }],
         },
       });
     });
@@ -381,7 +381,7 @@ describe('errorHandler', () => {
       req.errorResponseFormat = 'legacy-top-level-message';
       const error = new Error('Validation failed');
       error.name = 'ValidationError';
-      error.errors = { name: { message: 'Name is required' } };
+      error.errors = { name: { path: 'name', message: 'Name is required' } };
       errorHandler(error, req, res, next);
 
       expect(res.status).toHaveBeenCalledWith(400);

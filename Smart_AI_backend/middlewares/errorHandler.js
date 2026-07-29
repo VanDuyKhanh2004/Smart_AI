@@ -30,7 +30,7 @@ const errorHandler = (error, req, res, next) => {
     statusCode = 400;
     code = 'VALIDATION_ERROR';
     message = 'Dữ liệu không hợp lệ';
-    details = Object.values(error.errors).map((e) => e.message);
+    details = Object.values(error.errors).map((e) => ({ field: e.path, message: e.message }));
   } else if (error.name === 'CastError') {
     statusCode = 400;
     code = 'INVALID_ID';
@@ -77,7 +77,9 @@ const errorHandler = (error, req, res, next) => {
     }
     body = { success: false, message };
     if (details) {
-      body.errors = details;
+      body.errors = Array.isArray(details) && details[0] && typeof details[0] === 'object' && 'message' in details[0]
+        ? details.map((d) => d.message)
+        : details;
     }
   } else {
     if (!isDevelopment && statusCode >= 500) {
