@@ -83,6 +83,7 @@ Then:
 - [ ] Add rate limiting on admin endpoints
 - [ ] Add environment variable validation at startup
 - [x] Generate API documentation (OpenAPI/Swagger)
+- [x] Generate database ERD documentation (`docs/ERD.md`)
 - [ ] Add end-to-end tests (Cypress or Playwright)
 - [ ] Increase frontend test coverage
 

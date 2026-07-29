@@ -2,10 +2,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Last updated** | 2026-07-28 |
+| **Last updated** | 2026-07-29 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
-| **Current branch** | `feat/redis-auto-reconnect` |
-| **Current task** | Redis auto-reconnect with exponential backoff, graceful shutdown isolation |
+| **Current branch** | `main` |
+| **Current task** | Database ERD documentation completed |
 | **Next task** | Phase 3 incremental controller migration (next controller group) |
 | **Known blockers** | None |
 
@@ -31,6 +31,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 - **Customer order detail page**: `/orders/:id` with loading skeleton and error states.
 - **AI chatbot**: RAG pipeline (intent classification via OpenAI `gpt-4o` → vector search → constraint parsing → ranking → OpenAI `gpt-4o` primary chat completion with Gemini `gemini-2.0-flash` fallback), complaint handling via OpenAI, embeddings via Gemini (`gemini-embedding-001`), multi-turn context (Redis, 30min TTL, 20 max turns), evaluation framework at `evaluation/chatbot/`.
 - **API documentation**: OpenAPI 3.1 spec with swagger-jsdoc + swagger-ui-express mounted at `/api-docs`. Documents Auth, Products, Orders, Cart, Chat, Reviews, Promotions, Complaints, Wishlist, Compare, Questions, Stores, Addresses, Profile, Appointments, Dashboard, Health. Includes reusable schemas (User, Product, Order, Review, Promotion, Error) and Bearer JWT auth. Route accuracy test suite (`tests/route-accuracy.test.js`) validates every swagger path matches a real Express route with correct auth documentation, plus OpenAPI structure and secret-safety checks.
+- **Database ERD**: Complete entity-relationship documentation at `docs/ERD.md` covers all 16 collections, entity relationships, indexes, unique constraints, and scaling recommendations.
 
 # Current Production State
 
