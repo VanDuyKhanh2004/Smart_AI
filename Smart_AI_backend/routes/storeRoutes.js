@@ -11,6 +11,9 @@ const {
 } = require('../controllers/storeController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const errorResponseFormat = require('../middlewares/errorResponseFormat');
+
+router.use(errorResponseFormat('legacy-top-level-message'));
 
 // Admin protected routes (must come before /:id to avoid conflicts)
 router.get('/admin/all', protect, adminMiddleware, getAllStoresAdmin);
