@@ -9,6 +9,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 
 ### Added
 - `tests/appointment.test.js` (42 tests: CRUD, validation, auth, ownership, admin status transitions, `generateTimeSlots` unit tests)
+- `tests/compare.test.js` (21 tests: CRUD, validation, auth, duplicate detection, ownership, error paths)
 - Redis auto-reconnect: exponential backoff (`min(500 × 2^attempt, 30000)ms`), infinite retries, graceful shutdown isolation
 - Shared `calculateReconnectDelay(attemptIndex)` helper used by both node-redis `reconnectStrategy` and ioredis `retryStrategy`
 - Structured reconnect logging (attempt, delayMs on scheduled; shutdown stop signal)
@@ -42,6 +43,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - Documentation files under `docs/`
 
 ### Changed
+- compareController: all 4 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError, ForbiddenError); manual `try/catch` eliminated; `console.error` calls removed (handled by global errorHandler); response format unchanged (already centralized `{ success, error: { code, message } }`)
 - appointmentController: all 8 handlers migrated to `asyncHandler` + AppError classes (BadRequestError, NotFoundError); manual `try/catch` eliminated; `errorResponseFormat('legacy-top-level-message')` added to routes
 - index.js error handling replaced with `notFoundHandler` + `errorHandler` middleware chain
 - complaint route-level error handler now forwards unknown errors to global handler (instead of inline 500)

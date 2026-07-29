@@ -5,7 +5,7 @@
 | **Last updated** | 2026-07-29 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
 | **Current branch** | `main` |
-| **Current task** | Appointment controller migration to centralized error handling (Phase 2 Part B) completed |
+| **Current task** | Compare controller migration to centralized error handling (Phase 2 Part C) completed |
 | **Next task** | Phase 3 incremental controller migration (next controller group: review pending controllers) |
 | **Known blockers** | None |
 
