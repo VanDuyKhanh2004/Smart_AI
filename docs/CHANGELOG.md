@@ -37,6 +37,7 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 - Chatbot constraint parsing, product ranking by soft preferences, and conversation context management
 - Chatbot evaluation framework (`evaluation/chatbot/`)
 - Backend tests for chatbot evaluation, intent classification, context merging, and fallback behavior
+- Database ERD documentation at `docs/ERD.md` — 16 collections, all entity relationships, indexes, unique constraints, Mermaid diagrams
 - Documentation files under `docs/`
 
 ### Changed

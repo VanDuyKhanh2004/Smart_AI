@@ -274,6 +274,7 @@ docker compose up --build
 - Managed Redis instance required for BullMQ, rate limiting, chat context
 - Connection via `REDIS_URL`
 - Note: Auto-reconnect with exponential backoff (`min(500 × 2^attempt, 30000)ms`, infinite retries) — disabled during graceful shutdown
+- ERD: See `docs/ERD.md` for full database schema, relationships, indexes, and scaling recommendations
 
 ### Cloudinary
 
