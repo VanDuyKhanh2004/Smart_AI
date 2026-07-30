@@ -9,6 +9,8 @@ const { computeRequestFingerprint, computeCheckoutFingerprint } = require('../ut
 const logger = require('../utils/logger');
 const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
 const { STATUS_LIST, canTransition, getAllowedNextStatuses, isTerminal } = require('../services/orderStatusTransitions');
+const asyncHandler = require('../utils/asyncHandler');
+const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -506,225 +508,181 @@ const createOrder = async (req, res) => {
  * Get user's orders with pagination
  * Requirements: 2.1, 2.2
  */
-const getUserOrders = async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+const getUserOrders = asyncHandler(async (req, res, next) => {
+  const userId = req.user._id;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
 
-    const [orders, total] = await Promise.all([
-      Order.find({ user: userId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate('user', 'name email'),
-      Order.countDocuments({ user: userId })
-    ]);
+  const [orders, total] = await Promise.all([
+    Order.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('user', 'name email'),
+    Order.countDocuments({ user: userId })
+  ]);
 
-    res.status(200).json({
-      success: true,
-      data: orders,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi lấy danh sách đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
+  res.status(200).json({
+    success: true,
+    data: orders,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
+});
 
 /**
  * Get single order by ID
  * Requirements: 2.3
  */
-const getOrderById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user._id;
+const getOrderById = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user._id;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: 'ID đơn hàng không hợp lệ',
-        code: 'ORDER_NOT_FOUND'
-      });
-    }
-
-    const order = await Order.findById(id)
-      .populate('user', 'name email');
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy đơn hàng',
-        code: 'ORDER_NOT_FOUND'
-      });
-    }
-
-    // Verify user ownership (unless admin)
-    if (order.user._id.toString() !== userId.toString() && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn không có quyền xem đơn hàng này',
-        code: 'FORBIDDEN'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: order
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi lấy chi tiết đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new BadRequestError('ID đơn hàng không hợp lệ', 'ORDER_NOT_FOUND');
   }
-};
+
+  const order = await Order.findById(id)
+    .populate('user', 'name email');
+
+  if (!order) {
+    throw new NotFoundError('Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
+  }
+
+  // Verify user ownership (unless admin)
+  if (order.user._id.toString() !== userId.toString() && req.user.role !== 'admin') {
+    throw new ForbiddenError('Bạn không có quyền xem đơn hàng này', 'FORBIDDEN');
+  }
+
+  res.status(200).json({
+    success: true,
+    data: order
+  });
+});
 
 
 /**
  * Get all orders with filters (admin)
  * Requirements: 3.1, 3.2, 5.1, 5.2, 5.3
  */
-const getAllOrders = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+const getAllOrders = asyncHandler(async (req, res, next) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
 
-    // Build filter query
-    const filter = {};
+  // Build filter query
+  const filter = {};
 
-    // Status filter (Requirement 5.1)
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-
-    // Date range filter (Requirement 5.3)
-    if (req.query.startDate || req.query.endDate) {
-      filter.createdAt = {};
-      if (req.query.startDate) {
-        filter.createdAt.$gte = new Date(req.query.startDate);
-      }
-      if (req.query.endDate) {
-        // Set end date to end of day
-        const endDate = new Date(req.query.endDate);
-        endDate.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = endDate;
-      }
-    }
-
-    // Search filter (Requirement 5.2) - search by orderNumber or customer name
-    let searchQuery = {};
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, 'i');
-      searchQuery = {
-        $or: [
-          { orderNumber: searchRegex }
-        ]
-      };
-    }
-
-    // Combine filters
-    const finalFilter = req.query.search 
-      ? { $and: [filter, searchQuery] }
-      : filter;
-
-    // Get orders with user populated for search
-    let ordersQuery = Order.find(finalFilter)
-      .populate('user', 'name email')
-      .sort({ createdAt: -1 });
-
-    // If searching by customer name, we need to filter after populate
-    let orders = await ordersQuery.exec();
-    
-    if (req.query.search) {
-      const searchLower = req.query.search.toLowerCase();
-      orders = orders.filter(order => 
-        order.orderNumber.toLowerCase().includes(searchLower) ||
-        (order.user && order.user.name && order.user.name.toLowerCase().includes(searchLower))
-      );
-    }
-
-    const total = orders.length;
-    const paginatedOrders = orders.slice(skip, skip + limit);
-
-    res.status(200).json({
-      success: true,
-      data: paginatedOrders,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi lấy danh sách đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+  // Status filter (Requirement 5.1)
+  if (req.query.status) {
+    filter.status = req.query.status;
   }
-};
+
+  // Date range filter (Requirement 5.3)
+  if (req.query.startDate || req.query.endDate) {
+    filter.createdAt = {};
+    if (req.query.startDate) {
+      filter.createdAt.$gte = new Date(req.query.startDate);
+    }
+    if (req.query.endDate) {
+      // Set end date to end of day
+      const endDate = new Date(req.query.endDate);
+      endDate.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = endDate;
+    }
+  }
+
+  // Search filter (Requirement 5.2) - search by orderNumber or customer name
+  let searchQuery = {};
+  if (req.query.search) {
+    const searchRegex = new RegExp(req.query.search, 'i');
+    searchQuery = {
+      $or: [
+        { orderNumber: searchRegex }
+      ]
+    };
+  }
+
+  // Combine filters
+  const finalFilter = req.query.search
+    ? { $and: [filter, searchQuery] }
+    : filter;
+
+  // Get orders with user populated for search
+  let ordersQuery = Order.find(finalFilter)
+    .populate('user', 'name email')
+    .sort({ createdAt: -1 });
+
+  // If searching by customer name, we need to filter after populate
+  let orders = await ordersQuery.exec();
+
+  if (req.query.search) {
+    const searchLower = req.query.search.toLowerCase();
+    orders = orders.filter(order =>
+      order.orderNumber.toLowerCase().includes(searchLower) ||
+      (order.user && order.user.name && order.user.name.toLowerCase().includes(searchLower))
+    );
+  }
+
+  const total = orders.length;
+  const paginatedOrders = orders.slice(skip, skip + limit);
+
+  res.status(200).json({
+    success: true,
+    data: paginatedOrders,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
+});
 
 /**
  * Get order statistics (admin)
  * Requirements: 3.1
  */
-const getOrderStats = async (req, res) => {
-  try {
-    const [total, statusCounts] = await Promise.all([
-      Order.countDocuments(),
-      Order.aggregate([
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 }
-          }
+const getOrderStats = asyncHandler(async (req, res, next) => {
+  const [total, statusCounts] = await Promise.all([
+    Order.countDocuments(),
+    Order.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
         }
-      ])
-    ]);
-
-    // Convert to object format
-    const byStatus = {
-      pending: 0,
-      confirmed: 0,
-      processing: 0,
-      shipping: 0,
-      delivered: 0,
-      cancelled: 0
-    };
-
-    statusCounts.forEach(item => {
-      byStatus[item._id] = item.count;
-    });
-
-    res.status(200).json({
-      success: true,
-      data: {
-        total,
-        byStatus
       }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi lấy thống kê đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
+    ])
+  ]);
+
+  // Convert to object format
+  const byStatus = {
+    pending: 0,
+    confirmed: 0,
+    processing: 0,
+    shipping: 0,
+    delivered: 0,
+    cancelled: 0
+  };
+
+  statusCounts.forEach(item => {
+    byStatus[item._id] = item.count;
+  });
+
+  res.status(200).json({
+    success: true,
+    data: {
+      total,
+      byStatus
+    }
+  });
+});
 
 
 /**
