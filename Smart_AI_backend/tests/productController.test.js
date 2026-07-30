@@ -63,10 +63,12 @@ jest.mock('../services/productImageService', () => ({
   ProductImageValidationError: MockProductImageValidationError,
 }));
 
-const { createProduct, getAllProducts, getProductById, updateProduct, deleteProduct } = require('../controllers/productController');
+const { createProduct, getAllProducts, getProductById, updateProduct, deleteProduct, searchSemantic, getRecommendations } = require('../controllers/productController');
 const Product = require('../models/Product');
 const Review = require('../models/Review');
 const cache = require('../services/cacheService');
+const productSearchService = require('../services/productSearchService');
+const productRecommendationService = require('../services/productRecommendationService');
 const logger = require('../utils/logger');
 
 const mockJson = jest.fn();
@@ -80,6 +82,8 @@ function mockReq(body, params = {}, query = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   cache.get.mockReset();
+  productSearchService.search.mockReset();
+  productRecommendationService.recommend.mockReset();
   mockComputeContentHash.mockReturnValue('changed-hash');
   mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: '', imagePublicId: null });
 });
@@ -1384,6 +1388,127 @@ describe('getProductById', () => {
     const res = mockRes();
     const next = jest.fn();
     await expect(getProductById(req, res, next)).resolves.not.toThrow();
+    expect(next).toHaveBeenCalledWith(dbError);
+  });
+});
+
+/* ============================================================
+   searchSemantic
+============================================================ */
+describe('searchSemantic', () => {
+  it('returns semantic search results on success', async () => {
+    const mockResults = {
+      products: [{ _id: 'prod-1', name: 'Semantic result' }],
+      searchMode: 'vector',
+    };
+    productSearchService.search.mockResolvedValue(mockResults);
+
+    const req = mockReq({}, {}, { q: 'áo thun' });
+    const res = mockRes();
+    await searchSemantic(req, res);
+
+    expect(productSearchService.search).toHaveBeenCalledWith('áo thun', 10);
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      message: 'Tìm kiếm ngữ nghĩa thành công',
+      data: {
+        products: mockResults.products,
+        query: 'áo thun',
+        searchMode: 'vector',
+      },
+    });
+  });
+
+  it('forwards BadRequestError to next when query is empty', async () => {
+    const req = mockReq({}, {}, { q: '' });
+    const res = mockRes();
+    const next = jest.fn();
+    await searchSemantic(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }),
+    );
+    expect(productSearchService.search).not.toHaveBeenCalled();
+  });
+
+  it('forwards unexpected error to next', async () => {
+    const dbError = new Error('Search service failure');
+    productSearchService.search.mockRejectedValue(dbError);
+
+    const req = mockReq({}, {}, { q: 'áo thun' });
+    const res = mockRes();
+    const next = jest.fn();
+    await searchSemantic(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(dbError);
+  });
+});
+
+/* ============================================================
+   getRecommendations
+============================================================ */
+describe('getRecommendations', () => {
+  it('returns recommendations on success', async () => {
+    const mockResult = {
+      sourceProduct: { _id: 'prod-1', name: 'Source Product' },
+      products: [{ _id: 'prod-2', name: 'Recommended' }],
+      recommendationMode: 'vector',
+    };
+    productRecommendationService.recommend.mockResolvedValue(mockResult);
+
+    const req = mockReq({}, { id: 'prod-1' });
+    const res = mockRes();
+    await getRecommendations(req, res);
+
+    expect(productRecommendationService.recommend).toHaveBeenCalledWith('prod-1', undefined);
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      message: 'Lấy sản phẩm gợi ý thành công',
+      data: {
+        sourceProduct: mockResult.sourceProduct,
+        products: mockResult.products,
+        recommendationMode: 'vector',
+      },
+    });
+  });
+
+  it('forwards BadRequestError to next when product id is invalid', async () => {
+    productRecommendationService.recommend.mockResolvedValue({ error: 'INVALID_ID' });
+
+    const req = mockReq({}, { id: 'bad-id' });
+    const res = mockRes();
+    const next = jest.fn();
+    await getRecommendations(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }),
+    );
+  });
+
+  it('forwards NotFoundError to next when product not found', async () => {
+    productRecommendationService.recommend.mockResolvedValue({ error: 'NOT_FOUND' });
+
+    const req = mockReq({}, { id: 'nonexistent' });
+    const res = mockRes();
+    const next = jest.fn();
+    await getRecommendations(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }),
+    );
+  });
+
+  it('forwards unexpected error to next', async () => {
+    const dbError = new Error('Recommendation service failure');
+    productRecommendationService.recommend.mockRejectedValue(dbError);
+
+    const req = mockReq({}, { id: 'prod-1' });
+    const res = mockRes();
+    const next = jest.fn();
+    await getRecommendations(req, res, next);
+
     expect(next).toHaveBeenCalledWith(dbError);
   });
 });
