@@ -5,8 +5,8 @@
 | **Last updated** | 2026-07-30 |
 | **Verified commit** | `82a333a` (base commit before documentation changes) |
 | **Current branch** | `feat/product-error-handling` |
-| **Current task** | Order Read API — `getUserOrders`, `getOrderById`, `getAllOrders`, `getOrderStats` migrated to centralized error handling (complete) |
-| **Next task** | Order controller Phase 2: `createOrder`, `updateOrderStatus`, `cancelOrder` |
+| **Current task** | Order controller Phase 2 complete — all 6 non-createOrder handlers migrated to centralized error handling (`getUserOrders`, `getOrderById`, `getAllOrders`, `getOrderStats`, `updateOrderStatus`, `cancelOrder`) |
+| **Next task** | Order controller Phase 3: `createOrder` — complex handler with idempotency + transaction + session (~480 lines, `abort()` helper) |
 | **Known blockers** | None |
 
 > Update this block after each merged PR.
@@ -44,7 +44,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 # Known Limitations
 
-- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1–3). Migrated modules: complaint (Phase 1), health, address, profile, appointment, compare, question, answer, store (Phase 2), auth (Phase 3), product (Phase 3 completed: all 6 handlers migrated), order Read API (`getUserOrders`, `getOrderById`, `getAllOrders`, `getOrderStats` — Phase 3 PR1). Remaining handlers (order: `createOrder`, `updateOrderStatus`, `cancelOrder`; plus cart, review, promotion, wishlist, dashboard) still use legacy local error handling.
+- `middlewares/errorHandler.js` — centralized error handler implemented (Phase 1–3). Migrated modules: complaint (Phase 1), health, address, profile, appointment, compare, question, answer, store (Phase 2), auth (Phase 3), product (Phase 3 completed: all 6 handlers migrated), order (Phase 2: all 6 non-createOrder handlers migrated — `getUserOrders`, `getOrderById`, `getAllOrders`, `getOrderStats`, `updateOrderStatus`, `cancelOrder`). Remaining handlers (order: `createOrder`; plus cart, review, promotion, wishlist, dashboard) still use legacy local error handling.
 - Redis `reconnectStrategy = false` — resolved: auto-reconnect with exponential backoff implemented (see CHANGELOG)
 - MongoDB `$vectorSearch` requires Atlas cluster
 - No SMS provider — email only via Brevo

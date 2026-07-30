@@ -1446,7 +1446,8 @@ describe('cancelOrder', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
         'product-1',
@@ -1464,7 +1465,8 @@ describe('cancelOrder', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
 
-      await cancelOrder(makeReq({ body: { reason: 'other', customReason: 'Đổi ý' } }), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq({ body: { reason: 'other', customReason: 'Đổi ý' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('cancelled');
       expect(orderDoc.cancelReason).toBe('Đổi ý');
@@ -1479,7 +1481,8 @@ describe('cancelOrder', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(orderDoc.save).toHaveBeenCalledWith({ session: mockSession });
       expect(mockSession.commitTransaction).toHaveBeenCalled();
@@ -1490,7 +1493,8 @@ describe('cancelOrder', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockStatus).toHaveBeenCalledWith(200);
       expect(mockJson).toHaveBeenCalledWith(
@@ -1500,31 +1504,32 @@ describe('cancelOrder', () => {
           data: expect.objectContaining({ _id: 'order-123' }),
         })
       );
+      expect(next).not.toHaveBeenCalled();
     });
   });
 
   describe('validation', () => {
     it('rejects invalid order ID format', async () => {
       mongoose.Types.ObjectId.isValid.mockReturnValue(false);
+      const next = jest.fn();
 
-      await cancelOrder(makeReq({ params: { id: 'bad-id' } }), mockRes());
+      await cancelOrder(makeReq({ params: { id: 'bad-id' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'ORDER_NOT_FOUND' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('rejects missing cancel reason', async () => {
       setupOrderFindByIdForCancel(defaultOrderDoc({ status: 'pending' }));
+      const next = jest.fn();
 
-      await cancelOrder(makeReq({ body: { reason: '' } }), mockRes());
+      await cancelOrder(makeReq({ body: { reason: '' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'CANCEL_REASON_REQUIRED' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('CANCEL_REASON_REQUIRED');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
@@ -1533,26 +1538,26 @@ describe('cancelOrder', () => {
         session: jest.fn().mockResolvedValue(null),
         populate: jest.fn(),
       });
+      const next = jest.fn();
 
-      await cancelOrder(makeReq(), mockRes());
+      await cancelOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(404);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'ORDER_NOT_FOUND' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(NotFoundError));
+      expect(next.mock.calls[0][0].statusCode).toBe(404);
+      expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('rejects unauthorized user (not order owner)', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending', user: 'other-user-456' });
       setupOrderFindByIdForCancel(orderDoc);
+      const next = jest.fn();
 
-      await cancelOrder(makeReq(), mockRes());
+      await cancelOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(403);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'FORBIDDEN' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(ForbiddenError));
+      expect(next.mock.calls[0][0].statusCode).toBe(403);
+      expect(next.mock.calls[0][0].code).toBe('FORBIDDEN');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
@@ -1560,13 +1565,13 @@ describe('cancelOrder', () => {
       for (const status of ['processing', 'shipping', 'delivered', 'cancelled']) {
         const orderDoc = defaultOrderDoc({ status });
         setupOrderFindByIdForCancel(orderDoc);
+        const next = jest.fn();
 
-        await cancelOrder(makeReq(), mockRes());
+        await cancelOrder(makeReq(), mockRes(), next);
 
-        expect(mockStatus).toHaveBeenCalledWith(400);
-        expect(mockJson).toHaveBeenCalledWith(
-          expect.objectContaining({ success: false, code: 'INVALID_STATUS_FOR_CANCEL' })
-        );
+        expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+        expect(next.mock.calls[0][0].statusCode).toBe(400);
+        expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_FOR_CANCEL');
         expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
       }
     });
@@ -1575,10 +1580,12 @@ describe('cancelOrder', () => {
       const orderDoc = defaultOrderDoc({ status: 'confirmed' });
       setupOrderFindByIdForCancel(orderDoc);
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockStatus).toHaveBeenCalledWith(200);
       expect(mockProductFindByIdAndUpdate).toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
     });
   });
 
@@ -1588,10 +1595,12 @@ describe('cancelOrder', () => {
       setupOrderFindByIdForCancel(orderDoc);
       mockProductFindByIdAndUpdate.mockRejectedValue(new Error('Stock restore failed'));
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockSession.commitTransaction).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
     it('ends session on error', async () => {
@@ -1599,19 +1608,25 @@ describe('cancelOrder', () => {
       setupOrderFindByIdForCancel(orderDoc);
       mockProductFindByIdAndUpdate.mockRejectedValue(new Error('Stock restore failed'));
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockSession.endSession).toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
     it('does not restore stock twice on duplicate cancel attempt', async () => {
       const orderDoc = defaultOrderDoc({ status: 'cancelled' });
       setupOrderFindByIdForCancel(orderDoc);
 
-      await cancelOrder(makeReq(), mockRes());
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
       expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_FOR_CANCEL');
     });
   });
 });
@@ -1632,7 +1647,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('confirmed');
       expect(orderDoc.confirmedAt).toBeInstanceOf(Date);
@@ -1646,7 +1662,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'confirmed' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'processing' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'processing' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('processing');
       expect(mockStatus).toHaveBeenCalledWith(200);
@@ -1656,7 +1673,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'processing' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'shipping' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'shipping' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('shipping');
       expect(orderDoc.shippedAt).toBeInstanceOf(Date);
@@ -1666,7 +1684,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'shipping' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('delivered');
       expect(orderDoc.deliveredAt).toBeInstanceOf(Date);
@@ -1678,7 +1697,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'cancelled', cancelReason: 'Admin cancelled' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'cancelled', cancelReason: 'Admin cancelled' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('cancelled');
       expect(orderDoc.cancelReason).toBe('Admin cancelled');
@@ -1699,7 +1719,8 @@ describe('updateOrderStatus', () => {
         const orderDoc = defaultOrderDoc({ status });
         setupOrderFindByIdForStatus(orderDoc);
 
-        await updateOrderStatus(makeReq({ body: { status: 'cancelled' } }), mockRes());
+        const next = jest.fn();
+        await updateOrderStatus(makeReq({ body: { status: 'cancelled' } }), mockRes(), next);
 
         expect(mockProductFindByIdAndUpdate).toHaveBeenCalled();
         mockProductFindByIdAndUpdate.mockClear();
@@ -1710,7 +1731,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: 'Payment verified' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: 'Payment verified' } }), mockRes(), next);
 
       expect(mockOrderAddStatusHistory).toHaveBeenCalledWith('confirmed', 'Payment verified');
     });
@@ -1719,33 +1741,33 @@ describe('updateOrderStatus', () => {
   describe('validation', () => {
     it('rejects invalid order ID', async () => {
       mongoose.Types.ObjectId.isValid.mockReturnValue(false);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ params: { id: 'bad-id' } }), mockRes());
+      await updateOrderStatus(makeReq({ params: { id: 'bad-id' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'ORDER_NOT_FOUND' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('rejects invalid status value', async () => {
-      await updateOrderStatus(makeReq({ body: { status: 'invalid-status' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'invalid-status' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_STATUS_TRANSITION' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('rejects missing status', async () => {
-      await updateOrderStatus(makeReq({ body: {} }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: {} }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_STATUS_TRANSITION' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
     });
 
     it('rejects non-existent order', async () => {
@@ -1753,38 +1775,38 @@ describe('updateOrderStatus', () => {
         session: jest.fn().mockResolvedValue(null),
         populate: jest.fn(),
       });
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(404);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'ORDER_NOT_FOUND' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(NotFoundError));
+      expect(next.mock.calls[0][0].statusCode).toBe(404);
+      expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
     });
 
     it('rejects invalid transition from delivered', async () => {
       const orderDoc = defaultOrderDoc({ status: 'delivered' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'processing' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'processing' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_STATUS_TRANSITION' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('rejects transition from cancelled', async () => {
       const orderDoc = defaultOrderDoc({ status: 'cancelled' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'pending' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'pending' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_STATUS_TRANSITION' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
     });
   });
 
@@ -1794,17 +1816,20 @@ describe('updateOrderStatus', () => {
       setupOrderFindByIdForStatus(orderDoc);
       mockOrderSave.mockRejectedValue(new Error('Save failed'));
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockSession.commitTransaction).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
     it('ends session after commit', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
       expect(mockSession.endSession).toHaveBeenCalled();
     });
@@ -1814,9 +1839,11 @@ describe('updateOrderStatus', () => {
       setupOrderFindByIdForStatus(orderDoc);
       mockOrderSave.mockRejectedValue(new Error('Save failed'));
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
       expect(mockSession.endSession).toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
   });
 
@@ -1824,13 +1851,13 @@ describe('updateOrderStatus', () => {
     it('rejects same-status update', async () => {
       const orderDoc = defaultOrderDoc({ status: 'confirmed' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 'INVALID_STATUS_TRANSITION' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
       expect(mockOrderAddStatusHistory).not.toHaveBeenCalled();
       expect(orderDoc.save).not.toHaveBeenCalled();
     });
@@ -1838,35 +1865,33 @@ describe('updateOrderStatus', () => {
     it('rejects pending -> delivered directly', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 'INVALID_STATUS_TRANSITION' })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
       expect(mockOrderAddStatusHistory).not.toHaveBeenCalled();
     });
 
     it('returns allowedNextStatuses in the error response', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes(), next);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({
-          code: 'INVALID_STATUS_TRANSITION',
-          allowedNextStatuses: ['confirmed', 'cancelled'],
-        })
-      );
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+      expect(next.mock.calls[0][0].details).toEqual({ allowedNextStatuses: ['confirmed', 'cancelled'] });
     });
 
     it('trims whitespace from note', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '  payment verified  ' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '  payment verified  ' } }), mockRes(), next);
 
       expect(mockOrderAddStatusHistory).toHaveBeenCalledWith('confirmed', 'payment verified');
       expect(mockStatus).toHaveBeenCalledWith(200);
@@ -1876,7 +1901,8 @@ describe('updateOrderStatus', () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '   ' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '   ' } }), mockRes(), next);
 
       expect(mockOrderAddStatusHistory).toHaveBeenCalledWith('confirmed', '');
       expect(mockStatus).toHaveBeenCalledWith(200);
@@ -1887,30 +1913,36 @@ describe('updateOrderStatus', () => {
       setupOrderFindByIdForStatus(orderDoc);
       mockOrderSave.mockRejectedValue(new Error('Save failed'));
 
-      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes());
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
 
       expect(mockOrderAddStatusHistory).toHaveBeenCalledTimes(1);
       expect(orderDoc.save).toHaveBeenCalled();
       expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
     it('does not change order status on invalid transition', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes(), next);
 
       expect(orderDoc.status).toBe('pending');
       expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
     });
 
     it('does not enqueue email on failed transition', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
+      const next = jest.fn();
 
-      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes());
+      await updateOrderStatus(makeReq({ body: { status: 'delivered' } }), mockRes(), next);
 
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
     });
 
     it('correctly allows transitions per status', async () => {
@@ -1928,7 +1960,8 @@ describe('updateOrderStatus', () => {
         for (const target of allowed) {
           orderDoc.status = current; // reset
           setupOrderFindByIdForStatus({ ...orderDoc, status: current });
-          await updateOrderStatus(makeReq({ body: { status: target } }), mockRes());
+          const next = jest.fn();
+          await updateOrderStatus(makeReq({ body: { status: target } }), mockRes(), next);
           expect(mockStatus).toHaveBeenCalledWith(200);
           mockStatus.mockClear();
           mockJson.mockClear();
@@ -1939,8 +1972,9 @@ describe('updateOrderStatus', () => {
         for (const target of notAllowed) {
           const doc = defaultOrderDoc({ status: current });
           setupOrderFindByIdForStatus(doc);
-          await updateOrderStatus(makeReq({ body: { status: target } }), mockRes());
-          expect(mockStatus).toHaveBeenCalledWith(400);
+          const next = jest.fn();
+          await updateOrderStatus(makeReq({ body: { status: target } }), mockRes(), next);
+          expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
           mockStatus.mockClear();
           mockJson.mockClear();
         }
@@ -2191,6 +2225,150 @@ describe('getOrderStats', () => {
     const next = jest.fn();
 
     await getOrderStats(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('updateOrderStatus regression', () => {
+  function makeReq(overrides = {}) {
+    return {
+      params: { id: 'order-123' },
+      body: { status: 'confirmed' },
+      user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'admin' },
+      requestId: 'test-cid',
+      ...overrides,
+    };
+  }
+
+  it('handles success with centralized error handling', async () => {
+    const orderDoc = defaultOrderDoc({ status: 'pending' });
+    setupOrderFindByIdForStatus(orderDoc);
+    const next = jest.fn();
+
+    await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('throws BadRequestError for invalid order ID', async () => {
+    mongoose.Types.ObjectId.isValid.mockReturnValue(false);
+    const next = jest.fn();
+
+    await updateOrderStatus(makeReq({ params: { id: 'bad-id' } }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+    expect(next.mock.calls[0][0].statusCode).toBe(400);
+    expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
+  });
+
+  it('throws BadRequestError for invalid transition', async () => {
+    const orderDoc = defaultOrderDoc({ status: 'delivered' });
+    setupOrderFindByIdForStatus(orderDoc);
+    const next = jest.fn();
+
+    await updateOrderStatus(makeReq({ body: { status: 'processing' } }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+    expect(next.mock.calls[0][0].statusCode).toBe(400);
+    expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_TRANSITION');
+  });
+
+  it('throws NotFoundError when order does not exist', async () => {
+    Order.findById.mockReturnValue({
+      session: jest.fn().mockResolvedValue(null),
+      populate: jest.fn(),
+    });
+    const next = jest.fn();
+
+    await updateOrderStatus(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(NotFoundError));
+    expect(next.mock.calls[0][0].statusCode).toBe(404);
+    expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
+  });
+
+  it('forwards unexpected errors to centralized handler', async () => {
+    const orderDoc = defaultOrderDoc({ status: 'pending' });
+    setupOrderFindByIdForStatus(orderDoc);
+    const error = new Error('Unexpected DB error');
+    mockOrderSave.mockRejectedValue(error);
+    const next = jest.fn();
+
+    await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('cancelOrder regression', () => {
+  function makeReq(overrides = {}) {
+    return {
+      params: { id: 'order-123' },
+      body: { reason: 'Tôi không muốn mua nữa' },
+      user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'user' },
+      requestId: 'test-cid',
+      ...overrides,
+    };
+  }
+
+  it('handles success with centralized error handling', async () => {
+    const orderDoc = defaultOrderDoc({ status: 'pending' });
+    setupOrderFindByIdForCancel(orderDoc);
+    const next = jest.fn();
+
+    await cancelOrder(makeReq(), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('throws BadRequestError for invalid cancellation status', async () => {
+    const orderDoc = defaultOrderDoc({ status: 'shipping' });
+    setupOrderFindByIdForCancel(orderDoc);
+    const next = jest.fn();
+
+    await cancelOrder(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+    expect(next.mock.calls[0][0].statusCode).toBe(400);
+    expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_FOR_CANCEL');
+  });
+
+  it('throws BadRequestError when cancel reason is missing', async () => {
+    setupOrderFindByIdForCancel(defaultOrderDoc({ status: 'pending' }));
+    const next = jest.fn();
+
+    await cancelOrder(makeReq({ body: { reason: '' } }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+    expect(next.mock.calls[0][0].statusCode).toBe(400);
+    expect(next.mock.calls[0][0].code).toBe('CANCEL_REASON_REQUIRED');
+  });
+
+  it('throws NotFoundError when order does not exist', async () => {
+    Order.findById.mockReturnValue({
+      session: jest.fn().mockResolvedValue(null),
+      populate: jest.fn(),
+    });
+    const next = jest.fn();
+
+    await cancelOrder(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(NotFoundError));
+    expect(next.mock.calls[0][0].statusCode).toBe(404);
+    expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
+  });
+
+  it('forwards unexpected errors to centralized handler', async () => {
+    const orderDoc = defaultOrderDoc({ status: 'pending' });
+    setupOrderFindByIdForCancel(orderDoc);
+    const error = new Error('Unexpected stock error');
+    mockProductFindByIdAndUpdate.mockRejectedValue(error);
+    const next = jest.fn();
+
+    await cancelOrder(makeReq(), mockRes(), next);
 
     expect(next).toHaveBeenCalledWith(error);
   });
