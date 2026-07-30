@@ -19,10 +19,13 @@ jest.mock('../models/Product', () => {
   MockProduct.findOne = jest.fn();
   MockProduct.findById = jest.fn();
   MockProduct.findByIdAndUpdate = jest.fn();
+  MockProduct.aggregate = jest.fn();
   return MockProduct;
 });
 
-jest.mock('../models/Review', () => ({}));
+jest.mock('../models/Review', () => ({
+  getProductStats: jest.fn(),
+}));
 
 jest.mock('../services/cacheService', () => ({
   get: jest.fn(),
@@ -60,8 +63,9 @@ jest.mock('../services/productImageService', () => ({
   ProductImageValidationError: MockProductImageValidationError,
 }));
 
-const { createProduct, updateProduct, deleteProduct } = require('../controllers/productController');
+const { createProduct, getAllProducts, getProductById, updateProduct, deleteProduct } = require('../controllers/productController');
 const Product = require('../models/Product');
+const Review = require('../models/Review');
 const cache = require('../services/cacheService');
 const logger = require('../utils/logger');
 
@@ -75,9 +79,23 @@ function mockReq(body, params = {}, query = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  cache.get.mockReset();
   mockComputeContentHash.mockReturnValue('changed-hash');
   mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: '', imagePublicId: null });
 });
+
+/* Reset complex mock chains that persist past clearAllMocks */
+function mockFindOneQuery(returnValue, options = {}) {
+  const mockLean = jest.fn();
+  if (options.reject) {
+    mockLean.mockRejectedValue(returnValue);
+  } else {
+    mockLean.mockResolvedValue(returnValue);
+  }
+  const mockSelect = jest.fn().mockReturnValue({ lean: mockLean });
+  Product.findOne.mockReturnValue({ select: mockSelect });
+  return { mockSelect, mockLean };
+}
 
 describe('createProduct', () => {
   it('builds canonical content from savedProduct, not req.body', async () => {
@@ -1223,5 +1241,149 @@ describe('deleteProduct', () => {
     await deleteProduct(req, res, next);
 
     expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+});
+
+/* ============================================================
+   getAllProducts
+============================================================ */
+describe('getAllProducts', () => {
+  it('returns paginated products on success', async () => {
+    const mockProducts = [
+      { _id: 'p1', name: 'Product A', price: 100, reviewCount: 2, averageRating: 4.5 },
+      { _id: 'p2', name: 'Product B', price: 200, reviewCount: 0, averageRating: 0 },
+    ];
+    Product.aggregate
+      .mockResolvedValueOnce(mockProducts)  // dataPipeline
+      .mockResolvedValueOnce([{ total: 10 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '2' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    expect(Product.aggregate).toHaveBeenCalledTimes(2);
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: 'Lấy danh sách sản phẩm thành công',
+        data: expect.objectContaining({
+          products: mockProducts,
+          pagination: expect.objectContaining({
+            currentPage: 1,
+            totalPages: 5,
+            totalCount: 10,
+            limit: 2,
+            hasNextPage: true,
+            hasPrevPage: false,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('forwards unexpected error to next', async () => {
+    const dbError = new Error('DB failure');
+    Product.aggregate.mockRejectedValue(dbError);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10' });
+    const res = mockRes();
+    const next = jest.fn();
+    await getAllProducts(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(dbError);
+  });
+});
+
+/* ============================================================
+   getProductById
+============================================================ */
+describe('getProductById', () => {
+  it('returns product with rating stats on success', async () => {
+    const mockProduct = { _id: 'prod-1', name: 'Test Product', price: 100, isActive: true };
+    Product.findOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(mockProduct),
+      }),
+    });
+    Review.getProductStats.mockResolvedValue({ averageRating: 4.2, totalCount: 5 });
+
+    const req = mockReq({}, { id: 'prod-1' });
+    const res = mockRes();
+    await getProductById(req, res);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: 'Lấy chi tiết sản phẩm thành công',
+        data: expect.objectContaining({
+          _id: 'prod-1',
+          averageRating: 4.2,
+          reviewCount: 5,
+        }),
+      }),
+    );
+  });
+
+  it('returns cached response if available', async () => {
+    const cachedData = { success: true, data: { _id: 'prod-1', name: 'Cached' } };
+    cache.get.mockResolvedValue(cachedData);
+
+    const req = mockReq({}, { id: 'prod-1' });
+    const res = mockRes();
+    await getProductById(req, res);
+
+    expect(Product.findOne).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith(cachedData);
+  });
+
+  it('forwards error to next when product not found', async () => {
+    Product.findOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null),
+      }),
+    });
+
+    const req = mockReq({}, { id: 'nonexistent' });
+    const res = mockRes();
+    const next = jest.fn();
+    await getProductById(req, res, next);
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }),
+    );
+  });
+
+  it('forwards CastError to next for invalid id', async () => {
+    const castError = new Error('Cast to ObjectId failed');
+    castError.name = 'CastError';
+    castError.kind = 'ObjectId';
+    Product.findOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockRejectedValue(castError),
+      }),
+    });
+
+    const req = mockReq({}, { id: 'invalid-id' });
+    const res = mockRes();
+    const next = jest.fn();
+    await expect(getProductById(req, res, next)).resolves.not.toThrow();
+    expect(next).toHaveBeenCalledWith(castError);
+  });
+
+  it('forwards unexpected error to next', async () => {
+    const dbError = new Error('Unexpected DB error');
+    Product.findOne.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockRejectedValue(dbError),
+      }),
+    });
+
+    const req = mockReq({}, { id: 'prod-1' });
+    const res = mockRes();
+    const next = jest.fn();
+    await expect(getProductById(req, res, next)).resolves.not.toThrow();
+    expect(next).toHaveBeenCalledWith(dbError);
   });
 });

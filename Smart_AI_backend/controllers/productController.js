@@ -87,179 +87,171 @@ const createProduct = asyncHandler(async (req, res) => {
 });
 
 // Lấy tất cả sản phẩm với pagination
-const getAllProducts = async (req, res) => {
-  try {
-    // Lấy parameters từ query string
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+const getAllProducts = asyncHandler(async (req, res) => {
+  // Lấy parameters từ query string
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
 
-    const cacheParams = {
-      page,
-      limit,
-      brand: req.query.brand || null,
-      search: req.query.search || null,
-      minPrice: req.query.minPrice || null,
-      maxPrice: req.query.maxPrice || null,
-      sortBy: req.query.sortBy || null,
-      sortOrder: req.query.sortOrder || null,
-      minRating: req.query.minRating || null,
-      inStock: req.query.inStock !== undefined ? req.query.inStock : null,
-    };
+  const cacheParams = {
+    page,
+    limit,
+    brand: req.query.brand || null,
+    search: req.query.search || null,
+    minPrice: req.query.minPrice || null,
+    maxPrice: req.query.maxPrice || null,
+    sortBy: req.query.sortBy || null,
+    sortOrder: req.query.sortOrder || null,
+    minRating: req.query.minRating || null,
+    inStock: req.query.inStock !== undefined ? req.query.inStock : null,
+  };
 
-    const cacheKey = "products:" + JSON.stringify(cacheParams);
+  const cacheKey = "products:" + JSON.stringify(cacheParams);
 
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      console.log("Cache HIT:", cacheKey);
-      return res.status(200).json(cached);
+  const cached = await cache.get(cacheKey);
+  if (cached) {
+    console.log("Cache HIT:", cacheKey);
+    return res.status(200).json(cached);
+  }
+
+  console.log("Cache MISS:", cacheKey);
+  const skip = (page - 1) * limit;
+  const minRating = req.query.minRating
+    ? parseFloat(req.query.minRating)
+    : null;
+
+  let filter = { isActive: true };
+
+  if (req.query.brand) {
+    filter.brand = req.query.brand.toLowerCase();
+  }
+
+  if (req.query.minPrice || req.query.maxPrice) {
+    filter.price = {};
+    if (req.query.minPrice) {
+      filter.price.$gte = parseFloat(req.query.minPrice);
     }
-
-    console.log("Cache MISS:", cacheKey);
-    const skip = (page - 1) * limit;
-    const minRating = req.query.minRating
-      ? parseFloat(req.query.minRating)
-      : null;
-
-    let filter = { isActive: true };
-
-    if (req.query.brand) {
-      filter.brand = req.query.brand.toLowerCase();
+    if (req.query.maxPrice) {
+      filter.price.$lte = parseFloat(req.query.maxPrice);
     }
+  }
 
-    if (req.query.minPrice || req.query.maxPrice) {
-      filter.price = {};
-      if (req.query.minPrice) {
-        filter.price.$gte = parseFloat(req.query.minPrice);
-      }
-      if (req.query.maxPrice) {
-        filter.price.$lte = parseFloat(req.query.maxPrice);
-      }
+  if (req.query.inStock !== undefined) {
+    if (req.query.inStock === "true") {
+      filter.inStock = { $gt: 0 };
+    } else if (req.query.inStock === "false") {
+      filter.inStock = 0;
     }
+  }
 
-    if (req.query.inStock !== undefined) {
-      if (req.query.inStock === "true") {
-        filter.inStock = { $gt: 0 };
-      } else if (req.query.inStock === "false") {
-        filter.inStock = 0;
-      }
-    }
+  if (req.query.search) {
+    filter.$text = { $search: req.query.search };
+  }
 
-    if (req.query.search) {
-      filter.$text = { $search: req.query.search };
-    }
+  let sort = {};
+  if (req.query.sortBy) {
+    const sortField = req.query.sortBy;
+    const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
+    sort[sortField] = sortOrder;
+  } else {
+    sort.createdAt = -1;
+  }
 
-    let sort = {};
-    if (req.query.sortBy) {
-      const sortField = req.query.sortBy;
-      const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
-      sort[sortField] = sortOrder;
-    } else {
-      sort.createdAt = -1;
-    }
-
-    // Use aggregation to include rating stats
-    const aggregationPipeline = [
-      { $match: filter },
-      {
-        $lookup: {
-          from: "reviews",
-          let: { productId: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$product", "$$productId"] },
-                    { $eq: ["$status", "approved"] },
-                  ],
-                },
+  // Use aggregation to include rating stats
+  const aggregationPipeline = [
+    { $match: filter },
+    {
+      $lookup: {
+        from: "reviews",
+        let: { productId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$product", "$$productId"] },
+                  { $eq: ["$status", "approved"] },
+                ],
               },
             },
-          ],
-          as: "reviews",
-        },
+          },
+        ],
+        as: "reviews",
       },
-      {
-        $addFields: {
-          reviewCount: { $size: "$reviews" },
-          averageRating: {
-            $cond: {
-              if: { $gt: [{ $size: "$reviews" }, 0] },
-              then: { $round: [{ $avg: "$reviews.rating" }, 1] },
-              else: 0,
-            },
+    },
+    {
+      $addFields: {
+        reviewCount: { $size: "$reviews" },
+        averageRating: {
+          $cond: {
+            if: { $gt: [{ $size: "$reviews" }, 0] },
+            then: { $round: [{ $avg: "$reviews.rating" }, 1] },
+            else: 0,
           },
         },
       },
-      // Filter by minRating if specified
-      ...(minRating
-        ? [{ $match: { averageRating: { $gte: minRating } } }]
-        : []),
-      {
-        $project: {
-          embedding_vector: 0,
-          embeddingError: 0,
-          reviews: 0,
-        },
+    },
+    // Filter by minRating if specified
+    ...(minRating
+      ? [{ $match: { averageRating: { $gte: minRating } } }]
+      : []),
+    {
+      $project: {
+        embedding_vector: 0,
+        embeddingError: 0,
+        reviews: 0,
       },
-    ];
+    },
+  ];
 
-    // Get total count with rating filter applied
-    const countPipeline = [
-      ...aggregationPipeline.slice(0, minRating ? 4 : 3),
-      ...(minRating
-        ? [{ $match: { averageRating: { $gte: minRating } } }]
-        : []),
-      { $count: "total" },
-    ];
+  // Get total count with rating filter applied
+  const countPipeline = [
+    ...aggregationPipeline.slice(0, minRating ? 4 : 3),
+    ...(minRating
+      ? [{ $match: { averageRating: { $gte: minRating } } }]
+      : []),
+    { $count: "total" },
+  ];
 
-    // Add sorting, skip, and limit
-    const dataPipeline = [
-      ...aggregationPipeline,
-      { $sort: sort },
-      { $skip: skip },
-      { $limit: limit },
-    ];
+  // Add sorting, skip, and limit
+  const dataPipeline = [
+    ...aggregationPipeline,
+    { $sort: sort },
+    { $skip: skip },
+    { $limit: limit },
+  ];
 
-    const [products, countResult] = await Promise.all([
-      Product.aggregate(dataPipeline),
-      Product.aggregate(countPipeline),
-    ]);
+  const [products, countResult] = await Promise.all([
+    Product.aggregate(dataPipeline),
+    Product.aggregate(countPipeline),
+  ]);
 
-    const totalCount = countResult.length > 0 ? countResult[0].total : 0;
-    const totalPages = Math.ceil(totalCount / limit);
-    const hasNextPage = page < totalPages;
-    const hasPrevPage = page > 1;
+  const totalCount = countResult.length > 0 ? countResult[0].total : 0;
+  const totalPages = Math.ceil(totalCount / limit);
+  const hasNextPage = page < totalPages;
+  const hasPrevPage = page > 1;
 
-    const responseData = {
-      success: true,
-      message: "Lấy danh sách sản phẩm thành công",
-      data: {
-        products,
-        pagination: {
-          currentPage: page,
-          totalPages,
-          totalCount,
-          limit,
-          hasNextPage,
-          hasPrevPage,
-          nextPage: hasNextPage ? page + 1 : null,
-          prevPage: hasPrevPage ? page - 1 : null,
-        },
+  const responseData = {
+    success: true,
+    message: "Lấy danh sách sản phẩm thành công",
+    data: {
+      products,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalCount,
+        limit,
+        hasNextPage,
+        hasPrevPage,
+        nextPage: hasNextPage ? page + 1 : null,
+        prevPage: hasPrevPage ? page - 1 : null,
       },
-    };
+    },
+  };
 
-    await cache.set(cacheKey, responseData, 300);
+  await cache.set(cacheKey, responseData, 300);
 
-    res.status(200).json(responseData);
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Lỗi server khi lấy danh sách sản phẩm",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-};
+  res.status(200).json(responseData);
+});
 
 // Tìm kiếm ngữ nghĩa sản phẩm
 const searchSemantic = async (req, res) => {
@@ -298,58 +290,46 @@ const searchSemantic = async (req, res) => {
 };
 
 // Lấy chi tiết sản phẩm theo ID
-const getProductById = async (req, res) => {
-  try {
-    const productId = req.params.id;
-    const cacheKey = "product:" + productId;
+const getProductById = asyncHandler(async (req, res) => {
+  const productId = req.params.id;
+  const cacheKey = "product:" + productId;
 
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      return res.status(200).json(cached);
-    }
-
-    // Tìm sản phẩm theo ID
-    const product = await Product.findOne({
-      _id: productId,
-      isActive: true,
-    })
-      .select("-embedding_vector")
-      .lean();
-
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "Không tìm thấy sản phẩm",
-      });
-    }
-
-    // Get rating stats for the product
-    const reviewStats = await Review.getProductStats(productId);
-
-    // Add rating stats to product response
-    const productWithStats = {
-      ...product,
-      averageRating: reviewStats.averageRating,
-      reviewCount: reviewStats.totalCount,
-    };
-
-    const responseData = {
-      success: true,
-      message: "Lấy chi tiết sản phẩm thành công",
-      data: productWithStats,
-    };
-
-    await cache.set(cacheKey, responseData, 300);
-
-    res.status(200).json(responseData);
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Lỗi server khi lấy chi tiết sản phẩm",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
+  const cached = await cache.get(cacheKey);
+  if (cached) {
+    return res.status(200).json(cached);
   }
-};
+
+  const product = await Product.findOne({
+    _id: productId,
+    isActive: true,
+  })
+    .select("-embedding_vector")
+    .lean();
+
+  if (!product) {
+    throw new NotFoundError("Không tìm thấy sản phẩm");
+  }
+
+  // Get rating stats for the product
+  const reviewStats = await Review.getProductStats(productId);
+
+  // Add rating stats to product response
+  const productWithStats = {
+    ...product,
+    averageRating: reviewStats.averageRating,
+    reviewCount: reviewStats.totalCount,
+  };
+
+  const responseData = {
+    success: true,
+    message: "Lấy chi tiết sản phẩm thành công",
+    data: productWithStats,
+  };
+
+  await cache.set(cacheKey, responseData, 300);
+
+  res.status(200).json(responseData);
+});
 
 /**
  * Product Recommendations
