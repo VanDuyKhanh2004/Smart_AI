@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
 const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
 const { STATUS_LIST, canTransition, getAllowedNextStatuses, isTerminal } = require('../services/orderStatusTransitions');
 const asyncHandler = require('../utils/asyncHandler');
-const { BadRequestError, NotFoundError, ForbiddenError, ConflictError } = require('../utils/errors');
+const { AppError, BadRequestError, NotFoundError, ForbiddenError, ConflictError } = require('../utils/errors');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -19,7 +19,7 @@ const SHIPPING_FEE = 30000;
  * Create order from cart
  * Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 5.1 (promotion usage tracking)
  */
-const createOrder = async (req, res) => {
+const createOrder = asyncHandler(async (req, res, next) => {
   const idempotencyKey = req.headers['idempotency-key'];
   let idempotencyRecord = null;
   const attemptId = crypto.randomUUID();
@@ -28,11 +28,7 @@ const createOrder = async (req, res) => {
   let requestFingerprint = null;
   if (idempotencyKey) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Idempotency-Key không hợp lệ',
-        code: 'INVALID_IDEMPOTENCY_KEY'
-      });
+      throw new BadRequestError('Idempotency-Key không hợp lệ', 'INVALID_IDEMPOTENCY_KEY');
     }
 
     // Compute requestFingerprint from request-owned inputs only (no cart read)
@@ -50,11 +46,7 @@ const createOrder = async (req, res) => {
     if (existingRecord) {
       // All paths: validate requestFingerprint first
       if (existingRecord.requestFingerprint !== requestFingerprint) {
-        return res.status(422).json({
-          success: false,
-          message: 'Idempotency-Key đã được sử dụng với thông tin khác',
-          code: 'IDEMPOTENCY_KEY_MISMATCH'
-        });
+        throw new AppError('Idempotency-Key đã được sử dụng với thông tin khác', 422, 'IDEMPOTENCY_KEY_MISMATCH');
       }
 
       if (existingRecord.status === 'completed') {
@@ -68,11 +60,7 @@ const createOrder = async (req, res) => {
             data: order,
           });
         }
-        return res.status(410).json({
-          success: false,
-          message: 'Đơn hàng gốc của yêu cầu idempotent không còn tồn tại',
-          code: 'IDEMPOTENT_ORDER_GONE'
-        });
+        throw new AppError('Đơn hàng gốc của yêu cầu idempotent không còn tồn tại', 410, 'IDEMPOTENT_ORDER_GONE');
       }
 
       if (existingRecord.status === 'failed') {
@@ -97,13 +85,8 @@ const createOrder = async (req, res) => {
           { new: true }
         );
         if (!reclaimed) {
-          return res.status(409)
-            .set('Retry-After', '5')
-            .json({
-              success: false,
-              message: 'Yêu cầu đang được xử lý',
-              code: 'IDEMPOTENCY_IN_PROGRESS'
-            });
+          res.set('Retry-After', '5');
+          throw new ConflictError('Yêu cầu đang được xử lý', 'IDEMPOTENCY_IN_PROGRESS');
         }
         idempotencyRecord = reclaimed;
       }
@@ -111,13 +94,8 @@ const createOrder = async (req, res) => {
       if (existingRecord.status === 'processing') {
         const isStale = existingRecord.processingExpiresAt && existingRecord.processingExpiresAt <= new Date();
         if (!isStale) {
-          return res.status(409)
-            .set('Retry-After', '5')
-            .json({
-              success: false,
-              message: 'Yêu cầu đang được xử lý',
-              code: 'IDEMPOTENCY_IN_PROGRESS'
-            });
+          res.set('Retry-After', '5');
+          throw new ConflictError('Yêu cầu đang được xử lý', 'IDEMPOTENCY_IN_PROGRESS');
         }
         // Stale processing — attempt atomic reclaim (only one request wins)
         const reclaimed = await IdempotencyRecord.findOneAndUpdate(
@@ -146,13 +124,8 @@ const createOrder = async (req, res) => {
           { new: true }
         );
         if (!reclaimed) {
-          return res.status(409)
-            .set('Retry-After', '5')
-            .json({
-              success: false,
-              message: 'Yêu cầu đang được xử lý',
-              code: 'IDEMPOTENCY_IN_PROGRESS'
-            });
+          res.set('Retry-After', '5');
+          throw new ConflictError('Yêu cầu đang được xử lý', 'IDEMPOTENCY_IN_PROGRESS');
         }
         idempotencyRecord = reclaimed;
       }
@@ -169,13 +142,8 @@ const createOrder = async (req, res) => {
         });
       } catch (err) {
         if (err.code === 11000) {
-          return res.status(409)
-            .set('Retry-After', '5')
-            .json({
-              success: false,
-              message: 'Yêu cầu đang được xử lý',
-              code: 'IDEMPOTENCY_IN_PROGRESS'
-            });
+          res.set('Retry-After', '5');
+          throw new ConflictError('Yêu cầu đang được xử lý', 'IDEMPOTENCY_IN_PROGRESS');
         }
         logger.warn({ err }, 'Failed to create idempotency record');
         idempotencyRecord = null;
@@ -189,7 +157,7 @@ const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
-  const abort = async (statusCode, body) => {
+  const abortTransactionAndMarkFailed = async (errorCode, errorMessage) => {
     await session.abortTransaction();
     if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
       await IdempotencyRecord.findOneAndUpdate(
@@ -197,14 +165,13 @@ const createOrder = async (req, res) => {
         {
           $set: {
             status: 'failed',
-            errorCode: body.code,
-            errorMessage: body.message || body.code,
+            errorCode,
+            errorMessage,
             processingExpiresAt: null,
           },
         }
       );
     }
-    return res.status(statusCode).json(body);
   };
 
   try {
@@ -213,31 +180,22 @@ const createOrder = async (req, res) => {
 
     // Validate shipping address
     if (!shippingAddress) {
-      return await abort(400, {
-        success: false,
-        message: 'Địa chỉ giao hàng là bắt buộc',
-        code: 'INVALID_SHIPPING_ADDRESS'
-      });
+      await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', 'Địa chỉ giao hàng là bắt buộc');
+      throw new BadRequestError('Địa chỉ giao hàng là bắt buộc', 'INVALID_SHIPPING_ADDRESS');
     }
 
     const requiredFields = ['fullName', 'phone', 'address', 'ward', 'district', 'city'];
     for (const field of requiredFields) {
       if (!shippingAddress[field] || !shippingAddress[field].trim()) {
-        return await abort(400, {
-          success: false,
-          message: `${field} là bắt buộc`,
-          code: 'INVALID_SHIPPING_ADDRESS'
-        });
+        await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', `${field} là bắt buộc`);
+        throw new BadRequestError(`${field} là bắt buộc`, 'INVALID_SHIPPING_ADDRESS');
       }
     }
 
     // Validate phone format
     if (!/^[0-9]{10,11}$/.test(shippingAddress.phone)) {
-      return await abort(400, {
-        success: false,
-        message: 'Số điện thoại phải có 10-11 chữ số',
-        code: 'INVALID_SHIPPING_ADDRESS'
-      });
+      await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', 'Số điện thoại phải có 10-11 chữ số');
+      throw new BadRequestError('Số điện thoại phải có 10-11 chữ số', 'INVALID_SHIPPING_ADDRESS');
     }
 
     // Get user's cart (authoritative read inside transaction)
@@ -246,11 +204,8 @@ const createOrder = async (req, res) => {
       .session(session);
 
     if (!cart || !cart.items || cart.items.length === 0) {
-      return await abort(400, {
-        success: false,
-        message: 'Giỏ hàng trống',
-        code: 'CART_EMPTY'
-      });
+      await abortTransactionAndMarkFailed('CART_EMPTY', 'Giỏ hàng trống');
+      throw new BadRequestError('Giỏ hàng trống', 'CART_EMPTY');
     }
 
     // --- Compute checkoutFingerprint ONCE from authoritative cart ---
@@ -266,11 +221,8 @@ const createOrder = async (req, res) => {
         { session }
       );
       if (!bound) {
-        return await abort(500, {
-          success: false,
-          message: 'Lỗi server khi tạo đơn hàng',
-          code: 'IDEMPOTENCY_CONFLICT'
-        });
+        await abortTransactionAndMarkFailed('IDEMPOTENCY_CONFLICT', 'Lỗi server khi tạo đơn hàng');
+        throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'IDEMPOTENCY_CONFLICT');
       }
     }
 
@@ -280,19 +232,13 @@ const createOrder = async (req, res) => {
       const product = item.product;
 
       if (!product || !product.isActive) {
-        return await abort(400, {
-          success: false,
-          message: 'Sản phẩm không tồn tại',
-          code: 'PRODUCT_NOT_FOUND'
-        });
+        await abortTransactionAndMarkFailed('PRODUCT_NOT_FOUND', 'Sản phẩm không tồn tại');
+        throw new BadRequestError('Sản phẩm không tồn tại', 'PRODUCT_NOT_FOUND');
       }
 
       if (product.inStock < item.quantity) {
-        return await abort(400, {
-          success: false,
-          message: `Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`,
-          code: 'INSUFFICIENT_STOCK'
-        });
+        await abortTransactionAndMarkFailed('INSUFFICIENT_STOCK', `Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`);
+        throw new BadRequestError(`Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`, 'INSUFFICIENT_STOCK');
       }
 
       orderItems.push({
@@ -318,53 +264,35 @@ const createOrder = async (req, res) => {
       }).session(session);
 
       if (!promotion) {
-        return await abort(404, {
-          success: false,
-          message: 'Mã khuyến mãi không hợp lệ',
-          code: 'INVALID_PROMOTION'
-        });
+        await abortTransactionAndMarkFailed('INVALID_PROMOTION', 'Mã khuyến mãi không hợp lệ');
+        throw new NotFoundError('Mã khuyến mãi không hợp lệ', 'INVALID_PROMOTION');
       }
 
       if (!promotion.isActive) {
-        return await abort(400, {
-          success: false,
-          message: 'Mã khuyến mãi không còn hiệu lực',
-          code: 'INACTIVE_PROMOTION'
-        });
+        await abortTransactionAndMarkFailed('INACTIVE_PROMOTION', 'Mã khuyến mãi không còn hiệu lực');
+        throw new BadRequestError('Mã khuyến mãi không còn hiệu lực', 'INACTIVE_PROMOTION');
       }
 
       const now = new Date();
 
       if (promotion.startDate > now) {
-        return await abort(400, {
-          success: false,
-          message: 'Mã khuyến mãi chưa có hiệu lực',
-          code: 'PROMOTION_NOT_STARTED'
-        });
+        await abortTransactionAndMarkFailed('PROMOTION_NOT_STARTED', 'Mã khuyến mãi chưa có hiệu lực');
+        throw new BadRequestError('Mã khuyến mãi chưa có hiệu lực', 'PROMOTION_NOT_STARTED');
       }
 
       if (promotion.endDate < now) {
-        return await abort(400, {
-          success: false,
-          message: 'Mã khuyến mãi đã hết hạn',
-          code: 'EXPIRED_PROMOTION'
-        });
+        await abortTransactionAndMarkFailed('EXPIRED_PROMOTION', 'Mã khuyến mãi đã hết hạn');
+        throw new BadRequestError('Mã khuyến mãi đã hết hạn', 'EXPIRED_PROMOTION');
       }
 
       if (promotion.usedCount >= promotion.usageLimit) {
-        return await abort(400, {
-          success: false,
-          message: 'Mã khuyến mãi đã hết lượt sử dụng',
-          code: 'PROMOTION_USAGE_LIMIT'
-        });
+        await abortTransactionAndMarkFailed('PROMOTION_USAGE_LIMIT', 'Mã khuyến mãi đã hết lượt sử dụng');
+        throw new BadRequestError('Mã khuyến mãi đã hết lượt sử dụng', 'PROMOTION_USAGE_LIMIT');
       }
 
       if (subtotal < promotion.minOrderValue) {
-        return await abort(400, {
-          success: false,
-          message: `Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`,
-          code: 'MIN_ORDER_NOT_MET'
-        });
+        await abortTransactionAndMarkFailed('MIN_ORDER_NOT_MET', `Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`);
+        throw new BadRequestError(`Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`, 'MIN_ORDER_NOT_MET');
       }
 
       if (promotion.discountType === 'percentage') {
@@ -457,9 +385,8 @@ const createOrder = async (req, res) => {
         { session }
       );
       if (!completedRecord) {
-        const err = new Error('Idempotency completion conflict — attempt lost claim');
-        err.code = 'IDEMPOTENCY_CONFLICT';
-        throw err;
+        await abortTransactionAndMarkFailed('IDEMPOTENCY_CONFLICT', 'Lỗi server khi tạo đơn hàng');
+        throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'IDEMPOTENCY_CONFLICT');
       }
     }
 
@@ -486,22 +413,21 @@ const createOrder = async (req, res) => {
         {
           $set: {
             status: 'failed',
-            errorCode: 'SERVER_ERROR',
+            errorCode: error instanceof AppError ? error.code : 'SERVER_ERROR',
             errorMessage: error.message,
             processingExpiresAt: null,
           },
         }
       );
     }
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi tạo đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'SERVER_ERROR');
   } finally {
     session.endSession();
   }
-};
+});
 
 
 /**
