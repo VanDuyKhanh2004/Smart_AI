@@ -56,6 +56,7 @@ jest.mock('../models/Order', () => {
   MockOrder.findById = jest.fn();
   MockOrder.find = jest.fn();
   MockOrder.countDocuments = jest.fn();
+  MockOrder.aggregate = jest.fn();
   return MockOrder;
 });
 
@@ -136,6 +137,8 @@ const {
   getAllOrders,
   getOrderStats,
 } = require('../controllers/orderController');
+
+const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
 
 const mockJson = jest.fn();
 const mockSet = jest.fn().mockReturnValue({ json: mockJson });
@@ -1943,5 +1946,252 @@ describe('updateOrderStatus', () => {
         }
       }
     });
+  });
+});
+
+describe('getUserOrders', () => {
+  function makeReq(overrides = {}) {
+    return {
+      user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'user' },
+      query: {},
+      requestId: 'test-cid',
+      ...overrides,
+    };
+  }
+
+  it('returns paginated orders for the authenticated user', async () => {
+    const orders = [
+      { _id: 'o1', orderNumber: 'ORD-001', status: 'pending' },
+      { _id: 'o2', orderNumber: 'ORD-002', status: 'delivered' },
+    ];
+    Order.find.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      populate: jest.fn().mockResolvedValue(orders),
+    });
+    Order.countDocuments.mockResolvedValue(2);
+
+    const next = jest.fn();
+    await getUserOrders(makeReq(), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      data: orders,
+      pagination: { page: 1, limit: 10, total: 2, totalPages: 1 },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('forwards unexpected errors to next', async () => {
+    const error = new Error('DB error');
+    Order.find.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      populate: jest.fn().mockRejectedValue(error),
+    });
+    const next = jest.fn();
+
+    await getUserOrders(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('getOrderById', () => {
+  function makeReq(overrides = {}) {
+    return {
+      params: { id: 'order-123' },
+      user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'user' },
+      query: {},
+      requestId: 'test-cid',
+      ...overrides,
+    };
+  }
+
+  it('returns the order for a valid ID', async () => {
+    const order = { _id: 'order-123', orderNumber: 'ORD-001', user: { _id: 'user-123', name: 'Test User', email: 'test@test.com' } };
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue(order),
+    });
+
+    const next = jest.fn();
+    await getOrderById(makeReq(), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      data: order,
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('throws BadRequestError for invalid order ID', async () => {
+    mongoose.Types.ObjectId.isValid.mockReturnValue(false);
+    const next = jest.fn();
+
+    await getOrderById(makeReq({ params: { id: 'bad-id' } }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
+    expect(next.mock.calls[0][0].statusCode).toBe(400);
+    expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
+  });
+
+  it('throws NotFoundError when order does not exist', async () => {
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue(null),
+    });
+    const next = jest.fn();
+
+    await getOrderById(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(NotFoundError));
+    expect(next.mock.calls[0][0].statusCode).toBe(404);
+    expect(next.mock.calls[0][0].code).toBe('ORDER_NOT_FOUND');
+  });
+
+  it('throws ForbiddenError when user does not own the order and is not admin', async () => {
+    const order = { _id: 'order-123', user: { _id: 'other-user', name: 'Other', email: 'other@test.com' } };
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue(order),
+    });
+    const next = jest.fn();
+
+    await getOrderById(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(ForbiddenError));
+    expect(next.mock.calls[0][0].statusCode).toBe(403);
+    expect(next.mock.calls[0][0].code).toBe('FORBIDDEN');
+  });
+
+  it('allows admin to view any order', async () => {
+    const order = { _id: 'order-123', user: { _id: 'other-user', name: 'Other', email: 'other@test.com' } };
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue(order),
+    });
+
+    const next = jest.fn();
+    await getOrderById(makeReq({ user: { _id: 'admin-id', name: 'Admin', email: 'admin@test.com', role: 'admin' } }), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      data: order,
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('forwards unexpected errors to next', async () => {
+    const error = new Error('DB error');
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockRejectedValue(error),
+    });
+    const next = jest.fn();
+
+    await getOrderById(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('getAllOrders', () => {
+  function makeReq(overrides = {}) {
+    return {
+      user: { _id: 'admin-id', name: 'Admin', email: 'admin@test.com', role: 'admin' },
+      query: {},
+      requestId: 'test-cid',
+      ...overrides,
+    };
+  }
+
+  it('returns paginated orders with filters', async () => {
+    const orders = [
+      { _id: 'o1', orderNumber: 'ORD-001', status: 'pending', user: { _id: 'u1', name: 'User 1', email: 'u1@test.com' } },
+      { _id: 'o2', orderNumber: 'ORD-002', status: 'delivered', user: { _id: 'u2', name: 'User 2', email: 'u2@test.com' } },
+    ];
+    Order.find.mockReturnValue({
+      populate: jest.fn().mockReturnThis(),
+      sort: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(orders),
+    });
+
+    const next = jest.fn();
+    await getAllOrders(makeReq(), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      data: orders,
+      pagination: { page: 1, limit: 10, total: 2, totalPages: 1 },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('forwards unexpected errors to next', async () => {
+    const error = new Error('DB error');
+    Order.find.mockReturnValue({
+      populate: jest.fn().mockReturnThis(),
+      sort: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockRejectedValue(error),
+    });
+    const next = jest.fn();
+
+    await getAllOrders(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('getOrderStats', () => {
+  function makeReq(overrides = {}) {
+    return {
+      user: { _id: 'admin-id', name: 'Admin', email: 'admin@test.com', role: 'admin' },
+      query: {},
+      requestId: 'test-cid',
+      ...overrides,
+    };
+  }
+
+  it('returns total count and breakdown by status', async () => {
+    Order.countDocuments.mockResolvedValue(10);
+    Order.aggregate.mockResolvedValue([
+      { _id: 'pending', count: 4 },
+      { _id: 'confirmed', count: 3 },
+      { _id: 'processing', count: 1 },
+      { _id: 'shipping', count: 1 },
+      { _id: 'delivered', count: 1 },
+    ]);
+
+    const next = jest.fn();
+    await getOrderStats(makeReq(), mockRes(), next);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      data: {
+        total: 10,
+        byStatus: {
+          pending: 4,
+          confirmed: 3,
+          processing: 1,
+          shipping: 1,
+          delivered: 1,
+          cancelled: 0,
+        },
+      },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('forwards unexpected errors to next', async () => {
+    const error = new Error('DB error');
+    Order.countDocuments.mockRejectedValue(error);
+    const next = jest.fn();
+
+    await getOrderStats(makeReq(), mockRes(), next);
+
+    expect(next).toHaveBeenCalledWith(error);
   });
 });
