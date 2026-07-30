@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
 const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService');
 const { STATUS_LIST, canTransition, getAllowedNextStatuses, isTerminal } = require('../services/orderStatusTransitions');
 const asyncHandler = require('../utils/asyncHandler');
-const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
+const { BadRequestError, NotFoundError, ForbiddenError, ConflictError } = require('../utils/errors');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -689,7 +689,7 @@ const getOrderStats = asyncHandler(async (req, res, next) => {
  * Update order status (admin)
  * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
  */
-const updateOrderStatus = async (req, res) => {
+const updateOrderStatus = asyncHandler(async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -699,53 +699,31 @@ const updateOrderStatus = async (req, res) => {
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: 'ID đơn hàng không hợp lệ',
-        code: 'ORDER_NOT_FOUND'
-      });
+      throw new BadRequestError('ID đơn hàng không hợp lệ', 'ORDER_NOT_FOUND');
     }
 
     if (!status || !STATUS_LIST.includes(status)) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: 'Trạng thái không hợp lệ',
-        code: 'INVALID_STATUS_TRANSITION'
-      });
+      throw new BadRequestError('Trạng thái không hợp lệ', 'INVALID_STATUS_TRANSITION');
     }
 
     const order = await Order.findById(id).session(session);
 
     if (!order) {
       await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy đơn hàng',
-        code: 'ORDER_NOT_FOUND'
-      });
+      throw new NotFoundError('Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
     }
 
     // Reject same-status update
     if (order.status === status) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: `Đơn hàng đã ở trạng thái "${status}"`,
-        code: 'INVALID_STATUS_TRANSITION',
-        allowedNextStatuses: getAllowedNextStatuses(order.status),
-      });
+      throw new BadRequestError(`Đơn hàng đã ở trạng thái "${status}"`, 'INVALID_STATUS_TRANSITION', { allowedNextStatuses: getAllowedNextStatuses(order.status) });
     }
 
     // Reject invalid transition
     if (!canTransition(order.status, status)) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: `Không thể chuyển từ trạng thái "${order.status}" sang "${status}"`,
-        code: 'INVALID_STATUS_TRANSITION',
-        allowedNextStatuses: getAllowedNextStatuses(order.status),
-      });
+      throw new BadRequestError(`Không thể chuyển từ trạng thái "${order.status}" sang "${status}"`, 'INVALID_STATUS_TRANSITION', { allowedNextStatuses: getAllowedNextStatuses(order.status) });
     }
 
     // Update status
@@ -795,22 +773,18 @@ const updateOrderStatus = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi cập nhật trạng thái đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    throw error;
   } finally {
     session.endSession();
   }
-};
+});
 
 /**
  * Cancel order by user
  * Only allows cancellation for pending/confirmed orders
  * Requirements: 1.3, 1.4, 1.5, 1.6, 2.3
  */
-const cancelOrder = async (req, res) => {
+const cancelOrder = asyncHandler(async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -822,21 +796,13 @@ const cancelOrder = async (req, res) => {
     // Validate order ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: 'ID đơn hàng không hợp lệ',
-        code: 'ORDER_NOT_FOUND'
-      });
+      throw new BadRequestError('ID đơn hàng không hợp lệ', 'ORDER_NOT_FOUND');
     }
 
     // Validate cancellation reason is provided (Requirement 2.3)
     if (!reason || !reason.trim()) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: 'Vui lòng chọn lý do hủy đơn hàng',
-        code: 'CANCEL_REASON_REQUIRED'
-      });
+      throw new BadRequestError('Vui lòng chọn lý do hủy đơn hàng', 'CANCEL_REASON_REQUIRED');
     }
 
     // Find the order
@@ -844,32 +810,20 @@ const cancelOrder = async (req, res) => {
 
     if (!order) {
       await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy đơn hàng',
-        code: 'ORDER_NOT_FOUND'
-      });
+      throw new NotFoundError('Không tìm thấy đơn hàng', 'ORDER_NOT_FOUND');
     }
 
     // Verify user owns the order (Requirement 1.6)
     if (order.user.toString() !== userId.toString()) {
       await session.abortTransaction();
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn không có quyền hủy đơn hàng này',
-        code: 'FORBIDDEN'
-      });
+      throw new ForbiddenError('Bạn không có quyền hủy đơn hàng này', 'FORBIDDEN');
     }
 
     // Check order status is 'pending' or 'confirmed' (Requirement 1.5)
     const cancellableStatuses = ['pending', 'confirmed'];
     if (!cancellableStatuses.includes(order.status)) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: `Không thể hủy đơn hàng với trạng thái "${order.status}". Chỉ có thể hủy đơn hàng đang chờ xử lý hoặc đã xác nhận.`,
-        code: 'INVALID_STATUS_FOR_CANCEL'
-      });
+      throw new BadRequestError(`Không thể hủy đơn hàng với trạng thái "${order.status}". Chỉ có thể hủy đơn hàng đang chờ xử lý hoặc đã xác nhận.`, 'INVALID_STATUS_FOR_CANCEL');
     }
 
     // Determine the final cancel reason
@@ -906,15 +860,11 @@ const cancelOrder = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi hủy đơn hàng',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    throw error;
   } finally {
     session.endSession();
   }
-};
+});
 
 module.exports = {
   createOrder,
