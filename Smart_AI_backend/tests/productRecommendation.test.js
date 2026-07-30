@@ -493,14 +493,13 @@ describe("productController — getRecommendations()", () => {
 
     const req = mockReq({ params: { id: "bad" } });
     const res = mockRes();
+    const next = jest.fn();
 
-    await getRecommendations(req, res);
+    await getRecommendations(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: "ID sản phẩm không hợp lệ",
-    });
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR", message: "ID sản phẩm không hợp lệ" }),
+    );
   });
 
   it("returns 404 when product not found", async () => {
@@ -508,29 +507,26 @@ describe("productController — getRecommendations()", () => {
 
     const req = mockReq();
     const res = mockRes();
+    const next = jest.fn();
 
-    await getRecommendations(req, res);
+    await getRecommendations(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: "Không tìm thấy sản phẩm",
-    });
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 404, code: "NOT_FOUND", message: "Không tìm thấy sản phẩm" }),
+    );
   });
 
   it("returns 500 on unexpected service error", async () => {
-    mockRecommend.mockRejectedValue(new Error("Unexpected"));
+    const error = new Error("Unexpected");
+    mockRecommend.mockRejectedValue(error);
 
     const req = mockReq();
     const res = mockRes();
+    const next = jest.fn();
 
-    await getRecommendations(req, res);
+    await getRecommendations(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(500);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: "Lỗi server khi lấy gợi ý sản phẩm",
-    });
+    expect(next).toHaveBeenCalledWith(error);
   });
 });
 

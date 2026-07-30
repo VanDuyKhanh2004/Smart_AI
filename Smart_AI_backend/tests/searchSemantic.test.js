@@ -71,34 +71,39 @@ describe('GET /api/products/search/semantic — searchSemantic()', () => {
   it('returns 400 when q is missing', async () => {
     const req = mockReq({ q: undefined });
     const res = mockRes();
+    const next = jest.fn();
 
-    await searchSemantic(req, res);
+    await searchSemantic(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: 'Vui lòng cung cấp từ khóa tìm kiếm (q)',
-    });
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR', message: 'Vui lòng cung cấp từ khóa tìm kiếm (q)' }),
+    );
     expect(mockSearch).not.toHaveBeenCalled();
   });
 
   it('returns 400 when q is empty string', async () => {
     const req = mockReq({ q: '' });
     const res = mockRes();
+    const next = jest.fn();
 
-    await searchSemantic(req, res);
+    await searchSemantic(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }),
+    );
     expect(mockSearch).not.toHaveBeenCalled();
   });
 
   it('returns 400 when q is only whitespace', async () => {
     const req = mockReq({ q: '   ' });
     const res = mockRes();
+    const next = jest.fn();
 
-    await searchSemantic(req, res);
+    await searchSemantic(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }),
+    );
     expect(mockSearch).not.toHaveBeenCalled();
   });
 
@@ -147,16 +152,14 @@ describe('GET /api/products/search/semantic — searchSemantic()', () => {
   });
 
   it('handles service throwing an error', async () => {
-    mockSearch.mockRejectedValue(new Error('Unexpected error'));
+    const error = new Error('Unexpected error');
+    mockSearch.mockRejectedValue(error);
     const req = mockReq();
     const res = mockRes();
+    const next = jest.fn();
 
-    await searchSemantic(req, res);
+    await searchSemantic(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(500);
-    expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: 'Lỗi server khi tìm kiếm sản phẩm',
-    });
+    expect(next).toHaveBeenCalledWith(error);
   });
 });

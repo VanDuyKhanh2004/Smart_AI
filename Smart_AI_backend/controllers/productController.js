@@ -254,40 +254,29 @@ const getAllProducts = asyncHandler(async (req, res) => {
 });
 
 // Tìm kiếm ngữ nghĩa sản phẩm
-const searchSemantic = async (req, res) => {
-  try {
-    const query = (req.query.q || '').trim();
-    let limit = parseInt(req.query.limit) || 10;
+const searchSemantic = asyncHandler(async (req, res) => {
+  const query = (req.query.q || '').trim();
+  let limit = parseInt(req.query.limit) || 10;
 
-    if (!query) {
-      return res.status(400).json({
-        success: false,
-        message: 'Vui lòng cung cấp từ khóa tìm kiếm (q)',
-      });
-    }
-
-    if (limit < 1) limit = 10;
-    if (limit > 50) limit = 50;
-
-    const result = await semanticSearch(query, limit);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Tìm kiếm ngữ nghĩa thành công',
-      data: {
-        products: result.products,
-        query,
-        searchMode: result.searchMode,
-      },
-    });
-  } catch (error) {
-    console.error('Lỗi tìm kiếm ngữ nghĩa:', error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Lỗi server khi tìm kiếm sản phẩm',
-    });
+  if (!query) {
+    throw new BadRequestError('Vui lòng cung cấp từ khóa tìm kiếm (q)');
   }
-};
+
+  if (limit < 1) limit = 10;
+  if (limit > 50) limit = 50;
+
+  const result = await semanticSearch(query, limit);
+
+  res.status(200).json({
+    success: true,
+    message: 'Tìm kiếm ngữ nghĩa thành công',
+    data: {
+      products: result.products,
+      query,
+      searchMode: result.searchMode,
+    },
+  });
+});
 
 // Lấy chi tiết sản phẩm theo ID
 const getProductById = asyncHandler(async (req, res) => {
@@ -334,44 +323,30 @@ const getProductById = asyncHandler(async (req, res) => {
 /**
  * Product Recommendations
  */
-const getRecommendations = async (req, res) => {
-  try {
-    const productId = req.params.id;
-    const limit = req.query.limit;
+const getRecommendations = asyncHandler(async (req, res) => {
+  const productId = req.params.id;
+  const limit = req.query.limit;
 
-    const result = await productRecommend(productId, limit);
+  const result = await productRecommend(productId, limit);
 
-    if (result.error === "INVALID_ID") {
-      return res.status(400).json({
-        success: false,
-        message: "ID sản phẩm không hợp lệ",
-      });
-    }
-
-    if (result.error === "NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        message: "Không tìm thấy sản phẩm",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Lấy sản phẩm gợi ý thành công",
-      data: {
-        sourceProduct: result.sourceProduct,
-        products: result.products,
-        recommendationMode: result.recommendationMode,
-      },
-    });
-  } catch (error) {
-    console.error("Lỗi gợi ý sản phẩm:", error.message);
-    return res.status(500).json({
-      success: false,
-      message: "Lỗi server khi lấy gợi ý sản phẩm",
-    });
+  if (result.error === "INVALID_ID") {
+    throw new BadRequestError("ID sản phẩm không hợp lệ");
   }
-};
+
+  if (result.error === "NOT_FOUND") {
+    throw new NotFoundError("Không tìm thấy sản phẩm");
+  }
+
+  res.status(200).json({
+    success: true,
+    message: "Lấy sản phẩm gợi ý thành công",
+    data: {
+      sourceProduct: result.sourceProduct,
+      products: result.products,
+      recommendationMode: result.recommendationMode,
+    },
+  });
+});
 
 /**
  * Delete product (soft delete by setting isActive = false)
