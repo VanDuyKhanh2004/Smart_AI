@@ -138,7 +138,7 @@ const {
   getOrderStats,
 } = require('../controllers/orderController');
 
-const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
+const { AppError, BadRequestError, NotFoundError, ForbiddenError, ConflictError } = require('../utils/errors');
 
 const mockJson = jest.fn();
 const mockSet = jest.fn().mockReturnValue({ json: mockJson });
@@ -392,7 +392,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(IdempotencyRecord.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -422,7 +422,7 @@ describe('createOrder', () => {
       IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockStatus).toHaveBeenCalledWith(200);
       expect(mockJson).toHaveBeenCalledWith(
@@ -442,7 +442,7 @@ describe('createOrder', () => {
       IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockSet).toHaveBeenCalledWith('Idempotent-Replay', 'true');
     });
@@ -456,7 +456,7 @@ describe('createOrder', () => {
       IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(Order).not.toHaveBeenCalled();
       expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
@@ -474,11 +474,10 @@ describe('createOrder', () => {
       });
       IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(422);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_KEY_MISMATCH' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 422, code: 'IDEMPOTENCY_KEY_MISMATCH' })
       );
     });
 
@@ -491,10 +490,11 @@ describe('createOrder', () => {
       IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockStatus).toHaveBeenCalledWith(200);
       expect(mockSet).toHaveBeenCalledWith('Idempotent-Replay', 'true');
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('replay returns 410 when original order is gone', async () => {
@@ -509,11 +509,10 @@ describe('createOrder', () => {
         session: jest.fn().mockResolvedValue(null),
       });
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(410);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'IDEMPOTENT_ORDER_GONE' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 410, code: 'IDEMPOTENT_ORDER_GONE' })
       );
     });
 
@@ -521,12 +520,10 @@ describe('createOrder', () => {
       const processingRecord = defaultIdempotencyRecord({ status: 'processing' });
       IdempotencyRecord.findOne.mockResolvedValue(processingRecord);
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(409);
-      expect(mockSet).toHaveBeenCalledWith('Retry-After', '5');
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_IN_PROGRESS' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 409, code: 'IDEMPOTENCY_IN_PROGRESS' })
       );
     });
 
@@ -539,7 +536,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockIdempotencyFindOneAndUpdate).toHaveBeenNthCalledWith(
         1,
@@ -562,11 +559,10 @@ describe('createOrder', () => {
       });
       IdempotencyRecord.findOne.mockResolvedValue(failedRecord);
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(422);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_KEY_MISMATCH' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 422, code: 'IDEMPOTENCY_KEY_MISMATCH' })
       );
     });
 
@@ -574,21 +570,21 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(logger.warn).toHaveBeenCalledWith('Missing Idempotency-Key header');
       expect(IdempotencyRecord.findOne).not.toHaveBeenCalled();
       expect(mockStatus).toHaveBeenCalledWith(201);
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('invalid UUID format returns 400', async () => {
       const req = makeIdempotentReq({ headers: { 'idempotency-key': 'not-a-uuid' } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_IDEMPOTENCY_KEY' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INVALID_IDEMPOTENCY_KEY' })
       );
     });
 
@@ -596,11 +592,10 @@ describe('createOrder', () => {
       IdempotencyRecord.findOne.mockResolvedValue(null);
       IdempotencyRecord.create.mockRejectedValue({ code: 11000, message: 'Duplicate key' });
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(409);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'IDEMPOTENCY_IN_PROGRESS' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 409, code: 'IDEMPOTENCY_IN_PROGRESS' })
       );
     });
 
@@ -613,7 +608,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
         { _id: 'idempotency-123', status: 'failed', requestFingerprint: 'request-fingerprint-hash' },
@@ -636,7 +631,7 @@ describe('createOrder', () => {
       IdempotencyRecord.findOne.mockResolvedValue(null);
       const req = makeIdempotentReq({ body: { shippingAddress: null } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
       expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
         { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash' },
@@ -649,7 +644,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockOrderSave.mockRejectedValue(new Error('DB error'));
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockIdempotencyFindOneAndUpdate).toHaveBeenCalledWith(
         { _id: 'idempotency-123', attemptId: expect.any(String), status: 'processing', requestFingerprint: 'request-fingerprint-hash' },
@@ -661,7 +656,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockProductFindByIdAndUpdate).toHaveBeenCalledTimes(2);
     });
@@ -670,7 +665,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockEnqueueOrderConfirmationEmail).toHaveBeenCalledTimes(1);
     });
@@ -682,7 +677,7 @@ describe('createOrder', () => {
         session: jest.fn().mockResolvedValue(defaultPromotionDoc()),
       });
 
-      await createOrder(makeIdempotentReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST10' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST10' } }), mockRes(), next);
 
       expect(Promotion.findOneAndUpdate).toHaveBeenCalledTimes(1);
     });
@@ -691,7 +686,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(IdempotencyRecord.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -710,7 +705,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockIdempotencyFindOneAndUpdate).toHaveBeenNthCalledWith(
         1,
@@ -733,10 +728,12 @@ describe('createOrder', () => {
       });
       IdempotencyRecord.findOne.mockResolvedValue(freshRecord);
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockIdempotencyFindOneAndUpdate).not.toHaveBeenCalled();
-      expect(mockStatus).toHaveBeenCalledWith(409);
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 409, code: 'IDEMPOTENCY_IN_PROGRESS' })
+      );
     });
 
     it('ttlMs uses CHECKOUT_IDEMPOTENCY_TTL_HOURS env var default', async () => {
@@ -763,7 +760,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       const call = mockIdempotencyFindOneAndUpdate.mock.calls.find(
         ([filter]) => filter?.status === 'completed' || (filter && filter.status === 'completed')
@@ -780,7 +777,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       const bindingCalls = mockIdempotencyFindOneAndUpdate.mock.calls.filter(
         ([, update]) => update?.$set?.checkoutFingerprint !== undefined
@@ -801,11 +798,13 @@ describe('createOrder', () => {
       // Make the binding step fail by returning null for findOneAndUpdate
       mockIdempotencyFindOneAndUpdate.mockResolvedValue(null);
 
-      await createOrder(makeIdempotentReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockSession.commitTransaction).not.toHaveBeenCalled();
-      expect(mockStatus).toHaveBeenCalledWith(500);
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 500, code: 'IDEMPOTENCY_CONFLICT' })
+      );
     });
   });
 
@@ -814,7 +813,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mongoose.startSession).toHaveBeenCalled();
       expect(mockSession.startTransaction).toHaveBeenCalled();
@@ -824,7 +823,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockSession.commitTransaction).toHaveBeenCalled();
     });
@@ -832,7 +831,7 @@ describe('createOrder', () => {
     it('aborts the transaction on validation failure', async () => {
       const req = makeReq({ body: { shippingAddress: null } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockSession.commitTransaction).not.toHaveBeenCalled();
@@ -842,7 +841,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockOrderSave.mockRejectedValue(new Error('DB write error'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockSession.commitTransaction).not.toHaveBeenCalled();
@@ -852,7 +851,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockSession.endSession).toHaveBeenCalled();
     });
@@ -860,7 +859,7 @@ describe('createOrder', () => {
     it('ends session even after abort', async () => {
       const req = makeReq({ body: { shippingAddress: null } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
       expect(mockSession.endSession).toHaveBeenCalled();
     });
@@ -869,7 +868,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockOrderSave.mockRejectedValue(new Error('DB write error'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockSession.endSession).toHaveBeenCalled();
     });
@@ -878,7 +877,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockOrderSave.mockRejectedValue(new Error('DB write error'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
     });
@@ -888,11 +887,10 @@ describe('createOrder', () => {
     it('rejects missing shipping address with 400', async () => {
       const req = makeReq({ body: { shippingAddress: null } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_SHIPPING_ADDRESS' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INVALID_SHIPPING_ADDRESS' })
       );
     });
 
@@ -902,11 +900,10 @@ describe('createOrder', () => {
         delete addr[field];
         const req = makeReq({ body: { shippingAddress: addr } });
 
-        await createOrder(req, mockRes());
+        const next = jest.fn(); await createOrder(req, mockRes(), next);
 
-        expect(mockStatus).toHaveBeenCalledWith(400);
-        expect(mockJson).toHaveBeenCalledWith(
-          expect.objectContaining({ success: false, code: 'INVALID_SHIPPING_ADDRESS' })
+        expect(next).toHaveBeenCalledWith(
+          expect.objectContaining({ statusCode: 400, code: 'INVALID_SHIPPING_ADDRESS' })
         );
       }
     });
@@ -914,11 +911,10 @@ describe('createOrder', () => {
     it('rejects invalid phone format', async () => {
       const req = makeReq({ body: { shippingAddress: { ...validShippingAddress, phone: '123' } } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_SHIPPING_ADDRESS' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INVALID_SHIPPING_ADDRESS' })
       );
     });
   });
@@ -931,11 +927,10 @@ describe('createOrder', () => {
         session: jest.fn().mockResolvedValue(null),
       });
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'CART_EMPTY' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'CART_EMPTY' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
@@ -943,11 +938,10 @@ describe('createOrder', () => {
     it('rejects empty items array', async () => {
       setupCartFindOne({ ...defaultCartDoc(), items: [] });
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'CART_EMPTY' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'CART_EMPTY' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
@@ -957,11 +951,10 @@ describe('createOrder', () => {
       cartDoc.items[0].product = null;
       setupCartFindOne(cartDoc);
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'PRODUCT_NOT_FOUND' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'PRODUCT_NOT_FOUND' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
@@ -971,11 +964,10 @@ describe('createOrder', () => {
       cartDoc.items[0].product.isActive = false;
       setupCartFindOne(cartDoc);
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'PRODUCT_NOT_FOUND' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'PRODUCT_NOT_FOUND' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
@@ -986,11 +978,10 @@ describe('createOrder', () => {
       cartDoc.items[0].quantity = 2;
       setupCartFindOne(cartDoc);
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INSUFFICIENT_STOCK' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INSUFFICIENT_STOCK' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
@@ -1005,7 +996,7 @@ describe('createOrder', () => {
 
       const req = makeReq({ body: { shippingAddress: validShippingAddress, clientPrice: 100 } });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
       expect(Order).toHaveBeenCalledWith(expect.objectContaining({
         subtotal: 1300000,
@@ -1021,7 +1012,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockJson).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1037,7 +1028,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(Order).toHaveBeenCalledWith(expect.objectContaining({
         subtotal: 1300000,
@@ -1053,7 +1044,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
         'product-1',
@@ -1074,7 +1065,7 @@ describe('createOrder', () => {
         session: jest.fn().mockResolvedValue(null),
       });
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
     });
@@ -1099,7 +1090,7 @@ describe('createOrder', () => {
       setupWithPromotion(defaultPromotionDoc({ discountType: 'percentage', discountValue: 10 }));
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST10' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST10' } }), mockRes(), next);
 
       expect(Order).toHaveBeenCalledWith(expect.objectContaining({
         subtotal: 1300000,
@@ -1122,19 +1113,20 @@ describe('createOrder', () => {
       }));
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST50' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST50' } }), mockRes(), next);
 
       expect(Order).toHaveBeenCalledWith(expect.objectContaining({
         promotion: expect.objectContaining({ discountAmount: 50000 }),
       }));
       expect(mockStatus).toHaveBeenCalledWith(201);
+      expect(next).not.toHaveBeenCalled();
     });
 
     it('applies valid fixed promotion', async () => {
       setupWithPromotion(defaultPromotionDoc({ code: 'FIXED50', discountType: 'fixed', discountValue: 50000 }));
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes(), next);
 
       expect(Order).toHaveBeenCalledWith(expect.objectContaining({
         total: 1280000,
@@ -1152,7 +1144,7 @@ describe('createOrder', () => {
       setupWithPromotion(defaultPromotionDoc({ discountType: 'fixed', discountValue: 99999999 }));
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'HUGE' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'HUGE' } }), mockRes(), next);
 
       expect(Order).toHaveBeenCalledWith(expect.objectContaining({
         total: 30000,
@@ -1165,11 +1157,10 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupPromotionFindOne(null);
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'INVALID' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'INVALID' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(404);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INVALID_PROMOTION' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 404, code: 'INVALID_PROMOTION' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
@@ -1177,55 +1168,50 @@ describe('createOrder', () => {
     it('rejects inactive promotion', async () => {
       setupWithPromotion(defaultPromotionDoc({ isActive: false }));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'INACTIVE' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'INACTIVE' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'INACTIVE_PROMOTION' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INACTIVE_PROMOTION' })
       );
     });
 
     it('rejects promotion that has not started yet', async () => {
       setupWithPromotion(defaultPromotionDoc({ startDate: new Date('2099-01-01') }));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FUTURE' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FUTURE' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'PROMOTION_NOT_STARTED' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'PROMOTION_NOT_STARTED' })
       );
     });
 
     it('rejects expired promotion', async () => {
       setupWithPromotion(defaultPromotionDoc({ endDate: new Date('2023-01-01') }));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'EXPIRED' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'EXPIRED' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'EXPIRED_PROMOTION' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'EXPIRED_PROMOTION' })
       );
     });
 
     it('rejects promotion at usage limit', async () => {
       setupWithPromotion(defaultPromotionDoc({ usedCount: 100, usageLimit: 100 }));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'EXHAUSTED' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'EXHAUSTED' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'PROMOTION_USAGE_LIMIT' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'PROMOTION_USAGE_LIMIT' })
       );
     });
 
     it('rejects promotion when order value below minimum', async () => {
       setupWithPromotion(defaultPromotionDoc({ minOrderValue: 99999999 }));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'HIGHMIN' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'HIGHMIN' } }), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(400);
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, code: 'MIN_ORDER_NOT_MET' })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'MIN_ORDER_NOT_MET' })
       );
     });
 
@@ -1233,7 +1219,7 @@ describe('createOrder', () => {
       setupWithPromotion(defaultPromotionDoc({ discountType: 'fixed', discountValue: 50000 }));
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes(), next);
 
       expect(Promotion.findOneAndUpdate).toHaveBeenCalledWith(
         { code: 'FIXED50' },
@@ -1245,7 +1231,7 @@ describe('createOrder', () => {
     it('does not increment promotion usedCount on validation failure', async () => {
       setupWithPromotion(defaultPromotionDoc({ isActive: false }));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'INACTIVE' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'INACTIVE' } }), mockRes(), next);
 
       expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
     });
@@ -1254,7 +1240,7 @@ describe('createOrder', () => {
       setupWithPromotion(defaultPromotionDoc({ discountType: 'fixed', discountValue: 50000 }));
       mockOrderSave.mockRejectedValue(new Error('Save failed'));
 
-      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes());
+      const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes(), next);
 
       expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
     });
@@ -1265,7 +1251,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockStatus).toHaveBeenCalledWith(201);
       expect(mockJson).toHaveBeenCalledWith(
@@ -1290,7 +1276,7 @@ describe('createOrder', () => {
       setupCartFindOne(cartDoc);
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(cartDoc.items).toEqual([]);
       expect(mockCartSave).toHaveBeenCalledWith({ session: mockSession });
@@ -1302,7 +1288,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockEnqueueOrderConfirmationEmail).toHaveBeenCalledWith(
         { name: 'Test User', email: 'test@test.com', _id: 'user-123' },
@@ -1318,7 +1304,7 @@ describe('createOrder', () => {
         session: jest.fn().mockResolvedValue(null),
       });
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
     });
@@ -1327,7 +1313,7 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockProductFindByIdAndUpdate.mockRejectedValue(new Error('Stock update failed'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
     });
@@ -1338,9 +1324,11 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockProductFindByIdAndUpdate.mockRejectedValue(new Error('DB error during stock update'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(500);
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 500, code: 'SERVER_ERROR' })
+      );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
     });
@@ -1349,9 +1337,11 @@ describe('createOrder', () => {
       setupCartFindOne(defaultCartDoc());
       mockOrderSave.mockRejectedValue(new Error('DB error during order save'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(500);
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 500, code: 'SERVER_ERROR' })
+      );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
     });
@@ -1361,9 +1351,11 @@ describe('createOrder', () => {
       setupOrderFindByIdForCreate();
       mockSession.commitTransaction.mockRejectedValue(new Error('Commit failed'));
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockStatus).toHaveBeenCalledWith(500);
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 500, code: 'SERVER_ERROR' })
+      );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
     });
@@ -1375,11 +1367,14 @@ describe('createOrder', () => {
       mockOrderSave.mockRejectedValue(new Error('Internal DB details'));
       setupOrderFindByIdForCreate();
 
-      await createOrder(makeReq(), mockRes());
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        expect.not.objectContaining({ error: expect.any(String) })
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 500, code: 'SERVER_ERROR', message: 'Lỗi server khi tạo đơn hàng' })
       );
+      const calledWithError = next.mock.calls[0][0];
+      expect(calledWithError).toBeInstanceOf(AppError);
+      expect(calledWithError.message).toBe('Lỗi server khi tạo đơn hàng');
       process.env.NODE_ENV = origEnv;
     });
   });
@@ -1396,7 +1391,7 @@ describe('createOrder', () => {
         },
       });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
       expect(mockJson).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1417,7 +1412,7 @@ describe('createOrder', () => {
         body: { shippingAddress: validShippingAddress, userId: 'hacker-user-id' },
       });
 
-      await createOrder(req, mockRes());
+      const next = jest.fn(); await createOrder(req, mockRes(), next);
 
       expect(mockJson).toHaveBeenCalledWith(
         expect.objectContaining({
