@@ -60,7 +60,7 @@ jest.mock('../services/productImageService', () => ({
   ProductImageValidationError: MockProductImageValidationError,
 }));
 
-const { createProduct, updateProduct } = require('../controllers/productController');
+const { createProduct, updateProduct, deleteProduct } = require('../controllers/productController');
 const Product = require('../models/Product');
 const cache = require('../services/cacheService');
 const logger = require('../utils/logger');
@@ -272,17 +272,78 @@ describe('createProduct', () => {
     errorSpy.mockRestore();
   });
 
-  it('logs error with logger.error on failure', async () => {
+  it('forwards error to next on failure', async () => {
     Product.findOne.mockRejectedValue(new Error('DB down'));
 
     const req = mockReq({ name: 'X', brand: 'Y', price: 1, description: 'D' });
     const res = mockRes();
+    const next = jest.fn();
 
-    await createProduct(req, res);
+    await createProduct(req, res, next);
 
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: expect.objectContaining({ message: 'DB down' }) }),
-      'Failed to create product',
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('returns 400 for missing required fields', async () => {
+    const req = mockReq({ name: '', brand: '', price: '', description: '' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 400,
+        message: 'Thiếu thông tin bắt buộc: name, brand, price, description',
+      }),
+    );
+  });
+
+  it('returns 400 for duplicate product', async () => {
+    Product.findOne.mockResolvedValue({ _id: 'existing', name: 'Test', brand: 'test' });
+
+    const req = mockReq({ name: 'Test', brand: 'test', price: 100, description: 'Desc' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: 400,
+        message: 'Sản phẩm đã tồn tại với tên và hãng này',
+      }),
+    );
+  });
+
+  it('forwards Mongoose ValidationError to error handler', async () => {
+    Product.findOne.mockResolvedValue(null);
+    const valErr = new Error('Validation failed');
+    valErr.name = 'ValidationError';
+    valErr.errors = {
+      name: { path: 'name', message: 'Tên là bắt buộc' },
+    };
+    const mockSave = new Product({}).save;
+    mockSave.mockRejectedValue(valErr);
+
+    const req = mockReq({ name: 'Test', brand: 'test', price: 100, description: 'Desc' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(valErr);
+  });
+
+  it('forwards unexpected error on save', async () => {
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = new Product({}).save;
+    mockSave.mockRejectedValue(new Error('DB write failed'));
+
+    const req = mockReq({ name: 'Test', brand: 'test', price: 100, description: 'Desc' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'DB write failed' }),
     );
   });
 });
@@ -786,18 +847,46 @@ describe('updateProduct', () => {
     errorSpy.mockRestore();
   });
 
-  it('logs error with logger.error on failure', async () => {
+  it('forwards error to next on failure', async () => {
     Product.findById.mockRejectedValue(new Error('Find failed'));
 
     const req = mockReq({ name: 'X', brand: 'Y', price: 1, description: 'D' }, { id: 'prod-err' });
     const res = mockRes();
+    const next = jest.fn();
 
-    await updateProduct(req, res);
+    await updateProduct(req, res, next);
 
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: expect.objectContaining({ message: 'Find failed' }) }),
-      'Failed to update product',
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('returns 404 when product not found', async () => {
+    Product.findById.mockResolvedValue(null);
+
+    const req = mockReq({ name: 'Test', brand: 'test', price: 100, description: 'Desc' }, { id: 'nonexistent' });
+    const res = mockRes();
+    const next = jest.fn();
+    await updateProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }),
     );
+  });
+
+  it('forwards Mongoose ValidationError on update', async () => {
+    Product.findById.mockResolvedValue({ _id: 'existing', name: 'Old', brand: 'old', price: 50, description: 'Old desc', specs: {}, colors: [], inStock: 0, tags: [], embeddingStatus: 'ready', embeddingContentHash: 'abc' });
+    const valErr = new Error('Validation failed');
+    valErr.name = 'ValidationError';
+    valErr.errors = {
+      name: { path: 'name', message: 'Tên là bắt buộc' },
+    };
+    Product.findByIdAndUpdate.mockRejectedValue(valErr);
+
+    const req = mockReq({ name: 'Test', brand: 'test', price: 100, description: 'Desc' }, { id: 'existing' });
+    const res = mockRes();
+    const next = jest.fn();
+    await updateProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(valErr);
   });
 });
 
@@ -876,12 +965,12 @@ describe('createProduct — image upload integration', () => {
 
     const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'http://example.com/phone.jpg' });
     const res = mockRes();
-    await createProduct(req, res);
+    const next = jest.fn();
+    await createProduct(req, res, next);
 
     expect(mockSave).not.toHaveBeenCalled();
-    expect(mockStatus).toHaveBeenCalledWith(400);
-    expect(mockJson).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'INVALID_PRODUCT_IMAGE' }),
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'INVALID_PRODUCT_IMAGE' }),
     );
   });
 
@@ -897,9 +986,10 @@ describe('createProduct — image upload integration', () => {
 
     const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'http://example.com/phone.jpg' });
     const res = mockRes();
-    await createProduct(req, res);
+    const next = jest.fn();
+    await createProduct(req, res, next);
 
-    expect(mockStatus).toHaveBeenCalledWith(500);
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
 
   it('returns controlled error when Cloudinary upload fails', async () => {
@@ -911,10 +1001,11 @@ describe('createProduct — image upload integration', () => {
 
     const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'data:image/jpeg;base64,/9j/4AAQ' });
     const res = mockRes();
-    await createProduct(req, res);
+    const next = jest.fn();
+    await createProduct(req, res, next);
 
     expect(mockSave).not.toHaveBeenCalled();
-    expect(mockStatus).toHaveBeenCalledWith(500);
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
 });
 
@@ -1041,19 +1132,19 @@ describe('updateProduct — image upload integration', () => {
     expect(mockStatus).toHaveBeenCalledWith(200);
   });
 
-  it('does not update product when upload validation fails — returns 400 with INVALID_PRODUCT_IMAGE', async () => {
+  it('does not update product when upload validation fails — forwards error with INVALID_PRODUCT_IMAGE', async () => {
     const { ProductImageValidationError } = require('../services/productImageService');
     mockUploadProductImageIfNeeded.mockRejectedValue(new ProductImageValidationError('HTTP image URLs are not allowed'));
     Product.findById.mockResolvedValue({ ...existingProduct });
 
     const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'http://example.com/bad.jpg' }, { id: 'prod-update-img' });
     const res = mockRes();
-    await updateProduct(req, res);
+    const next = jest.fn();
+    await updateProduct(req, res, next);
 
     expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
-    expect(mockStatus).toHaveBeenCalledWith(400);
-    expect(mockJson).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'INVALID_PRODUCT_IMAGE' }),
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 400, code: 'INVALID_PRODUCT_IMAGE' }),
     );
   });
 
@@ -1066,9 +1157,10 @@ describe('updateProduct — image upload integration', () => {
 
     const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'http://example.com/bad.jpg' }, { id: 'prod-update-img' });
     const res = mockRes();
-    await updateProduct(req, res);
+    const next = jest.fn();
+    await updateProduct(req, res, next);
 
-    expect(mockStatus).toHaveBeenCalledWith(500);
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
 
   it('leaves existing image unchanged on Cloudinary failure', async () => {
@@ -1077,9 +1169,59 @@ describe('updateProduct — image upload integration', () => {
 
     const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
     const res = mockRes();
-    await updateProduct(req, res);
+    const next = jest.fn();
+    await updateProduct(req, res, next);
 
     expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
-    expect(mockStatus).toHaveBeenCalledWith(500);
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+});
+
+/* ============================================================
+   deleteProduct
+============================================================ */
+describe('deleteProduct', () => {
+  it('should soft delete a product and return 200', async () => {
+    Product.findByIdAndUpdate.mockResolvedValue({ _id: 'prod-del-1', isActive: false });
+
+    const req = mockReq({}, { id: 'prod-del-1' });
+    const res = mockRes();
+    await deleteProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-del-1',
+      { isActive: false },
+      { new: true },
+    );
+    expect(cache.del).toHaveBeenCalledWith('product:prod-del-1');
+    expect(cache.invalidatePattern).toHaveBeenCalledWith('products:*');
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, message: 'Xóa sản phẩm thành công' }),
+    );
+  });
+
+  it('returns 404 when product not found', async () => {
+    Product.findByIdAndUpdate.mockResolvedValue(null);
+
+    const req = mockReq({}, { id: 'nonexistent' });
+    const res = mockRes();
+    const next = jest.fn();
+    await deleteProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }),
+    );
+  });
+
+  it('forwards unexpected error to next', async () => {
+    Product.findByIdAndUpdate.mockRejectedValue(new Error('DB error'));
+
+    const req = mockReq({}, { id: 'prod-del-err' });
+    const res = mockRes();
+    const next = jest.fn();
+    await deleteProduct(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
 });

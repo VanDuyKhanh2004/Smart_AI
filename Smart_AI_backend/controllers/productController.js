@@ -7,104 +7,84 @@ const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddin
 const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
 const { uploadProductImageIfNeeded, ProductImageValidationError } = require("../services/productImageService");
 const logger = require("../utils/logger");
+const asyncHandler = require("../utils/asyncHandler");
+const { AppError, BadRequestError, NotFoundError } = require("../utils/errors");
 
-const createProduct = async (req, res) => {
+const createProduct = asyncHandler(async (req, res) => {
+  req.errorResponseFormat = 'legacy-top-level-message';
   const log = req.logger || logger;
-  try {
 
-    const {
-      name,
-      brand,
-      price,
-      specs,
-      description,
-      inStock,
-      colors,
-      tags,
-      image,
-    } = req.body;
+  const {
+    name,
+    brand,
+    price,
+    specs,
+    description,
+    inStock,
+    colors,
+    tags,
+    image,
+  } = req.body;
 
-    if (!name || !brand || !price || !description) {
-      return res.status(400).json({
-        success: false,
-        message: "Thiếu thông tin bắt buộc: name, brand, price, description",
-      });
-    }
-
-    const existingProduct = await Product.findOne({
-      name: { $regex: new RegExp(`^${name}$`, "i") },
-      brand: brand.toLowerCase(),
-    });
-
-    if (existingProduct) {
-      return res.status(400).json({
-        success: false,
-        message: "Sản phẩm đã tồn tại với tên và hãng này",
-      });
-    }
-
-    const { imageUrl: processedImage, imagePublicId: processedPublicId } = await uploadProductImageIfNeeded(image);
-
-    const newProduct = new Product({
-      name,
-      brand: brand.toLowerCase(),
-      price,
-      specs: specs || {},
-      description,
-      inStock: inStock || 0,
-      colors: colors || [],
-      tags: tags || [],
-      image: processedImage,
-      imagePublicId: processedPublicId || undefined,
-      embeddingStatus: 'pending',
-    });
-
-    const savedProduct = await newProduct.save();
-    log.info({ productId: savedProduct._id.toString(), requestId: req.requestId }, 'Product created');
-
-    const canonicalText = buildEmbeddingContent(savedProduct);
-
-    enqueueProductEmbedding(
-      savedProduct._id.toString(),
-      canonicalText,
-      'create',
-      req.requestId || null,
-    );
-
-    await cache.invalidatePattern("products:*");
-
-    res.status(201).json({
-      success: true,
-      message: "Sản phẩm đã được tạo thành công",
-      data: savedProduct,
-    });
-  } catch (error) {
-    log.error({ err: { message: error.message } }, 'Failed to create product');
-
-    if (error.name === "ValidationError") {
-      const errors = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: "Dữ liệu không hợp lệ",
-        errors,
-      });
-    }
-
-    if (error instanceof ProductImageValidationError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        code: error.code,
-        message: error.message,
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Lỗi server khi tạo sản phẩm",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
+  if (!name || !brand || !price || !description) {
+    throw new BadRequestError("Thiếu thông tin bắt buộc: name, brand, price, description");
   }
-};
+
+  const existingProduct = await Product.findOne({
+    name: { $regex: new RegExp(`^${name}$`, "i") },
+    brand: brand.toLowerCase(),
+  });
+
+  if (existingProduct) {
+    throw new BadRequestError("Sản phẩm đã tồn tại với tên và hãng này");
+  }
+
+  let processedImage, processedPublicId;
+  try {
+    const result = await uploadProductImageIfNeeded(image);
+    processedImage = result.imageUrl;
+    processedPublicId = result.imagePublicId;
+  } catch (error) {
+    if (error instanceof ProductImageValidationError) {
+      throw new AppError(error.message, error.statusCode, error.code);
+    }
+    throw error;
+  }
+
+  const newProduct = new Product({
+    name,
+    brand: brand.toLowerCase(),
+    price,
+    specs: specs || {},
+    description,
+    inStock: inStock || 0,
+    colors: colors || [],
+    tags: tags || [],
+    image: processedImage,
+    imagePublicId: processedPublicId || undefined,
+    embeddingStatus: 'pending',
+  });
+
+  const savedProduct = await newProduct.save();
+  log.info({ productId: savedProduct._id.toString(), requestId: req.requestId }, 'Product created');
+
+  const canonicalText = buildEmbeddingContent(savedProduct);
+
+  enqueueProductEmbedding(
+    savedProduct._id.toString(),
+    canonicalText,
+    'create',
+    req.requestId || null,
+  );
+
+  await cache.invalidatePattern("products:*");
+
+  res.status(201).json({
+    success: true,
+    message: "Sản phẩm đã được tạo thành công",
+    data: savedProduct,
+  });
+});
 
 // Lấy tất cả sản phẩm với pagination
 const getAllProducts = async (req, res) => {
@@ -416,205 +396,153 @@ const getRecommendations = async (req, res) => {
 /**
  * Delete product (soft delete by setting isActive = false)
  */
-const deleteProduct = async (req, res) => {
-  try {
-    const productId = req.params.id;
+const deleteProduct = asyncHandler(async (req, res) => {
+  const productId = req.params.id;
 
-    // Find and soft delete the product
-    const product = await Product.findByIdAndUpdate(
-      productId,
-      { isActive: false },
-      { new: true },
-    );
+  const product = await Product.findByIdAndUpdate(
+    productId,
+    { isActive: false },
+    { new: true },
+  );
 
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: "NOT_FOUND",
-          message: "Không tìm thấy sản phẩm",
-        },
-      });
-    }
-
-    await cache.del("product:" + productId);
-    await cache.invalidatePattern("products:*");
-
-    res.status(200).json({
-      success: true,
-      message: "Xóa sản phẩm thành công",
-    });
-  } catch (error) {
-    console.error("Lỗi khi xóa sản phẩm:", error.message);
-    res.status(500).json({
-      success: false,
-      error: {
-        code: "SERVER_ERROR",
-        message: "Lỗi server khi xóa sản phẩm",
-      },
-    });
+  if (!product) {
+    throw new NotFoundError("Không tìm thấy sản phẩm");
   }
-};
+
+  await cache.del("product:" + productId);
+  await cache.invalidatePattern("products:*");
+
+  res.status(200).json({
+    success: true,
+    message: "Xóa sản phẩm thành công",
+  });
+});
 
 /**
  * Update product
  */
-const updateProduct = async (req, res) => {
+const updateProduct = asyncHandler(async (req, res) => {
+  req.errorResponseFormat = 'legacy-top-level-message';
   const log = req.logger || logger;
-  try {
-    const productId = req.params.id;
-    log.info({ productId, requestId: req.requestId }, 'Updating product');
+  const productId = req.params.id;
+  log.info({ productId, requestId: req.requestId }, 'Updating product');
 
-    const existing = await Product.findById(productId);
-    if (!existing) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: "NOT_FOUND",
-          message: "Không tìm thấy sản phẩm",
-        },
-      });
-    }
+  const existing = await Product.findById(productId);
+  if (!existing) {
+    throw new NotFoundError("Không tìm thấy sản phẩm");
+  }
 
-    const {
-      name,
-      brand,
-      price,
-      specs,
-      description,
-      inStock,
-      colors,
-      tags,
-      image,
-    } = req.body;
+  const {
+    name,
+    brand,
+    price,
+    specs,
+    description,
+    inStock,
+    colors,
+    tags,
+    image,
+  } = req.body;
 
-    if (!name || !brand || !price || !description) {
-      return res.status(400).json({
-        success: false,
-        message: "Thiếu thông tin bắt buộc: name, brand, price, description",
-      });
-    }
+  if (!name || !brand || !price || !description) {
+    throw new BadRequestError("Thiếu thông tin bắt buộc: name, brand, price, description");
+  }
 
-    // Build update payload — only include explicitly provided fields
-    let processedImage;
-    let processedPublicId;
-    if (image !== undefined) {
+  // Build update payload — only include explicitly provided fields
+  let processedImage;
+  let processedPublicId;
+  if (image !== undefined) {
+    try {
       const result = await uploadProductImageIfNeeded(image);
       processedImage = result.imageUrl;
       processedPublicId = result.imagePublicId;
-    }
-
-    const $set = {
-      name,
-      brand: brand.toLowerCase(),
-      price,
-      description,
-      inStock: inStock !== undefined ? inStock : existing.inStock,
-      ...(specs !== undefined && { specs }),
-      ...(colors !== undefined && { colors }),
-      ...(tags !== undefined && { tags }),
-    };
-    const $unset = {};
-
-    if (image !== undefined) {
-      $set.image = processedImage;
-      if (processedPublicId) {
-        $set.imagePublicId = processedPublicId;
-      } else {
-        $unset.imagePublicId = '';
+    } catch (error) {
+      if (error instanceof ProductImageValidationError) {
+        throw new AppError(error.message, error.statusCode, error.code);
       }
+      throw error;
     }
-
-    // Enqueue embedding if embedding-relevant fields changed
-    const embeddingRelevantFieldsChanged =
-      name !== existing.name ||
-      brand.toLowerCase() !== existing.brand ||
-      description !== existing.description ||
-      price !== existing.price ||
-      (specs !== undefined && JSON.stringify(specs) !== JSON.stringify(existing.specs)) ||
-      (colors !== undefined && JSON.stringify(colors) !== JSON.stringify(existing.colors));
-
-    let shouldEnqueue = false;
-
-    if (embeddingRelevantFieldsChanged) {
-      const existingData = existing._doc || existing;
-      const prospectiveData = { ...existingData, ...$set };
-      const contentHash = computeContentHash(buildEmbeddingContent(prospectiveData));
-
-      if (existing.embeddingContentHash === contentHash && existing.embeddingStatus === 'ready') {
-        // Canonical content hasn't genuinely changed; keep ready status, skip enqueue
-      } else {
-        $set.embeddingStatus = 'pending';
-        shouldEnqueue = true;
-      }
-    }
-
-    const updateOp = { $set };
-    if (Object.keys($unset).length > 0) {
-      updateOp.$unset = $unset;
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(productId, updateOp, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!updatedProduct) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: "NOT_FOUND",
-          message: "Không tìm thấy sản phẩm",
-        },
-      });
-    }
-
-    if (shouldEnqueue) {
-      const canonicalText = buildEmbeddingContent(updatedProduct);
-      enqueueProductEmbedding(
-        productId,
-        canonicalText,
-        'update',
-        req.requestId || null,
-      );
-    }
-
-    // Invalidate cache
-    await cache.del("product:" + productId);
-    await cache.invalidatePattern("products:*");
-
-    res.status(200).json({
-      success: true,
-      message: "Cập nhật sản phẩm thành công",
-      data: updatedProduct,
-    });
-  } catch (error) {
-    log.error({ err: { message: error.message } }, 'Failed to update product');
-
-    if (error.name === "ValidationError") {
-      const errors = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: "Dữ liệu không hợp lệ",
-        errors,
-      });
-    }
-
-    if (error instanceof ProductImageValidationError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        code: error.code,
-        message: error.message,
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Lỗi server khi cập nhật sản phẩm",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
   }
-};
+
+  const $set = {
+    name,
+    brand: brand.toLowerCase(),
+    price,
+    description,
+    inStock: inStock !== undefined ? inStock : existing.inStock,
+    ...(specs !== undefined && { specs }),
+    ...(colors !== undefined && { colors }),
+    ...(tags !== undefined && { tags }),
+  };
+  const $unset = {};
+
+  if (image !== undefined) {
+    $set.image = processedImage;
+    if (processedPublicId) {
+      $set.imagePublicId = processedPublicId;
+    } else {
+      $unset.imagePublicId = '';
+    }
+  }
+
+  // Enqueue embedding if embedding-relevant fields changed
+  const embeddingRelevantFieldsChanged =
+    name !== existing.name ||
+    brand.toLowerCase() !== existing.brand ||
+    description !== existing.description ||
+    price !== existing.price ||
+    (specs !== undefined && JSON.stringify(specs) !== JSON.stringify(existing.specs)) ||
+    (colors !== undefined && JSON.stringify(colors) !== JSON.stringify(existing.colors));
+
+  let shouldEnqueue = false;
+
+  if (embeddingRelevantFieldsChanged) {
+    const existingData = existing._doc || existing;
+    const prospectiveData = { ...existingData, ...$set };
+    const contentHash = computeContentHash(buildEmbeddingContent(prospectiveData));
+
+    if (existing.embeddingContentHash === contentHash && existing.embeddingStatus === 'ready') {
+      // Canonical content hasn't genuinely changed; keep ready status, skip enqueue
+    } else {
+      $set.embeddingStatus = 'pending';
+      shouldEnqueue = true;
+    }
+  }
+
+  const updateOp = { $set };
+  if (Object.keys($unset).length > 0) {
+    updateOp.$unset = $unset;
+  }
+
+  const updatedProduct = await Product.findByIdAndUpdate(productId, updateOp, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!updatedProduct) {
+    throw new NotFoundError("Không tìm thấy sản phẩm");
+  }
+
+  if (shouldEnqueue) {
+    const canonicalText = buildEmbeddingContent(updatedProduct);
+    enqueueProductEmbedding(
+      productId,
+      canonicalText,
+      'update',
+      req.requestId || null,
+    );
+  }
+
+  // Invalidate cache
+  await cache.del("product:" + productId);
+  await cache.invalidatePattern("products:*");
+
+  res.status(200).json({
+    success: true,
+    message: "Cập nhật sản phẩm thành công",
+    data: updatedProduct,
+  });
+});
 
 module.exports = {
   createProduct,
