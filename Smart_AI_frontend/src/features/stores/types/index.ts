@@ -105,7 +105,7 @@ export interface CreateStoreRequest {
   description?: string;
 }
 
-export interface UpdateStoreRequest extends Partial<CreateStoreRequest> {}
+export type UpdateStoreRequest = Partial<CreateStoreRequest>;
 
 export interface StoreResponse {
   success: boolean;
