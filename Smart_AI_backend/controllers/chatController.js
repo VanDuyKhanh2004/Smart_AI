@@ -389,133 +389,128 @@ class ChatController {
     const startTime = Date.now();
     const { sessionId, message } = data;
 
-    try {
-      const metadata = {
-        userAgent: socket.handshake.headers["user-agent"],
-        ipAddress: socket.handshake.address,
-      };
+    const metadata = {
+      userAgent: socket.handshake.headers["user-agent"],
+      ipAddress: socket.handshake.address,
+    };
 
-      const { conversation, chatHistory } = await this.manageSession(
+    const { conversation, chatHistory } = await this.manageSession(
+      sessionId,
+      message,
+      metadata
+    );
+
+    const intentResult = await this.classifyAndProcessIntent(
+      chatHistory,
+      message
+    );
+    console.log("intentResult", intentResult);
+    let responseResult;
+
+    if (intentResult.intent === "small_talk") {
+      responseResult = await this.handleSmallTalk(
+        socket,
         sessionId,
-        message,
-        metadata
+        intentResult.directResponse
       );
-
-      const intentResult = await this.classifyAndProcessIntent(
+    } else if (intentResult.intent === "complaint") {
+      responseResult = await this.handleComplaint(
+        socket,
+        sessionId,
         chatHistory,
         message
       );
-      console.log("intentResult", intentResult);
-      let responseResult;
+    } else {
+      // ================================================================
+      // Phase A: Load and merge conversation context
+      // ================================================================
+      const clarifiedQuery = intentResult.clarifiedQuery;
+      const parsed = parseProductConstraints(clarifiedQuery);
+      const queryType = classifyQuery(clarifiedQuery, parsed);
+      const previousContext = await contextService.loadContext(sessionId);
+      let mergedFilters = parsed.filters;
+      let mergedPreferences = parsed.preferences;
+      let contextReset = false;
 
-      if (intentResult.intent === "small_talk") {
-        responseResult = await this.handleSmallTalk(
-          socket,
-          sessionId,
-          intentResult.directResponse
-        );
-      } else if (intentResult.intent === "complaint") {
-        responseResult = await this.handleComplaint(
-          socket,
-          sessionId,
-          chatHistory,
-          message
-        );
-      } else {
-        // ================================================================
-        // Phase A: Load and merge conversation context
-        // ================================================================
-        const clarifiedQuery = intentResult.clarifiedQuery;
-        const parsed = parseProductConstraints(clarifiedQuery);
-        const queryType = classifyQuery(clarifiedQuery, parsed);
-        const previousContext = await contextService.loadContext(sessionId);
-        let mergedFilters = parsed.filters;
-        let mergedPreferences = parsed.preferences;
-        let contextReset = false;
+      if (queryType.action === 'reset') {
+        await contextService.deleteContext(sessionId);
+        contextReset = true;
+      } else if (queryType.action === 'follow_up' && previousContext) {
+        const { mergedParsed } = resolveFollowUpQuery(parsed, previousContext);
+        mergedFilters = mergedParsed.filters;
+        mergedPreferences = mergedParsed.preferences;
+      }
+      // independent: use parsed values as-is (no merge)
 
-        if (queryType.action === 'reset') {
-          await contextService.deleteContext(sessionId);
-          contextReset = true;
-        } else if (queryType.action === 'follow_up' && previousContext) {
-          const { mergedParsed } = resolveFollowUpQuery(parsed, previousContext);
-          mergedFilters = mergedParsed.filters;
-          mergedPreferences = mergedParsed.preferences;
-        }
-        // independent: use parsed values as-is (no merge)
+      // ================================================================
+      // Phase B: Search, filter, rank
+      // ================================================================
+      const relatedProducts = await this.searchRelevantProducts(
+        clarifiedQuery,
+        5,
+        mergedFilters,
+        mergedPreferences
+      );
 
-        // ================================================================
-        // Phase B: Search, filter, rank
-        // ================================================================
-        const relatedProducts = await this.searchRelevantProducts(
-          clarifiedQuery,
-          5,
-          mergedFilters,
-          mergedPreferences
-        );
+      // ================================================================
+      // Phase C: Generate response (Gemini/OpenAI or deterministic fallback)
+      // ================================================================
+      responseResult = await this.generateResponse(
+        socket,
+        sessionId,
+        chatHistory,
+        message,
+        relatedProducts
+      );
 
-        // ================================================================
-        // Phase C: Generate response (Gemini/OpenAI or deterministic fallback)
-        // ================================================================
-        responseResult = await this.generateResponse(
-          socket,
-          sessionId,
-          chatHistory,
-          message,
-          relatedProducts
-        );
+      // ================================================================
+      // Phase D: Save normalized context only on valid response.
+      // A valid response has a non-empty fullResponse string.
+      // Save preserves merged filters even for no-result searches so the
+      // user can relax constraints in a follow-up.
+      //
+      // If response generation failed completely (threw, returned null,
+      // undefined, or empty string), context is NOT saved — the previous
+      // stored context remains unchanged.
+      //
+      // Save failure must not fail the chat response.
+      // ================================================================
+      if (responseResult && typeof responseResult.fullResponse === 'string' && responseResult.fullResponse.trim().length > 0) {
+        try {
+          const productIds = Array.isArray(responseResult.relatedProducts)
+            ? responseResult.relatedProducts.map(p => p.id).filter(Boolean).slice(0, 5)
+            : relatedProducts.map(p => p._id).filter(Boolean).slice(0, 5);
 
-        // ================================================================
-        // Phase D: Save normalized context only on valid response.
-        // A valid response has a non-empty fullResponse string.
-        // Save preserves merged filters even for no-result searches so the
-        // user can relax constraints in a follow-up.
-        //
-        // If response generation failed completely (threw, returned null,
-        // undefined, or empty string), context is NOT saved — the previous
-        // stored context remains unchanged.
-        //
-        // Save failure must not fail the chat response.
-        // ================================================================
-        if (responseResult && typeof responseResult.fullResponse === 'string' && responseResult.fullResponse.trim().length > 0) {
-          try {
-            const productIds = Array.isArray(responseResult.relatedProducts)
-              ? responseResult.relatedProducts.map(p => p.id).filter(Boolean).slice(0, 5)
-              : relatedProducts.map(p => p._id).filter(Boolean).slice(0, 5);
-
-            const newContext = createContextFromParsed(
-              { cleanedQuery: clarifiedQuery, filters: mergedFilters, preferences: mergedPreferences },
-              productIds
-            );
-            if (previousContext && !contextReset) {
-              newContext.turnCount = (previousContext.turnCount || 0) + 1;
-            }
-            await contextService.saveContext(sessionId, sanitizeConversationContext(newContext));
-          } catch (_ctxErr) {
-            // context save failure must not fail the chat response
+          const newContext = createContextFromParsed(
+            { cleanedQuery: clarifiedQuery, filters: mergedFilters, preferences: mergedPreferences },
+            productIds
+          );
+          if (previousContext && !contextReset) {
+            newContext.turnCount = (previousContext.turnCount || 0) + 1;
           }
+          await contextService.saveContext(sessionId, sanitizeConversationContext(newContext));
+        } catch (_ctxErr) {
+          // context save failure must not fail the chat response
         }
       }
-
-      const processingTime = Date.now() - startTime;
-      await this.saveAIResponse(sessionId, responseResult.fullResponse, {
-        processingTime,
-        retrievedProducts: responseResult.relatedProducts || [],
-        responseType: responseResult.responseType || "product_query",
-        skipRAG: responseResult.responseType === "small_talk",
-        modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
-      });
-
-      return {
-        success: true,
-        processingTime,
-        responseType: responseResult.responseType || "product_query",
-        ragSkipped: responseResult.responseType === "small_talk",
-        ...responseResult,
-      };
-    } catch (error) {
-      console.error("Error:", error.message);
-      throw error;
     }
+
+    const processingTime = Date.now() - startTime;
+    await this.saveAIResponse(sessionId, responseResult.fullResponse, {
+      processingTime,
+      retrievedProducts: responseResult.relatedProducts || [],
+      responseType: responseResult.responseType || "product_query",
+      skipRAG: responseResult.responseType === "small_talk",
+      modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
+    });
+
+    return {
+      success: true,
+      processingTime,
+      responseType: responseResult.responseType || "product_query",
+      ragSkipped: responseResult.responseType === "small_talk",
+      ...responseResult,
+    };
   }
 }
 
