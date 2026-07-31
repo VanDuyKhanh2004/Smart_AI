@@ -22,7 +22,7 @@ export interface CreateAddressRequest {
   city: string;
 }
 
-export interface UpdateAddressRequest extends CreateAddressRequest {}
+export type UpdateAddressRequest = CreateAddressRequest;
 
 export interface AddressResponse {
   success: boolean;
