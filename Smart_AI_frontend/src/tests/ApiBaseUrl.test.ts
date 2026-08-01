@@ -160,7 +160,7 @@ describe('isHtmlResponse', () => {
 
   it('handles header value as number (edge case)', () => {
     const headersWithGet = {
-      get(_name: string) {
+      get() {
         return 42;
       },
     };

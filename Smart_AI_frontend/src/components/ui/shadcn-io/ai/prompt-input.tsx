@@ -44,6 +44,9 @@ export const PromptInputTextarea = ({
   maxHeight = 164,
   ...props
 }: PromptInputTextareaProps) => {
+  void minHeight;
+  void maxHeight;
+
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     if (e.key === 'Enter') {
       if (e.shiftKey) {

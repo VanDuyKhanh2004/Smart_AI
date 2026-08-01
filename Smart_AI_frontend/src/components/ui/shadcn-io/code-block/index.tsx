@@ -350,6 +350,7 @@ export const CodeBlockFilename = ({
   children,
   ...props
 }: CodeBlockFilenameProps) => {
+  void className;
   const { value: activeValue } = useContext(CodeBlockContext);
   const defaultIcon = Object.entries(filenameIconMap).find(([pattern]) => {
     const regex = new RegExp(
