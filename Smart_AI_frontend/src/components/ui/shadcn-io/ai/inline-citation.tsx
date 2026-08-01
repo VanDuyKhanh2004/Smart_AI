@@ -28,7 +28,7 @@ export const InlineCitation = ({
 }: InlineCitationProps) => (
   <span
     className={cn('group inline items-center gap-1', className)}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -40,14 +40,14 @@ export const InlineCitationText = ({
 }: InlineCitationTextProps) => (
   <span
     className={cn('transition-colors group-hover:bg-accent', className)}
-    {...(props as any)}
+    {...props}
   />
 );
 
 export type InlineCitationCardProps = ComponentProps<'div'>;
 
 export const InlineCitationCard = ({ className, ...props }: InlineCitationCardProps) => (
-  <div className={cn('inline-flex flex-col', className)} {...(props as any)} />
+  <div className={cn('inline-flex flex-col', className)} {...props} />
 );
 
 export type InlineCitationCardTriggerProps = ComponentProps<typeof Badge> & {
@@ -62,7 +62,7 @@ export const InlineCitationCardTrigger = ({
   <Badge
     className={cn('ml-1 rounded-full', className)}
     variant="secondary"
-    {...(props as any)}
+    {...props}
   >
     {sources.length ? (
       <>
@@ -81,7 +81,7 @@ export const InlineCitationCardBody = ({
   className,
   ...props
 }: InlineCitationCardBodyProps) => (
-  <div className={cn('relative w-80 p-0', className)} {...(props as any)} />
+  <div className={cn('relative w-80 p-0', className)} {...props} />
 );
 
 export type InlineCitationCarouselProps = ComponentProps<typeof Carousel>;
@@ -98,7 +98,7 @@ export const InlineCitationCarousel = ({
       <Carousel 
         className={cn('w-full', className)} 
         setApi={setApi}
-        {...(props as any)} 
+        {...props}
       >
         {children}
       </Carousel>
@@ -110,7 +110,7 @@ export type InlineCitationCarouselContentProps = ComponentProps<'div'>;
 
 export const InlineCitationCarouselContent = (
   props: InlineCitationCarouselContentProps
-) => <CarouselContent {...(props as any)} />;
+) => <CarouselContent {...props} />;
 
 export type InlineCitationCarouselItemProps = ComponentProps<'div'>;
 
@@ -118,7 +118,7 @@ export const InlineCitationCarouselItem = ({
   className,
   ...props
 }: InlineCitationCarouselItemProps) => (
-  <CarouselItem className={cn('w-full space-y-2 p-4', className)} {...(props as any)} />
+  <CarouselItem className={cn('w-full space-y-2 p-4', className)} {...props} />
 );
 
 export type InlineCitationCarouselHeaderProps = ComponentProps<'div'>;
@@ -132,7 +132,7 @@ export const InlineCitationCarouselHeader = ({
       'flex items-center justify-between gap-2 rounded-t-md bg-secondary p-2',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -166,7 +166,7 @@ export const InlineCitationCarouselIndex = ({
         'flex flex-1 items-center justify-end px-3 py-1 text-muted-foreground text-xs',
         className
       )}
-      {...(props as any)}
+      {...props}
     >
       {children ?? `${current}/${count}`}
     </div>
@@ -193,7 +193,7 @@ export const InlineCitationCarouselPrev = ({
       className={cn('shrink-0', className)}
       onClick={handleClick}
       type="button"
-      {...(props as any)}
+      {...props}
     >
       <ArrowLeftIcon className="size-4 text-muted-foreground" />
     </button>
@@ -220,7 +220,7 @@ export const InlineCitationCarouselNext = ({
       className={cn('shrink-0', className)}
       onClick={handleClick}
       type="button"
-      {...(props as any)}
+      {...props}
     >
       <ArrowRightIcon className="size-4 text-muted-foreground" />
     </button>
@@ -241,7 +241,7 @@ export const InlineCitationSource = ({
   children,
   ...props
 }: InlineCitationSourceProps) => (
-  <div className={cn('space-y-1', className)} {...(props as any)}>
+  <div className={cn('space-y-1', className)} {...props}>
     {title && (
       <h4 className="truncate font-medium text-sm leading-tight">{title}</h4>
     )}
@@ -269,7 +269,7 @@ export const InlineCitationQuote = ({
       'border-muted border-l-2 pl-3 text-muted-foreground text-sm italic',
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     {children}
   </blockquote>

@@ -19,7 +19,7 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
       '[&>div]:max-w-[80%]',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -37,7 +37,7 @@ export const MessageContent = ({
       'group-[.is-assistant]:bg-secondary group-[.is-assistant]:text-foreground',
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     <div className="is-user:dark">{children}</div>
   </div>
@@ -56,7 +56,7 @@ export const MessageAvatar = ({
 }: MessageAvatarProps) => (
   <Avatar
     className={cn('size-8 ring ring-1 ring-border', className)}
-    {...(props as any)}
+    {...props}
   >
     <AvatarImage alt="" className="mt-0 mb-0" src={src} />
     <AvatarFallback>{name?.slice(0, 2) || 'ME'}</AvatarFallback>

@@ -72,7 +72,7 @@ export const Branch = ({
     <BranchContext.Provider value={contextValue}>
       <div
         className={cn('grid w-full gap-2 [&>div]:pb-0', className)}
-        {...(props as any)}
+        {...props}
       />
     </BranchContext.Provider>
   );
@@ -98,7 +98,7 @@ export const BranchMessages = ({ children, ...props }: BranchMessagesProps) => {
         index === currentBranch ? 'block' : 'hidden'
       )}
       key={branch.key}
-      {...(props as any)}
+      {...props}
     >
       {branch}
     </div>
@@ -128,7 +128,7 @@ export const BranchSelector = ({
         from === 'assistant' ? 'justify-start' : 'justify-end',
         className
       )}
-      {...(props as any)}
+      {...props}
     />
   );
 };
@@ -156,7 +156,7 @@ export const BranchPrevious = ({
       size="icon"
       type="button"
       variant="ghost"
-      {...(props as any)}
+      {...props}
     >
       {children ?? <ChevronLeftIcon size={14} />}
     </Button>
@@ -186,7 +186,7 @@ export const BranchNext = ({
       size="icon"
       type="button"
       variant="ghost"
-      {...(props as any)}
+      {...props}
     >
       {children ?? <ChevronRightIcon size={14} />}
     </Button>
@@ -204,7 +204,7 @@ export const BranchPage = ({ className, ...props }: BranchPageProps) => {
         'font-medium text-muted-foreground text-xs tabular-nums',
         className
       )}
-      {...(props as any)}
+      {...props}
     >
       {currentBranch + 1} of {totalBranches}
     </span>

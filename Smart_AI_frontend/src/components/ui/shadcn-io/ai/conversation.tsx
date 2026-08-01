@@ -15,7 +15,7 @@ export const Conversation = ({ className, ...props }: ConversationProps) => (
     initial="smooth"
     resize="smooth"
     role="log"
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -27,7 +27,7 @@ export const ConversationContent = ({
   className,
   ...props
 }: ConversationContentProps) => (
-  <StickToBottom.Content className={cn('p-4', className)} {...(props as any)} />
+  <StickToBottom.Content className={cn('p-4', className)} {...props} />
 );
 
 export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
@@ -53,7 +53,7 @@ export const ConversationScrollButton = ({
         size="icon"
         type="button"
         variant="outline"
-        {...(props as any)}
+        {...props}
       >
         <ArrowDownIcon className="size-4" />
       </Button>

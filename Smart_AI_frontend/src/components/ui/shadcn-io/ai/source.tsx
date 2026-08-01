@@ -9,7 +9,7 @@ export type SourcesProps = HTMLAttributes<HTMLDivElement>;
 export const Sources = ({ className, ...props }: SourcesProps) => (
   <div
     className={cn('not-prose mb-4 text-primary text-xs', className)}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -25,7 +25,7 @@ export const SourcesTrigger = ({
 }: SourcesTriggerProps) => {
   void className;
   return (
-    <button className="flex items-center gap-2" type="button" {...(props as any)}>
+    <button className="flex items-center gap-2" type="button" {...props}>
       {children ?? (
         <>
           <p className="font-medium">Used {count} sources</p>
@@ -47,7 +47,7 @@ export const SourcesContent = ({
       'mt-3 flex w-fit flex-col gap-2',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -59,7 +59,7 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => (
     href={href}
     rel="noreferrer"
     target="_blank"
-    {...(props as any)}
+    {...props}
   >
     {children ?? (
       <>

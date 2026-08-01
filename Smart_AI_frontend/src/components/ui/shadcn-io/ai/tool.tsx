@@ -19,7 +19,7 @@ export type ToolProps = ComponentProps<'div'>;
 export const Tool = ({ className, ...props }: ToolProps) => (
   <div
     className={cn('not-prose mb-4 w-full rounded-md border', className)}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -63,7 +63,7 @@ export const ToolHeader = ({
       'flex w-full items-center justify-between gap-4 p-3',
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     <div className="flex items-center gap-2">
       <WrenchIcon className="size-4 text-muted-foreground" />
@@ -82,7 +82,7 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
       'text-popover-foreground outline-none',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -91,7 +91,7 @@ export type ToolInputProps = ComponentProps<'div'> & {
 };
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn('space-y-2 overflow-hidden p-4', className)} {...(props as any)}>
+  <div className={cn('space-y-2 overflow-hidden p-4', className)} {...props}>
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       Parameters
     </h4>
@@ -117,7 +117,7 @@ export const ToolOutput = ({
   }
 
   return (
-    <div className={cn('space-y-2 p-4', className)} {...(props as any)}>
+    <div className={cn('space-y-2 p-4', className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         {errorText ? 'Error' : 'Result'}
       </h4>

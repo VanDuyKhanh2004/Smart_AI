@@ -27,7 +27,7 @@ export const PromptInput = ({ className, ...props }: PromptInputProps) => (
       'w-full divide-y overflow-hidden rounded-xl border bg-background shadow-sm',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -77,7 +77,7 @@ export const PromptInputTextarea = ({
       }}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
-      {...(props as any)}
+      {...props}
     />
   );
 };
@@ -90,7 +90,7 @@ export const PromptInputToolbar = ({
 }: PromptInputToolbarProps) => (
   <div
     className={cn('flex items-center justify-between p-1', className)}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -106,7 +106,7 @@ export const PromptInputTools = ({
       '[&_button:first-child]:rounded-bl-xl',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -132,7 +132,7 @@ export const PromptInputButton = ({
       size={newSize}
       type="button"
       variant={variant}
-      {...(props as any)}
+      {...props}
     />
   );
 };
@@ -165,7 +165,7 @@ export const PromptInputSubmit = ({
       size={size}
       type="submit"
       variant={variant}
-      {...(props as any)}
+      {...props}
     >
       {children ?? Icon}
     </Button>
@@ -175,7 +175,7 @@ export const PromptInputSubmit = ({
 export type PromptInputModelSelectProps = ComponentProps<typeof Select>;
 
 export const PromptInputModelSelect = (props: PromptInputModelSelectProps) => (
-  <Select {...(props as any)} />
+  <Select {...props} />
 );
 
 export type PromptInputModelSelectTriggerProps = ComponentProps<
@@ -192,7 +192,7 @@ export const PromptInputModelSelectTrigger = ({
       'hover:bg-accent hover:text-foreground [&[aria-expanded="true"]]:bg-accent [&[aria-expanded="true"]]:text-foreground',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -204,7 +204,7 @@ export const PromptInputModelSelectContent = ({
   className,
   ...props
 }: PromptInputModelSelectContentProps) => (
-  <SelectContent className={cn(className)} {...(props as any)} />
+  <SelectContent className={cn(className)} {...props} />
 );
 
 export type PromptInputModelSelectItemProps = ComponentProps<typeof SelectItem>;
@@ -213,7 +213,7 @@ export const PromptInputModelSelectItem = ({
   className,
   ...props
 }: PromptInputModelSelectItemProps) => (
-  <SelectItem className={cn(className)} {...(props as any)} />
+  <SelectItem className={cn(className)} {...props} />
 );
 
 export type PromptInputModelSelectValueProps = ComponentProps<
@@ -224,5 +224,5 @@ export const PromptInputModelSelectValue = ({
   className,
   ...props
 }: PromptInputModelSelectValueProps) => (
-  <SelectValue className={cn(className)} {...(props as any)} />
+  <SelectValue className={cn(className)} {...props} />
 );
