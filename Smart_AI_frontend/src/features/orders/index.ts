@@ -3,7 +3,8 @@ export { default as CheckoutForm } from './components/CheckoutForm';
 export { default as OrderSummary } from './components/OrderSummary';
 
 // Components - named exports
-export { OrderStatusBadge, getOrderStatusColor, getOrderStatusLabel } from './components/OrderStatusBadge';
+export { OrderStatusBadge } from './components/OrderStatusBadge';
+export { getOrderStatusColor, getOrderStatusLabel } from './components/order-status-meta';
 export { OrderCard } from './components/OrderCard';
 export { OrderDetailDialog } from './components/OrderDetailDialog';
 export { OrderFilters } from './components/OrderFilters';
