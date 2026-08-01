@@ -39,14 +39,17 @@ export const Task = ({
   className,
   children,
   ...props
-}: TaskProps) => (
-  <div
-    className={cn(className)}
-    {...(props as any)}
-  >
-    {children}
-  </div>
-);
+}: TaskProps) => {
+  void defaultOpen;
+  return (
+    <div
+      className={cn(className)}
+      {...(props as any)}
+    >
+      {children}
+    </div>
+  );
+};
 
 export type TaskTriggerProps = HTMLAttributes<HTMLButtonElement> & {
   title: string;

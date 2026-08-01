@@ -108,6 +108,7 @@ export const ReasoningTrigger = memo(
     children,
     ...props
   }: ReasoningTriggerProps) => {
+    void title;
     const { isStreaming, isOpen, setIsOpen, duration } = useReasoning();
 
     return (

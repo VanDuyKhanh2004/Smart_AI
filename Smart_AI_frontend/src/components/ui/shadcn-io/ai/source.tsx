@@ -22,16 +22,19 @@ export const SourcesTrigger = ({
   count,
   children,
   ...props
-}: SourcesTriggerProps) => (
-  <button className="flex items-center gap-2" type="button" {...(props as any)}>
-    {children ?? (
-      <>
-        <p className="font-medium">Used {count} sources</p>
-        <ChevronDownIcon className="h-4 w-4" />
-      </>
-    )}
-  </button>
-);
+}: SourcesTriggerProps) => {
+  void className;
+  return (
+    <button className="flex items-center gap-2" type="button" {...(props as any)}>
+      {children ?? (
+        <>
+          <p className="font-medium">Used {count} sources</p>
+          <ChevronDownIcon className="h-4 w-4" />
+        </>
+      )}
+    </button>
+  );
+};
 
 export type SourcesContentProps = HTMLAttributes<HTMLDivElement>;
 

@@ -172,127 +172,184 @@ export type ResponseProps = HTMLAttributes<HTMLDivElement> & {
 };
 
 const components: Options['components'] = {
-  ol: ({ node, children, className, ...props }) => (
-    <ol className={cn('ml-4 list-outside list-decimal', className)} {...(props as any)}>
-      {children}
-    </ol>
-  ),
-  li: ({ node, children, className, ...props }) => (
-    <li className={cn('py-1', className)} {...(props as any)}>
-      {children}
-    </li>
-  ),
-  ul: ({ node, children, className, ...props }) => (
-    <ul className={cn('ml-4 list-outside list-disc', className)} {...(props as any)}>
-      {children}
-    </ul>
-  ),
-  hr: ({ node, className, ...props }) => (
-    <hr className={cn('my-6 border-border', className)} {...(props as any)} />
-  ),
-  strong: ({ node, children, className, ...props }) => (
-    <span className={cn('font-semibold', className)} {...(props as any)}>
-      {children}
-    </span>
-  ),
-  a: ({ node, children, className, ...props }) => (
-    <a
-      className={cn('font-medium text-primary underline', className)}
-      rel="noreferrer"
-      target="_blank"
-      {...(props as any)}
-    >
-      {children}
-    </a>
-  ),
-  h1: ({ node, children, className, ...props }) => (
-    <h1
-      className={cn('mt-6 mb-2 font-semibold text-3xl', className)}
-      {...(props as any)}
-    >
-      {children}
-    </h1>
-  ),
-  h2: ({ node, children, className, ...props }) => (
-    <h2
-      className={cn('mt-6 mb-2 font-semibold text-2xl', className)}
-      {...(props as any)}
-    >
-      {children}
-    </h2>
-  ),
-  h3: ({ node, children, className, ...props }) => (
-    <h3 className={cn('mt-6 mb-2 font-semibold text-xl', className)} {...(props as any)}>
-      {children}
-    </h3>
-  ),
-  h4: ({ node, children, className, ...props }) => (
-    <h4 className={cn('mt-6 mb-2 font-semibold text-lg', className)} {...(props as any)}>
-      {children}
-    </h4>
-  ),
-  h5: ({ node, children, className, ...props }) => (
-    <h5
-      className={cn('mt-6 mb-2 font-semibold text-base', className)}
-      {...(props as any)}
-    >
-      {children}
-    </h5>
-  ),
-  h6: ({ node, children, className, ...props }) => (
-    <h6 className={cn('mt-6 mb-2 font-semibold text-sm', className)} {...(props as any)}>
-      {children}
-    </h6>
-  ),
-  table: ({ node, children, className, ...props }) => (
-    <div className="my-4 overflow-x-auto">
-      <table
-        className={cn('w-full border-collapse border border-border', className)}
+  ol: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <ol className={cn('ml-4 list-outside list-decimal', className)} {...(props as any)}>
+        {children}
+      </ol>
+    );
+  },
+  li: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <li className={cn('py-1', className)} {...(props as any)}>
+        {children}
+      </li>
+    );
+  },
+  ul: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <ul className={cn('ml-4 list-outside list-disc', className)} {...(props as any)}>
+        {children}
+      </ul>
+    );
+  },
+  hr: ({ node, className, ...props }) => {
+    void node;
+    return (
+      <hr className={cn('my-6 border-border', className)} {...(props as any)} />
+    );
+  },
+  strong: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <span className={cn('font-semibold', className)} {...(props as any)}>
+        {children}
+      </span>
+    );
+  },
+  a: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <a
+        className={cn('font-medium text-primary underline', className)}
+        rel="noreferrer"
+        target="_blank"
         {...(props as any)}
       >
         {children}
-      </table>
-    </div>
-  ),
-  thead: ({ node, children, className, ...props }) => (
-    <thead className={cn('bg-muted/50', className)} {...(props as any)}>
-      {children}
-    </thead>
-  ),
-  tbody: ({ node, children, className, ...props }) => (
-    <tbody className={cn('divide-y divide-border', className)} {...(props as any)}>
-      {children}
-    </tbody>
-  ),
-  tr: ({ node, children, className, ...props }) => (
-    <tr className={cn('border-border border-b', className)} {...(props as any)}>
-      {children}
-    </tr>
-  ),
-  th: ({ node, children, className, ...props }) => (
-    <th
-      className={cn('px-4 py-2 text-left font-semibold text-sm', className)}
-      {...(props as any)}
-    >
-      {children}
-    </th>
-  ),
-  td: ({ node, children, className, ...props }) => (
-    <td className={cn('px-4 py-2 text-sm', className)} {...(props as any)}>
-      {children}
-    </td>
-  ),
-  blockquote: ({ node, children, className, ...props }) => (
-    <blockquote
-      className={cn(
-        'my-4 border-muted-foreground/30 border-l-4 pl-4 text-muted-foreground italic',
-        className
-      )}
-      {...(props as any)}
-    >
-      {children}
-    </blockquote>
-  ),
+      </a>
+    );
+  },
+  h1: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <h1
+        className={cn('mt-6 mb-2 font-semibold text-3xl', className)}
+        {...(props as any)}
+      >
+        {children}
+      </h1>
+    );
+  },
+  h2: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <h2
+        className={cn('mt-6 mb-2 font-semibold text-2xl', className)}
+        {...(props as any)}
+      >
+        {children}
+      </h2>
+    );
+  },
+  h3: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <h3 className={cn('mt-6 mb-2 font-semibold text-xl', className)} {...(props as any)}>
+        {children}
+      </h3>
+    );
+  },
+  h4: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <h4 className={cn('mt-6 mb-2 font-semibold text-lg', className)} {...(props as any)}>
+        {children}
+      </h4>
+    );
+  },
+  h5: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <h5
+        className={cn('mt-6 mb-2 font-semibold text-base', className)}
+        {...(props as any)}
+      >
+        {children}
+      </h5>
+    );
+  },
+  h6: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <h6 className={cn('mt-6 mb-2 font-semibold text-sm', className)} {...(props as any)}>
+        {children}
+      </h6>
+    );
+  },
+  table: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <div className="my-4 overflow-x-auto">
+        <table
+          className={cn('w-full border-collapse border border-border', className)}
+          {...(props as any)}
+        >
+          {children}
+        </table>
+      </div>
+    );
+  },
+  thead: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <thead className={cn('bg-muted/50', className)} {...(props as any)}>
+        {children}
+      </thead>
+    );
+  },
+  tbody: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <tbody className={cn('divide-y divide-border', className)} {...(props as any)}>
+        {children}
+      </tbody>
+    );
+  },
+  tr: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <tr className={cn('border-border border-b', className)} {...(props as any)}>
+        {children}
+      </tr>
+    );
+  },
+  th: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <th
+        className={cn('px-4 py-2 text-left font-semibold text-sm', className)}
+        {...(props as any)}
+      >
+        {children}
+      </th>
+    );
+  },
+  td: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <td className={cn('px-4 py-2 text-sm', className)} {...(props as any)}>
+        {children}
+      </td>
+    );
+  },
+  blockquote: ({ node, children, className, ...props }) => {
+    void node;
+    return (
+      <blockquote
+        className={cn(
+          'my-4 border-muted-foreground/30 border-l-4 pl-4 text-muted-foreground italic',
+          className
+        )}
+        {...(props as any)}
+      >
+        {children}
+      </blockquote>
+    );
+  },
   code: ({ node, className, ...props }) => {
     const inline = node?.position?.start.line === node?.position?.end.line;
 
