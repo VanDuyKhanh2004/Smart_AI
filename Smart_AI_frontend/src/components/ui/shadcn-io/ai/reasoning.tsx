@@ -88,7 +88,7 @@ export const Reasoning = memo(
       >
         <div
           className={cn('not-prose mb-4', className)}
-          {...(props as any)}
+          {...props}
         >
           {children}
         </div>
@@ -119,7 +119,7 @@ export const ReasoningTrigger = memo(
         )}
         onClick={() => setIsOpen(!isOpen)}
         type="button"
-        {...(props as any)}
+        {...props}
       >
         {children ?? (
           <>
@@ -156,7 +156,7 @@ export const ReasoningContent = memo(
           'mt-4 text-sm',
           className
         )}
-        {...(props as any)}
+        {...props}
       >
         <Response className="grid gap-2">{children}</Response>
       </div>

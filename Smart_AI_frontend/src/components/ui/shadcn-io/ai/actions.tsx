@@ -7,7 +7,7 @@ import type { ComponentProps } from 'react';
 export type ActionsProps = ComponentProps<'div'>;
 
 export const Actions = ({ className, children, ...props }: ActionsProps) => (
-  <div className={cn('flex items-center gap-1', className)} {...(props as any)}>
+  <div className={cn('flex items-center gap-1', className)} {...props}>
     {children}
   </div>
 );
@@ -35,7 +35,7 @@ export const Action = ({
     title={tooltip}
     type="button"
     variant={variant}
-    {...(props as any)}
+    {...props}
   >
     {children}
     <span className="sr-only">{label || tooltip}</span>

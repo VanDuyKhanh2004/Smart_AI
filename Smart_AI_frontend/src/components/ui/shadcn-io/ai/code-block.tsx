@@ -40,7 +40,7 @@ export const CodeBlock = ({
         'relative w-full overflow-hidden rounded-md border bg-background text-foreground',
         className
       )}
-      {...(props as any)}
+      {...props}
     >
       <div className="relative">
         <SyntaxHighlighter
@@ -140,7 +140,7 @@ export const CodeBlockCopyButton = ({
       onClick={copyToClipboard}
       size="icon"
       variant="ghost"
-      {...(props as any)}
+      {...props}
     >
       {children ?? <Icon size={14} />}
     </Button>

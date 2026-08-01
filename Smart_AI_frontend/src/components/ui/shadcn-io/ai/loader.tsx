@@ -89,7 +89,7 @@ export const Loader = ({ className, size = 16, ...props }: LoaderProps) => (
       'inline-flex animate-spin items-center justify-center',
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     <LoaderIcon size={size} />
   </div>

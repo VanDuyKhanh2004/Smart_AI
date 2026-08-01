@@ -58,7 +58,7 @@ export const WebPreview = ({
           'flex size-full flex-col rounded-lg border bg-card',
           className
         )}
-        {...(props as any)}
+        {...props}
       >
         {children}
       </div>
@@ -75,7 +75,7 @@ export const WebPreviewNavigation = ({
 }: WebPreviewNavigationProps) => (
   <div
     className={cn('flex items-center gap-1 border-b p-2', className)}
-    {...(props as any)}
+    {...props}
   >
     {children}
   </div>
@@ -99,7 +99,7 @@ export const WebPreviewNavigationButton = ({
     size="sm"
     title={tooltip}
     variant="ghost"
-    {...(props as any)}
+    {...props}
   >
     {children}
   </Button>
@@ -135,7 +135,7 @@ export const WebPreviewUrl = ({
         defaultValue={url}
         onKeyDown={handleKeyDown}
         placeholder="Enter URL..."
-        {...(props as any)}
+        {...props}
       />
     );
   }
@@ -147,7 +147,7 @@ export const WebPreviewUrl = ({
       onKeyDown={handleKeyDown}
       placeholder="Enter URL..."
       value={value ?? url}
-      {...(props as any)}
+      {...props}
     />
   );
 };
@@ -171,7 +171,7 @@ export const WebPreviewBody = ({
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
         src={(src ?? url) || undefined}
         title="Preview"
-        {...(props as any)}
+        {...props}
       />
       {loading}
     </div>
@@ -197,7 +197,7 @@ export const WebPreviewConsole = ({
   return (
     <div
       className={cn('border-t bg-muted/50 font-mono text-sm', className)}
-      {...(props as any)}
+      {...props}
     >
       <Button
         className="flex w-full items-center justify-between p-4 text-left font-medium hover:bg-muted/50"

@@ -11,7 +11,7 @@ export const Suggestions = ({
   children,
   ...props
 }: SuggestionsProps) => (
-  <div className={cn('w-full overflow-x-auto whitespace-nowrap', className)} {...(props as any)}>
+  <div className={cn('w-full overflow-x-auto whitespace-nowrap', className)} {...props}>
     <div className={cn('flex w-max flex-nowrap items-center gap-2')}>
       {children}
     </div>
@@ -43,7 +43,7 @@ export const Suggestion = ({
       size={size}
       type="button"
       variant={variant}
-      {...(props as any)}
+      {...props}
     >
       {children || suggestion}
     </Button>

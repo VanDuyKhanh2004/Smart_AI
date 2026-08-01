@@ -16,7 +16,7 @@ export const TaskItemFile = ({
       'inline-flex items-center gap-1 rounded-md border bg-secondary px-1.5 py-0.5 text-foreground text-xs',
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     {children}
   </div>
@@ -25,7 +25,7 @@ export const TaskItemFile = ({
 export type TaskItemProps = ComponentProps<'div'>;
 
 export const TaskItem = ({ children, className, ...props }: TaskItemProps) => (
-  <div className={cn('text-muted-foreground text-sm', className)} {...(props as any)}>
+  <div className={cn('text-muted-foreground text-sm', className)} {...props}>
     {children}
   </div>
 );
@@ -44,7 +44,7 @@ export const Task = ({
   return (
     <div
       className={cn(className)}
-      {...(props as any)}
+      {...props}
     >
       {children}
     </div>
@@ -61,7 +61,7 @@ export const TaskTrigger = ({
   title,
   ...props
 }: TaskTriggerProps) => (
-  <div className={cn('group', className)} {...(props as any)}>
+  <div className={cn('group', className)} {...(props as HTMLAttributes<HTMLDivElement>)}>
     {children ?? (
       <div className="flex cursor-pointer items-center gap-2 text-muted-foreground hover:text-foreground">
         <SearchIcon className="size-4" />
@@ -84,7 +84,7 @@ export const TaskContent = ({
       'text-popover-foreground outline-none',
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     <div className="mt-4 space-y-2 border-muted border-l-2 pl-4">
       {children}
