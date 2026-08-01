@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { OrderStatusBadge, getOrderStatusLabel } from "./OrderStatusBadge";
+import { OrderStatusBadge } from "./OrderStatusBadge";
+import { getOrderStatusLabel } from "./order-status-meta";
 import type { Order, OrderStatus, UpdateOrderStatusRequest } from "@/types/order.type";
 import { Loader2 } from "lucide-react";
 import { getAllowedNextStatuses } from "../utils/orderStatusTransitions";
