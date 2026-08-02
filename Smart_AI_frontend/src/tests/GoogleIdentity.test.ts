@@ -9,8 +9,21 @@ import {
 const mockInitialize = vi.fn();
 const mockRenderButton = vi.fn();
 
+type GoogleIdentityMock = {
+  google?: {
+    accounts?: {
+      id?: {
+        initialize: typeof mockInitialize;
+        renderButton: typeof mockRenderButton;
+      };
+    };
+  };
+};
+
+const googleWindowMock = window as unknown as GoogleIdentityMock;
+
 function setupGIS() {
-  (window as any).google = {
+  googleWindowMock.google = {
     accounts: {
       id: {
         initialize: mockInitialize,
@@ -26,7 +39,7 @@ describe('initGoogleIdentity', () => {
   beforeEach(() => {
     __resetGoogleIdentity();
     vi.clearAllMocks();
-    delete (window as any).google;
+    delete googleWindowMock.google;
   });
 
   it('returns false for empty client ID', () => {
@@ -92,7 +105,7 @@ describe('setGoogleCallback', () => {
   beforeEach(() => {
     __resetGoogleIdentity();
     vi.clearAllMocks();
-    delete (window as any).google;
+    delete googleWindowMock.google;
   });
 
   it('updates the callback used by the GIS dispatcher', () => {
@@ -139,7 +152,7 @@ describe('renderGoogleButton', () => {
   beforeEach(() => {
     __resetGoogleIdentity();
     vi.clearAllMocks();
-    delete (window as any).google;
+    delete googleWindowMock.google;
   });
 
   it('renders the button when GIS is ready', () => {
@@ -195,7 +208,7 @@ describe('full integration: login then linking flow', () => {
   beforeEach(() => {
     __resetGoogleIdentity();
     vi.clearAllMocks();
-    delete (window as any).google;
+    delete googleWindowMock.google;
   });
 
   it('supports switching callback from login to linking', () => {
@@ -237,7 +250,7 @@ describe('stale callback after unmount', () => {
   beforeEach(() => {
     __resetGoogleIdentity();
     vi.clearAllMocks();
-    delete (window as any).google;
+    delete googleWindowMock.google;
   });
 
   it('fires callback after setGoogleCallback was called with a new function', () => {
