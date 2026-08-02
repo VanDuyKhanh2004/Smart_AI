@@ -293,7 +293,7 @@ export const CodeBlock = ({
     <CodeBlockContext.Provider value={{ value, onValueChange, data }}>
       <div
         className={cn('size-full overflow-hidden rounded-md border', className)}
-        {...(props as any)}
+        {...props}
       />
     </CodeBlockContext.Provider>
   );
@@ -310,7 +310,7 @@ export const CodeBlockHeader = ({
       'flex flex-row items-center border-b bg-secondary p-1',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
@@ -331,7 +331,7 @@ export const CodeBlockFiles = ({
   return (
     <div
       className={cn('flex grow flex-row items-center gap-2', className)}
-      {...(props as any)}
+      {...props}
     >
       {data.map(children)}
     </div>
@@ -367,7 +367,7 @@ export const CodeBlockFilename = ({
   return (
     <div
       className="flex items-center gap-2 bg-secondary px-4 py-1.5 text-muted-foreground text-xs"
-      {...(props as any)}
+      {...props}
     >
       {Icon && <Icon className="h-4 w-4 shrink-0" />}
       <span className="flex-1 truncate">{children}</span>
@@ -380,7 +380,7 @@ export type CodeBlockSelectProps = ComponentProps<typeof Select>;
 export const CodeBlockSelect = (props: CodeBlockSelectProps) => {
   const { value, onValueChange } = useContext(CodeBlockContext);
 
-  return <Select onValueChange={onValueChange} value={value} {...(props as any)} />;
+  return <Select onValueChange={onValueChange} value={value} {...props} />;
 };
 
 export type CodeBlockSelectTriggerProps = ComponentProps<typeof SelectTrigger>;
@@ -394,14 +394,14 @@ export const CodeBlockSelectTrigger = ({
       'w-fit border-none text-muted-foreground text-xs shadow-none',
       className
     )}
-    {...(props as any)}
+    {...props}
   />
 );
 
 export type CodeBlockSelectValueProps = ComponentProps<typeof SelectValue>;
 
 export const CodeBlockSelectValue = (props: CodeBlockSelectValueProps) => (
-  <SelectValue {...(props as any)} />
+  <SelectValue {...props} />
 );
 
 export type CodeBlockSelectContentProps = Omit<
@@ -417,7 +417,7 @@ export const CodeBlockSelectContent = ({
 }: CodeBlockSelectContentProps) => {
   const { data } = useContext(CodeBlockContext);
 
-  return <SelectContent {...(props as any)}>{data.map(children)}</SelectContent>;
+  return <SelectContent {...props}>{data.map(children)}</SelectContent>;
 };
 
 export type CodeBlockSelectItemProps = ComponentProps<typeof SelectItem>;
@@ -426,7 +426,7 @@ export const CodeBlockSelectItem = ({
   className,
   ...props
 }: CodeBlockSelectItemProps) => (
-  <SelectItem className={cn('text-sm', className)} {...(props as any)} />
+  <SelectItem className={cn('text-sm', className)} {...props} />
 );
 
 export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
@@ -480,7 +480,7 @@ export const CodeBlockCopyButton = ({
       onClick={copyToClipboard}
       size="icon"
       variant="ghost"
-      {...(props as any)}
+      {...props}
     >
       {children ?? <Icon className="text-muted-foreground" size={14} />}
     </Button>
@@ -490,7 +490,7 @@ export const CodeBlockCopyButton = ({
 type CodeBlockFallbackProps = HTMLAttributes<HTMLDivElement>;
 
 const CodeBlockFallback = ({ children, ...props }: CodeBlockFallbackProps) => (
-  <div {...(props as any)}>
+  <div {...props}>
     <pre className="w-full">
       <code>
         {children
@@ -516,7 +516,7 @@ export type CodeBlockBodyProps = Omit<
 export const CodeBlockBody = ({ children, ...props }: CodeBlockBodyProps) => {
   const { data } = useContext(CodeBlockContext);
 
-  return <div {...(props as any)}>{data.map(children)}</div>;
+  return <div {...props}>{data.map(children)}</div>;
 };
 
 export type CodeBlockItemProps = HTMLAttributes<HTMLDivElement> & {
@@ -549,7 +549,7 @@ export const CodeBlockItem = ({
         lineNumbers && lineNumberClassNames,
         className
       )}
-      {...(props as any)}
+      {...props}
     >
       {children}
     </div>
@@ -609,13 +609,13 @@ export const CodeBlockContent = ({
   }, [children, language, themes, syntaxHighlighting]);
 
   if (!syntaxHighlighting || isLoading) {
-    return <CodeBlockFallback {...(props as any)}>{children}</CodeBlockFallback>;
+    return <CodeBlockFallback {...props}>{children}</CodeBlockFallback>;
   }
 
   return (
     <div
       dangerouslySetInnerHTML={{ __html: highlightedCode }}
-      {...(props as any)}
+      {...props}
     />
   );
 };
