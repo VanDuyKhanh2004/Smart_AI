@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/auth.service';
 import apiClient from '@/lib/axios';
+import type { InternalAxiosRequestConfig } from 'axios';
 
 vi.mock('@/services/auth.service', () => ({
   authService: {
@@ -27,13 +28,26 @@ function setTokens(access: string, refresh: string) {
   localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
 }
 
+type AxiosRequestFulfilledHandler = (
+  config: InternalAxiosRequestConfig
+) => InternalAxiosRequestConfig | Promise<InternalAxiosRequestConfig>;
+
+type AxiosInterceptorHandlers = {
+  handlers?: Array<{
+    fulfilled?: AxiosRequestFulfilledHandler;
+    rejected?: (error: unknown) => unknown;
+  }>;
+};
+
 function getRequestHandler() {
-  const handlers = (apiClient.interceptors.request as any).handlers;
+  const handlers = (apiClient.interceptors.request as unknown as AxiosInterceptorHandlers)
+    .handlers;
   return handlers?.[0]?.fulfilled;
 }
 
 function getResponseErrorHandler() {
-  const handlers = (apiClient.interceptors.response as any).handlers;
+  const handlers = (apiClient.interceptors.response as unknown as AxiosInterceptorHandlers)
+    .handlers;
   return handlers?.[0]?.rejected;
 }
 
@@ -167,8 +181,8 @@ describe('Axios request interceptor', () => {
     localStorage.setItem(ACCESS_TOKEN_KEY, 'my-bearer-token');
     const handler = getRequestHandler();
     expect(handler).toBeDefined();
-    const config = { headers: {} } as any;
-    const result = await handler(config);
+    const config = { headers: {} } as InternalAxiosRequestConfig;
+    const result = await handler!(config);
     expect(result.headers.Authorization).toBe('Bearer my-bearer-token');
   });
 
@@ -176,8 +190,8 @@ describe('Axios request interceptor', () => {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     const handler = getRequestHandler();
     expect(handler).toBeDefined();
-    const config = { headers: {} } as any;
-    const result = await handler(config);
+    const config = { headers: {} } as InternalAxiosRequestConfig;
+    const result = await handler!(config);
     expect(result.headers.Authorization).toBeUndefined();
   });
 });
@@ -194,7 +208,7 @@ describe('Axios response interceptor', () => {
       response: { status: 401 },
       config: { url: '/auth/refresh', headers: {} },
     };
-    await expect(handler(error)).rejects.toBe(error);
+    await expect(handler!(error)).rejects.toBe(error);
   });
 
   it('passes through non-401 errors without refresh', async () => {
@@ -204,7 +218,7 @@ describe('Axios response interceptor', () => {
       response: { status: 500 },
       config: { url: '/auth/me', headers: {} },
     };
-    await expect(handler(error)).rejects.toBe(error);
+    await expect(handler!(error)).rejects.toBe(error);
   });
 
   it('skips refresh when _retry is already true', async () => {
@@ -214,7 +228,7 @@ describe('Axios response interceptor', () => {
       response: { status: 401 },
       config: { url: '/auth/me', headers: {}, _retry: true },
     };
-    await expect(handler(error)).rejects.toBe(error);
+    await expect(handler!(error)).rejects.toBe(error);
   });
 
   it('redirects to /login when no refresh token is in localStorage', async () => {
@@ -231,7 +245,7 @@ describe('Axios response interceptor', () => {
       value: { href: '/login' },
       writable: true,
     });
-    await expect(handler(error)).rejects.toBe(error);
+    await expect(handler!(error)).rejects.toBe(error);
     Object.defineProperty(window, 'location', {
       value: { href: originalLocation },
       writable: true,
