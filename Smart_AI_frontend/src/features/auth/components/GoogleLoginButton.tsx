@@ -76,7 +76,7 @@ const GoogleLoginButton: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [from, setAuth]);
+  }, [from, setAuth, navigate]);
 
   useEffect(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
