@@ -1,9 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import AppRouter from '@/routes/AppRouter'
-import { FloatingChat } from '@/features/chat'
 import { useAuthStore } from '@/stores/authStore'
 import { useCompareStore } from '@/stores/compareStore'
 import './App.css'
+
+const FloatingChat = lazy(() =>
+  import('@/features/chat').then((module) => ({
+    default: module.FloatingChat,
+  }))
+)
 
 function App() {
   const initialize = useAuthStore((state) => state.initialize)
@@ -21,7 +26,9 @@ function App() {
   return (
     <>
       <AppRouter />
-      <FloatingChat />
+      <Suspense fallback={null}>
+        <FloatingChat />
+      </Suspense>
     </>
   )
 }
