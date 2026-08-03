@@ -5,6 +5,34 @@ import { useAuthStore } from "@/stores/authStore";
 import { initGoogleIdentity, setGoogleCallback, renderGoogleButton } from "@/lib/googleIdentity";
 import { resolveBackendOrigin } from "@/lib/apiBaseUrl";
 
+const getGoogleLoginErrorMessage = (error: unknown): string => {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error
+  ) {
+    const data = (
+      error as {
+        response?: {
+          data?: {
+            message?: string;
+            error?: { message?: string };
+          };
+        };
+      }
+    ).response?.data;
+
+    if (data?.message) return data.message;
+    if (data?.error?.message) return data.error.message;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "Đăng nhập Google thất bại";
+};
+
 const GoogleLoginButton: React.FC = () => {
   const buttonRef = useRef<HTMLDivElement>(null);
 
@@ -43,13 +71,8 @@ const GoogleLoginButton: React.FC = () => {
       navigate(from, {
         replace: true,
       });
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message ||
-          err.response?.data?.error?.message ||
-          err.message ||
-          "Đăng nhập Google thất bại",
-      );
+    } catch (err) {
+      setError(getGoogleLoginErrorMessage(err));
     } finally {
       setIsLoading(false);
     }

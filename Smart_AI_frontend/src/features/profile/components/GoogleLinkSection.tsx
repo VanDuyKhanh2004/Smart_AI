@@ -5,6 +5,30 @@ import { authService } from '@/services/auth.service';
 import { useAuthStore } from '@/stores/authStore';
 import { initGoogleIdentity, setGoogleCallback, renderGoogleButton } from '@/lib/googleIdentity';
 
+const getGoogleApiErrorMessage = (error: unknown): string | undefined => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error
+  ) {
+    const data = (
+      error as {
+        response?: {
+          data?: {
+            message?: string;
+            error?: { message?: string };
+          };
+        };
+      }
+    ).response?.data;
+
+    if (data?.error?.message) return data.error.message;
+    if (data?.message) return data.message;
+  }
+
+  return undefined;
+};
+
 interface GoogleLinkSectionProps {
   onSuccess?: (message: string) => void;
   onError?: (message: string) => void;
@@ -33,11 +57,9 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
         if (!mounted.current) return;
         setUser(res.data.user);
         onSuccess?.('Đã liên kết tài khoản Google thành công');
-      } catch (err: any) {
+      } catch (err) {
         if (!mounted.current) return;
-        const msg = err.response?.data?.error?.message
-          || err.response?.data?.message
-          || 'Liên kết Google thất bại';
+        const msg = getGoogleApiErrorMessage(err) ?? 'Liên kết Google thất bại';
         onError?.(msg);
       } finally {
         if (mounted.current) setIsLoading(false);
@@ -57,10 +79,8 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
       setUser(res.data.user);
       setShowConfirm(false);
       onSuccess?.('Đã hủy liên kết tài khoản Google');
-    } catch (err: any) {
-      const msg = err.response?.data?.error?.message
-        || err.response?.data?.message
-        || 'Hủy liên kết thất bại';
+    } catch (err) {
+      const msg = getGoogleApiErrorMessage(err) ?? 'Hủy liên kết thất bại';
       onError?.(msg);
     } finally {
       setIsLoading(false);
