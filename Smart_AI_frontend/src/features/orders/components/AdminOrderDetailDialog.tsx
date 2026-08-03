@@ -68,10 +68,12 @@ export function AdminOrderDetailDialog({
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const orderStatus = order?.status;
+
   const allowedNextStatuses = useMemo(() => {
-    if (!order) return [];
-    return getAllowedNextStatuses(order.status);
-  }, [order?.status]);
+    if (!orderStatus) return [];
+    return getAllowedNextStatuses(orderStatus);
+  }, [orderStatus]);
 
   if (!order) return null;
 
