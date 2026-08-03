@@ -40,8 +40,15 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
   const [showConfirm, setShowConfirm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  const onSuccessRef = useRef(onSuccess);
+  onSuccessRef.current = onSuccess;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  const canLink = Boolean(user && !user.googleId);
+
   useEffect(() => {
-    if (!user || user.googleId) return;
+    if (!canLink) return;
 
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
     if (!clientId?.trim()) return;
@@ -56,11 +63,11 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
         const res = await authService.linkGoogle(credential);
         if (!mounted.current) return;
         setUser(res.data.user);
-        onSuccess?.('Đã liên kết tài khoản Google thành công');
+        onSuccessRef.current?.('Đã liên kết tài khoản Google thành công');
       } catch (err) {
         if (!mounted.current) return;
         const msg = getGoogleApiErrorMessage(err) ?? 'Liên kết Google thất bại';
-        onError?.(msg);
+        onErrorRef.current?.(msg);
       } finally {
         if (mounted.current) setIsLoading(false);
       }
@@ -70,7 +77,7 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
     return () => {
       mounted.current = false;
     };
-  }, [user?.googleId]);
+  }, [canLink, setUser]);
 
   const handleUnlink = async () => {
     setIsLoading(true);
