@@ -24,6 +24,7 @@ This address is public. Reporters may alternatively use GitHub private vulnerabi
 - **No secrets in code** — API keys, database credentials, JWT secrets, and OAuth client secrets must never be committed to the repository.
 - **Environment variables** — All secrets are injected via environment variables at runtime or build time.
 - **`.env.example` files** — Contain placeholder values only. Never commit real `.env` files.
+- **`.env.docker` is local and ignored** — it is no longer tracked; only `.env.docker.example` (placeholders) is version-controlled. Create local `.env.docker` with `cp .env.docker.example .env.docker`.
 - **Git history** — If a secret is accidentally committed, rotate it immediately and rewrite history (`git filter-repo` or `git rebase`). Assume the exposed secret is compromised.
 
 ## Environment Variables
@@ -78,7 +79,7 @@ This address is public. Reporters may alternatively use GitHub private vulnerabi
 - **Password** — Use `REDIS_URL` with embedded password: `redis://:password@host:6379`.
 - **ACL** — Use a Redis user with minimal permissions (access to relevant keyspaces only).
 - **Network isolation** — Do not expose Redis to the public internet. Use private networking (VPC, internal network).
-- **`reconnectStrategy`** — Currently set to `false`. Redis connection loss requires application restart. A reconnect strategy should be implemented in production.
+- **`reconnectStrategy`** — Auto-reconnect with exponential backoff is implemented (`min(500 × 2^attempt, 30000)ms`, infinite retries). Reconnect is disabled only during graceful shutdown (`setShuttingDown()`). No application restart is required on transient Redis loss.
 - **Data classification** — Redis stores: cached product queries (non-sensitive), rate limit counters, chat context (potentially includes user messages), BullMQ job data (includes email content). Ensure Redis is in a trusted network.
 
 ## Cloudinary Credentials
@@ -104,13 +105,20 @@ This address is public. Reporters may alternatively use GitHub private vulnerabi
 1. **Environment separation** — Use separate API keys, databases, and Redis instances for development and production.
 2. **HTTPS only** — The production backend must be served over HTTPS (handled by Render). The frontend on Vercel is HTTPS by default.
 3. **CORS hardening** — `FRONTEND_URL` must be set to the exact production frontend origin. Do not use wildcard `*` in production.
-4. **Rate limiting** — Currently only on the login endpoint (Redis-backed). Add rate limiting on admin endpoints and general API in production.
-5. **Error handler middleware** — `middlewares/errorHandler.js` is empty. Error handling is inlined in `index.js`. Implement the middleware for consistent error responses.
-6. **Redis auto-reconnect** — `reconnectStrategy = false` means Redis connection loss requires a restart. Implement auto-reconnect for production resilience.
-7. **No SMS fallback** — Email-only via Brevo. If SMS is added later, manage credentials separately.
+4. **Rate limiting** — Currently only on the login endpoint (Redis-backed, IP-based). **Known limitation:** no general/admin/chat rate limiting yet. Add rate limiting on admin endpoints, general API, and the unauthenticated chat endpoint in production.
+5. **Error handler middleware** — Implemented. `middlewares/errorHandler.js` is a centralized `errorHandler` (with `notFoundHandler` and `AppError` classes in `utils/errors/`) that normalizes Mongoose/JWT errors and returns consistent error envelopes. A small set of legacy controllers still produce legacy response shapes (see `docs/API_OVERVIEW.md`).
+6. **Redis auto-reconnect** — Implemented with exponential backoff (`min(500 × 2^attempt, 30000)ms`, infinite retries); disabled during graceful shutdown.
+7. **No SMS fallback** — Email-only via Brevo (API, not SMTP). If SMS is added later, manage credentials separately.
 8. **Graceful shutdown** — SIGTERM/SIGINT handlers close BullMQ workers, disconnect Socket.IO, stop HTTP server, disconnect Redis and MongoDB, then exit.
 9. **Health checks** — Endpoints: `GET /health` (liveness), `GET /health/readiness` (dependencies). Use these in Render health check configuration.
 10. **Logging** — Pino structured logging with `LOG_LEVEL` configuration. Sensitive data redaction is configured in `utils/logger.js`.
+
+## Known Limitations
+
+- **Socket.IO chat is unauthenticated** — any client can connect and call `sendMessage`, driving paid OpenAI/Gemini calls anonymously. A JWT handshake (`io.use(...)`) is the recommended next security work item.
+- **Helmet is not implemented** — no CSP / `X-Frame-Options` / `X-Content-Type-Options` security headers are set.
+- **Broad rate limiting is not implemented** — only the login endpoint is rate-limited (Redis-backed).
+- **Tokens in `localStorage`** — the frontend stores access and refresh tokens in `localStorage` (`src/lib/axios.ts`, `src/stores/authStore.ts`). This is exposed to any XSS that runs in the page context; an `httpOnly` cookie strategy would remove that exposure but requires backend session/refresh changes.
 
 ## Dependency Update Policy
 

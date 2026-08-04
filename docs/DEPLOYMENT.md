@@ -53,9 +53,14 @@ node index.js
 # Health check (liveness)
 curl https://your-app.onrender.com/health
 
+# Readiness check (dependencies: MongoDB, Redis)
+curl https://your-app.onrender.com/health/ready
+
 # API info
 curl https://your-app.onrender.com/api/info
 ```
+
+Use `GET /health` (liveness) and `GET /health/ready` (readiness) as Render health checks.
 
 ## Frontend (Vercel)
 
@@ -111,25 +116,39 @@ Deployed automatically via GitHub Actions (`.github/workflows/deploy-frontend.ym
 - **Returns null** if `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, or `CLOUDINARY_API_SECRET` are not set
 - All uploads use `secure: true` (HTTPS URLs)
 
+## Brevo (Transactional Email)
+
+- **Transport**: Brevo API only (`@getbrevo/brevo` `transactionalEmails.sendTransacEmail`) — no SMTP.
+- **Config**: `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME`.
+- **Email types**: welcome, verification, password-reset, unlock-account, order-confirmation.
+- **Queue**: BullMQ `emailQueue` with direct fallback. If any Brevo var is missing, emails are silently skipped — ensure all three are set in production.
+- Missing Brevo config does **not** block boot; verify with a sign-up or password-reset flow.
+
+## Google OAuth
+
+- Requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from the Google Cloud Console.
+- Authorized redirect origins must include the production frontend origin (Vercel) and `http://localhost:5173` for local dev.
+- The frontend loads the Google Identity Services script at runtime; `VITE_GOOGLE_CLIENT_ID` must be set at build time.
+- If `GOOGLE_CLIENT_ID` is unset, Google login returns a 500 (logged), other auth flows still work.
+
 ## Docker Deployment
 
 Full application with all services:
 
 ```bash
-# 1. Configure environment
+# 1. Configure environment (local only; .env.docker is gitignored)
 cd Smart_AI_backend
 cp .env.docker.example .env.docker
 # Edit .env.docker with your API keys.
-# The example file contains SMTP vars but the app uses Brevo API.
-# Add these if needed:
+# Email is sent via the Brevo API — set:
 #   BREVO_API_KEY
 #   BREVO_FROM_NAME
 #   BREVO_FROM_EMAIL
+# (No SMTP_* variables are used.)
+# Required for the stack:
+#   OPENAI_API_KEY, GEMINI_API_KEY, JWT_SECRET, JWT_REFRESH_SECRET
+#   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
 #   REDIS_URL=redis://redis:6379
-#   CLOUDINARY_CLOUD_NAME
-#   CLOUDINARY_API_KEY
-#   CLOUDINARY_API_SECRET
-#   GEMINI_API_KEY
 
 # 2. Build and start
 cd ..

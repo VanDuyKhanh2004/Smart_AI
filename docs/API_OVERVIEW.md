@@ -98,7 +98,11 @@ Rate limiting is enforced on the login endpoint (`/api/auth/login`) via Redis-ba
 }
 ```
 
-> **Transitional note**: The centralized error handler (`middlewares/errorHandler.js`) is in Phase 2. Migrated modules use `asyncHandler` + `AppError`. The **complaint** controller uses the centralized `{ success: false, error: { message, code } }` envelope. The **address** and **profile** controllers preserve the legacy `{ success: false, message }` envelope (frontend `ApiError` reads `response.data.message`). Legacy controllers (auth, product, order, cart, review, promotion, wishlist, compare, store, question, answer, dashboard, appointment) still use varied local error response shapes. See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
+> **Error-handling status (verified 2026-08-04)**: The centralized error handler (`middlewares/errorHandler.js`) is fully implemented with `AppError` classes in `utils/errors/`. **All 18 controllers** wrap handlers with `asyncHandler` and throw `AppError` subclasses, so errors flow through the global `errorHandler`. Two error envelopes coexist:
+> - **Centralized envelope** `{ success: false, error: { message, code, details?, timestamp? } }` — used by most endpoints (e.g., complaint, auth, order, product, cart, review, promotion, wishlist, compare, question, answer, dashboard, health, chat).
+> - **Legacy top-level envelope** `{ success: false, message }` — still requested on specific paths via `req.errorResponseFormat = 'legacy-top-level-message'`: product `createProduct` / `updateProduct` (`controllers/productController.js`), and the **store**, **appointment**, **profile**, and **address** route groups (`routes/storeRoutes.js`, `appointmentRoutes.js`, `profileRoutes.js`, `addressRoutes.js`). The frontend `ApiError` type reads `response.data.message`, so both envelopes carry `message`.
+>
+> See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 
 ## See Also
 

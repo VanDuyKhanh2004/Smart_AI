@@ -85,7 +85,7 @@ Each domain module in `features/` contains:
 ### Testing
 - Vitest with @testing-library/react
 - Mocked API modules via `vi.mock()`
-- 8 test files, 119 tests
+- 9 test files, 129 tests (verified 2026-08-04)
 - Radix UI portal considerations: close Select via Escape before asserting button states
 
 ## Backend
@@ -112,15 +112,13 @@ Incoming Request
 ```
 
 ### Error Handling
-- **Centralized error foundation** (Phases 1 & 2): `AppError` class hierarchy in `utils/errors/`, global `errorHandler` middleware, `notFoundHandler` middleware
+- **Centralized error handling is fully migrated**: `AppError` class hierarchy in `utils/errors/`, global `errorHandler` middleware, `notFoundHandler` middleware. All 18 controllers wrap handlers with `asyncHandler` and throw `AppError` subclasses.
 - **Error normalization**: AppError → status/code, Mongoose ValidationError → 400, CastError → 400, duplicate key → 409, TokenExpiredError → 401, JsonWebTokenError → 401
 - **Response format**: `{ success: false, error: { message, code, details?, timestamp? } }` (timestamp in production only)
+- **Legacy envelope paths**: a small set of paths requests the legacy `{ success, message }` top-level format via `req.errorResponseFormat = 'legacy-top-level-message'` — product `createProduct`/`updateProduct` (`controllers/productController.js`) and the store, appointment, profile, and address route groups (`routes/storeRoutes.js`, `appointmentRoutes.js`, `profileRoutes.js`, `addressRoutes.js`).
 - **Production safety**: Generic messages for 5xx, no stack traces, no internal details
 - **Logging**: Pino with correlation ID (requestId). 4xx at warn level, 5xx at error level. Sensitive data redacted.
 - **Middleware order**: correlationId → parsers → cors → requestLogger → routes → notFoundHandler → errorHandler
-- **Migrated modules**: complaint (Phase 1 pilot), health, address, profile (Phase 2). These controllers use `asyncHandler` and `AppError` classes. Errors flow through global `errorHandler` automatically.
-- **Remaining controllers**: auth, product, order, cart, review, promotion, wishlist, compare, store, question, answer, dashboard, appointment — still use legacy local error handling.
-- **Route-level handlers**: No route-level error middleware remains in migrated route files. Errors propagate to global `errorHandler` via Express `next(error)` (either explicitly or through `asyncHandler`).
 
 ### Graceful Shutdown
 On SIGTERM/SIGINT:
@@ -188,7 +186,7 @@ Three queues initialized in `bullmq/bootstrap.js`:
 6. **Constraint Parsing**: Natural language → price range, brands (include/exclude), inStock filters
 7. **Ranking**: Soft preferences (camera, battery, performance, compact) from `productRanking.js`
 8. **Context**: Redis-backed context with multi-turn merging (follow-up detection)
-9. **Response**: OpenAI (`gpt-4o`) generates response via `utils/gemini.js`, streamed via Socket.IO
+9. **Response**: OpenAI (`gpt-4o`) generates response via `utils/gemini.js`, delivered as a single complete `aiResponse` event over real-time Socket.IO transport (no token-by-token streaming).
 
 ### External AI APIs
 

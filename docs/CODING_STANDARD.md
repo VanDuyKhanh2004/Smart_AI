@@ -69,10 +69,10 @@ The backend uses CommonJS (`require`, `module.exports`) — no ES modules.
 - New bug fixes must include a test that fails before the fix
 
 ### Error Handling
-- Inlined in `index.js` (not using `middlewares/errorHandler.js` which is empty)
+- Centralized: `middlewares/errorHandler.js` + `notFoundHandler` + `AppError` classes in `utils/errors/`; all controllers use `asyncHandler`
 - Logs via Pino with sanitized URL (query params stripped)
-- Returns `{ error: { message, status, timestamp } }` JSON
-- 404 handler returns `{ error: { message: "Route {path} not found", status: 404, timestamp } }`
+- Centralized envelope: `{ success: false, error: { message, code, details?, timestamp? } }` (legacy `{ success: false, message }` retained only on product create/update and store/appointment/profile/address routes)
+- 404 handler returns `{ success: false, error: { message: "Route {path} not found", code: "NOT_FOUND" } }`
 
 ## Frontend Conventions
 

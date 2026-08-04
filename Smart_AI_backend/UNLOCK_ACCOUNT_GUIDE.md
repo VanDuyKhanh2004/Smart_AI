@@ -32,6 +32,8 @@ Content-Type: application/json
 }
 ```
 
+> Lưu ý: "Email đã được gửi" nghĩa là yêu cầu gửi đã được chấp nhận (gửi bất đồng bộ), **không đảm bảo** email sẽ đến hộp thư. Việc gửi phụ thuộc vào cấu hình Brevo bên dưới.
+
 ### Người dùng thực hiện:
 1. Nhấn "Quên mật khẩu?" hoặc "Mở khóa tài khoản"
 2. Nhập email đã đăng ký
@@ -95,13 +97,20 @@ LOGIN_LOCK_MINUTES=30          # Thời gian khóa tài khoản (phút)
 # Frontend URL (cho email links)
 FRONTEND_URL=http://localhost:5173
 
-# Email Configuration
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
-SMTP_SECURE=false
+# Email Configuration (Brevo API)
+BREVO_API_KEY=your_brevo_api_key
+BREVO_FROM_EMAIL=your_verified_sender@example.com
+BREVO_FROM_NAME=Smart AI
 ```
+
+### Lưu ý về Brevo
+
+- `BREVO_API_KEY` phải là **API key của Brevo**, không phải SMTP key. API key thường bắt đầu bằng `xkeysib-`.
+- `BREVO_FROM_EMAIL` phải là địa chỉ gửi **đã được xác minh trong tài khoản Brevo**.
+- Ứng dụng gửi email mở khóa **bất đồng bộ** (qua hàng đợi BullMQ `emailQueue`).
+- Lỗi gửi email **không được chặn phản hồi của API** `request-unlock` — API vẫn trả về thành công dù email không đến được.
+- **Tuyệt đối không** đưa API key vào biến `VITE_*` của frontend (biến `VITE_*` nằm trong bundle công khai).
+- **Không bao giờ** commit API key thật vào repository.
 
 ## Luồng xử lý khi đăng nhập
 
@@ -215,9 +224,10 @@ curl -X POST http://localhost:5000/api/auth/admin-unlock \
 ## Troubleshooting
 
 ### Email không được gửi
-- Kiểm tra cấu hình SMTP trong `.env`
-- Đảm bảo SMTP_USER và SMTP_PASS đúng
-- Nếu dùng Gmail, cần bật "App Password"
+- Lỗi **401 "Key not found"** khi gửi email: `BREVO_API_KEY` sai loại hoặc không hợp lệ (có thể nhầm với SMTP key). Đảm bảo key là API key của Brevo, thường bắt đầu bằng `xkeysib-`.
+- Lỗi **sender validation**: `BREVO_FROM_EMAIL` chưa được xác minh trong tài khoản Brevo. Xác minh địa chỉ gửi trước khi dùng.
+- **Thiếu biến** `BREVO_API_KEY` / `BREVO_FROM_EMAIL` / `BREVO_FROM_NAME`: email không thể gửi. Khi đó API `request-unlock` vẫn trả về thành công nhưng người dùng sẽ không nhận được email.
+- Lưu ý: hệ thống gửi email **bất đồng bộ** — lỗi gửi không làm chặn response của API.
 
 ### Token không hợp lệ
 - Token có hiệu lực 1 giờ, có thể đã hết hạn
