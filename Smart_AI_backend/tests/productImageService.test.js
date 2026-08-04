@@ -2,7 +2,7 @@ jest.mock('../configs/cloudinary', () => ({
   getClient: jest.fn(),
 }));
 
-const { uploadProductImageIfNeeded, validateImageInput, isBase64DataUri, isAbsoluteHttpsUrl } = require('../services/productImageService');
+const { uploadProductImageIfNeeded, deleteImageFromCloudinary, validateImageInput, isBase64DataUri, isAbsoluteHttpsUrl } = require('../services/productImageService');
 const { getClient } = require('../configs/cloudinary');
 
 function makeJpegBase64(length = 100) {
@@ -343,6 +343,86 @@ describe('uploadProductImageIfNeeded', () => {
   it('rejects malformed Base64 in upload path', async () => {
     getClient.mockReturnValue({ uploader: { upload_stream: jest.fn() } });
     await expect(uploadProductImageIfNeeded('data:image/jpeg;base64,!!!invalid!!!')).rejects.toThrow(/malformed/i);
+  });
+});
+
+/* ============================================================
+   deleteImageFromCloudinary
+============================================================ */
+describe('deleteImageFromCloudinary', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('returns skipped no-op when publicId is null', async () => {
+    const result = await deleteImageFromCloudinary(null);
+    expect(result).toEqual({ deleted: true, publicId: null, result: 'skipped' });
+  });
+
+  it('returns skipped no-op when publicId is undefined', async () => {
+    const result = await deleteImageFromCloudinary(undefined);
+    expect(result).toEqual({ deleted: true, publicId: null, result: 'skipped' });
+  });
+
+  it('returns skipped no-op when publicId is empty string', async () => {
+    const result = await deleteImageFromCloudinary('');
+    expect(result).toEqual({ deleted: true, publicId: null, result: 'skipped' });
+  });
+
+  it('does not call Cloudinary destroy for empty publicId', async () => {
+    const destroy = jest.fn();
+    getClient.mockReturnValue({ uploader: { destroy } });
+    await deleteImageFromCloudinary('');
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it('returns deleted when Cloudinary reports result ok', async () => {
+    const destroy = jest.fn().mockResolvedValue({ result: 'ok' });
+    getClient.mockReturnValue({ uploader: { destroy } });
+
+    const result = await deleteImageFromCloudinary('smart-ai/products/abc');
+    expect(destroy).toHaveBeenCalledWith('smart-ai/products/abc');
+    expect(result).toEqual({ deleted: true, publicId: 'smart-ai/products/abc', result: 'deleted' });
+  });
+
+  it('returns idempotent success when Cloudinary reports not found', async () => {
+    const destroy = jest.fn().mockResolvedValue({ result: 'not found' });
+    getClient.mockReturnValue({ uploader: { destroy } });
+
+    const result = await deleteImageFromCloudinary('smart-ai/products/abc');
+    expect(result).toEqual({ deleted: true, publicId: 'smart-ai/products/abc', result: 'not_found' });
+  });
+
+  it('returns controlled failure for unexpected resolved result', async () => {
+    const destroy = jest.fn().mockResolvedValue({ result: 'weird' });
+    getClient.mockReturnValue({ uploader: { destroy } });
+
+    const result = await deleteImageFromCloudinary('smart-ai/products/abc');
+    expect(result.deleted).toBe(false);
+    expect(result.publicId).toBe('smart-ai/products/abc');
+    expect(result.result).toBe('failed');
+    expect(result.error).toBeInstanceOf(Error);
+  });
+
+  it('returns controlled failure when destroy rejects', async () => {
+    const destroy = jest.fn().mockRejectedValue(new Error('socket hang up'));
+    getClient.mockReturnValue({ uploader: { destroy } });
+
+    const result = await deleteImageFromCloudinary('smart-ai/products/abc');
+    expect(result.deleted).toBe(false);
+    expect(result.publicId).toBe('smart-ai/products/abc');
+    expect(result.result).toBe('failed');
+    expect(result.error.message).toBe('socket hang up');
+  });
+
+  it('returns controlled failure when Cloudinary is not configured', async () => {
+    getClient.mockReturnValue(null);
+
+    const result = await deleteImageFromCloudinary('smart-ai/products/abc');
+    expect(result.deleted).toBe(false);
+    expect(result.publicId).toBe('smart-ai/products/abc');
+    expect(result.result).toBe('failed');
+    expect(result.error).toBeInstanceOf(Error);
   });
 });
 

@@ -3,8 +3,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const Product = require('../models/Product');
-const { uploadProductImageIfNeeded } = require('../services/productImageService');
-const { getClient } = require('../configs/cloudinary');
+const { uploadProductImageIfNeeded, deleteImageFromCloudinary } = require('../services/productImageService');
 
 const BATCH_CONCURRENCY = 3;
 
@@ -42,13 +41,15 @@ async function saveMigrationRecord(record) {
 }
 
 async function deleteCloudinaryAsset(publicId, label) {
-  const client = getClient();
-  if (!client || !publicId) return;
-  try {
-    await client.uploader.destroy(publicId);
+  if (!publicId) return;
+  const result = await deleteImageFromCloudinary(publicId);
+  if (result.result === 'deleted') {
     console.log(`[CLEANUP] Deleted Cloudinary asset ${publicId} (${label})`);
-  } catch (err) {
-    console.error(`[CLEANUP_FAIL] Could not delete Cloudinary asset ${publicId} (${label}): ${err.message}`);
+  } else if (result.result === 'not_found') {
+    console.log(`[CLEANUP] Cloudinary asset ${publicId} already absent (${label})`);
+  } else {
+    const reason = result.error ? result.error.message : 'unknown error';
+    console.error(`[CLEANUP_FAIL] Could not delete Cloudinary asset ${publicId} (${label}): ${reason}`);
   }
 }
 

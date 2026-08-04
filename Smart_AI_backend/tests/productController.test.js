@@ -55,11 +55,13 @@ jest.mock('../services/embeddingQueueService', () => ({
 }));
 
 const mockUploadProductImageIfNeeded = jest.fn();
+const mockDeleteImageFromCloudinary = jest.fn();
 class MockProductImageValidationError extends Error {
   constructor(message) { super(message); this.name = 'ProductImageValidationError'; this.statusCode = 400; this.code = 'INVALID_PRODUCT_IMAGE'; }
 }
 jest.mock('../services/productImageService', () => ({
   uploadProductImageIfNeeded: mockUploadProductImageIfNeeded,
+  deleteImageFromCloudinary: mockDeleteImageFromCloudinary,
   ProductImageValidationError: MockProductImageValidationError,
 }));
 
@@ -86,6 +88,7 @@ beforeEach(() => {
   productRecommendationService.recommend.mockReset();
   mockComputeContentHash.mockReturnValue('changed-hash');
   mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: '', imagePublicId: null });
+  mockDeleteImageFromCloudinary.mockResolvedValue({ deleted: true, publicId: null, result: 'skipped' });
 });
 
 /* Reset complex mock chains that persist past clearAllMocks */
@@ -1029,6 +1032,62 @@ describe('createProduct — image upload integration', () => {
     expect(mockSave).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
+
+  it('rolls back uploaded Cloudinary image when product save fails', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn().mockRejectedValue(new Error('DB error'));
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'id', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'data:image/jpeg;base64,/9j/4AAQ' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/new');
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('preserves original DB error when rollback cleanup fails on save', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    mockDeleteImageFromCloudinary.mockResolvedValue({ deleted: false, publicId: 'smart-ai/products/new', result: 'failed', error: new Error('destroy failed') });
+    Product.findOne.mockResolvedValue(null);
+    const dbError = new Error('DB error');
+    const mockSave = jest.fn().mockRejectedValue(dbError);
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'id', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc', image: 'data:image/jpeg;base64,/9j/4AAQ' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/new');
+    expect(next).toHaveBeenCalledWith(dbError);
+  });
+
+  it('does not attempt rollback when no Cloudinary image was uploaded', async () => {
+    mockUploadProductImageIfNeeded.mockResolvedValue({ imageUrl: '', imagePublicId: null });
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = jest.fn().mockRejectedValue(new Error('DB error'));
+    const ProductMock = require('../models/Product');
+    ProductMock.mockImplementation((data) => ({ ...data, _id: 'id', save: mockSave }));
+
+    const req = mockReq({ name: 'Phone', brand: 'Test', price: 200, description: 'Desc' });
+    const res = mockRes();
+    const next = jest.fn();
+    await createProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
 });
 
 describe('updateProduct — image upload integration', () => {
@@ -1197,10 +1256,137 @@ describe('updateProduct — image upload integration', () => {
     expect(Product.findByIdAndUpdate).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledWith(expect.any(Error));
   });
+
+  it('deletes previous Cloudinary image only after successful DB update', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingWithCloudinary, image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg', imagePublicId: 'smart-ai/products/new' });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).toHaveBeenCalled();
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/old');
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('rolls back newly uploaded image and keeps old when DB update fails', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockRejectedValue(new Error('DB error'));
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    const next = jest.fn();
+    await updateProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/new');
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalledWith('smart-ai/products/old');
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('preserves original DB error when rollback cleanup fails on update', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    mockDeleteImageFromCloudinary.mockResolvedValue({ deleted: false, publicId: 'smart-ai/products/new', result: 'failed', error: new Error('destroy failed') });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    const dbError = new Error('DB error');
+    Product.findByIdAndUpdate.mockRejectedValue(dbError);
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    const next = jest.fn();
+    await updateProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/new');
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalledWith('smart-ai/products/old');
+    expect(next).toHaveBeenCalledWith(dbError);
+  });
+
+  it('rolls back newly uploaded image when updated product is not found', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue(null);
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    const next = jest.fn();
+    await updateProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/new');
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalledWith('smart-ai/products/old');
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }));
+  });
+
+  it('does not delete old Cloudinary image when image value is unchanged', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/same.jpg', imagePublicId: 'smart-ai/products/same' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/same.jpg', imagePublicId: null,
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue(existingWithCloudinary);
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/same.jpg' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('deletes old Cloudinary image when image is cleared with external HTTPS URL', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://cdn.example.com/new.jpg', imagePublicId: null,
+    });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingWithCloudinary, image: 'https://cdn.example.com/new.jpg' });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'https://cdn.example.com/new.jpg' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockDeleteImageFromCloudinary).toHaveBeenCalledWith('smart-ai/products/old');
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('does not fail request when old Cloudinary image deletion fails', async () => {
+    const existingWithCloudinary = { ...existingProduct, image: 'https://res.cloudinary.com/.../old.jpg', imagePublicId: 'smart-ai/products/old' };
+    mockUploadProductImageIfNeeded.mockResolvedValue({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg',
+      imagePublicId: 'smart-ai/products/new',
+    });
+    mockDeleteImageFromCloudinary.mockResolvedValue({ deleted: false, publicId: 'smart-ai/products/old', result: 'failed', error: new Error('destroy failed') });
+    Product.findById.mockResolvedValue(existingWithCloudinary);
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingWithCloudinary, image: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/new.jpg', imagePublicId: 'smart-ai/products/new' });
+
+    const req = mockReq({ name: 'Old Phone', brand: 'test', price: 100, description: 'Updated', image: 'data:image/jpeg;base64,/9j/4AAQ' }, { id: 'prod-update-img' });
+    const res = mockRes();
+    await updateProduct(req, res);
+
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ publicId: 'smart-ai/products/old' }), expect.any(String));
+  });
 });
 
 /* ============================================================
-   deleteProduct
+   deleteProduct (soft delete — must not destroy Cloudinary asset)
 ============================================================ */
 describe('deleteProduct', () => {
   it('should soft delete a product and return 200', async () => {
@@ -1223,6 +1409,46 @@ describe('deleteProduct', () => {
     );
   });
 
+  it('does not call Cloudinary destroy on soft delete even when product has imagePublicId', async () => {
+    Product.findByIdAndUpdate.mockResolvedValue({ _id: 'prod-del-1', isActive: false, image: 'https://res.cloudinary.com/.../abc.jpg', imagePublicId: 'smart-ai/products/abc' });
+
+    const req = mockReq({}, { id: 'prod-del-1' });
+    const res = mockRes();
+    await deleteProduct(req, res);
+
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('preserves image and imagePublicId during soft delete', async () => {
+    Product.findByIdAndUpdate.mockResolvedValue({ _id: 'prod-del-1', isActive: false });
+
+    const req = mockReq({}, { id: 'prod-del-1' });
+    const res = mockRes();
+    await deleteProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-del-1',
+      { isActive: false },
+      expect.any(Object),
+    );
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  it('does not remove image when DB soft delete fails', async () => {
+    const dbError = new Error('DB error');
+    Product.findByIdAndUpdate.mockRejectedValue(dbError);
+
+    const req = mockReq({}, { id: 'prod-del-err' });
+    const res = mockRes();
+    const next = jest.fn();
+    await deleteProduct(req, res, next);
+
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(dbError);
+  });
+
   it('returns 404 when product not found', async () => {
     Product.findByIdAndUpdate.mockResolvedValue(null);
 
@@ -1231,6 +1457,7 @@ describe('deleteProduct', () => {
     const next = jest.fn();
     await deleteProduct(req, res, next);
 
+    expect(mockDeleteImageFromCloudinary).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledWith(
       expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }),
     );
