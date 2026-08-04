@@ -15,7 +15,7 @@ npm test -- --runInBand                    # Sequential (recommended for DB conn
 npm test -- --watch                        # Watch mode
 ```
 
-### Test Suite (32 files, 1326 tests, snapshot verified on branch `refactor/error-handling-phase-2`)
+### Test Suite (39 files, 1611 tests, verified on branch `docs/synchronize-project-documentation` at commit `8dca92e`, 2026-08-04)
 
 > Documentation-only changes do not alter these totals. Update the hash after each merged PR when tests are modified.
 
@@ -49,6 +49,13 @@ npm test -- --watch                        # Watch mode
 | `openai.test.js` | OpenAI/Gemini integration |
 | `route-accuracy.test.js` | Swagger path-to-route validation (257 tests: route map, auth docs, OpenAPI structure, Bearer scheme, tags, schemas, secret-safety, Swagger UI mount) |
 | `complaint-auth.test.js` | Complaint route authorization (35 tests: 401/403/200 for all endpoints, 404 handling, side-effect safety) |
+| `auth.test.js` | Auth flows (54 tests: register, login, logout, refresh, getMe, Google OAuth, email verification, password reset, unlock, admin unlock, link/unlink Google, validation, error paths) |
+| `store.test.js` | Store controller (29 tests: CRUD, validation, auth, admin-only access, geo search, error paths, ValidationError errors array, CastError) |
+| `redis.test.js` | Redis reconnect strategy (36 tests: delay formula, client strategies, logging safety, status transitions, health integration) |
+| `appointment.test.js` | Appointment controller (42 tests: CRUD, validation, auth, ownership, admin status transitions, `generateTimeSlots` unit tests) |
+| `compare.test.js` | Compare controller (21 tests: CRUD, validation, auth, duplicate detection, ownership, error paths) |
+| `question.test.js` | Q&A controller (29 tests: CRUD, validation, auth, admin status update, ownership, upvote toggle, error paths) |
+| `answer.test.js` | Answer controller (14 tests: create/delete answer, validation, auth, admin-only access, error paths) |
 | `errorHandler.test.js` | Error handling infrastructure (36 tests: AppError classes, asyncHandler, errorHandler normalization, notFoundHandler, Express integration) |
 | `address.test.js` | Address controller centralized error handling (17 tests: CRUD, ownership, auth, error propagation, default-address reassignment) |
 | `profile.test.js` | Profile controller centralized error handling (19 tests: profile CRUD, avatar upload, password change, auth, error propagation, secret safety) |
@@ -90,7 +97,7 @@ npx vitest                                 # Watch mode
 npx vitest run --reporter=verbose          # Verbose output
 ```
 
-### Test Suite (8 files, 119 tests, snapshot verified at base commit `82a333a`)
+### Test Suite (9 files, 129 tests, verified on branch `docs/synchronize-project-documentation` at commit `8dca92e`, 2026-08-04)
 
 > Documentation-only changes do not alter these totals. Update the hash after each merged PR when tests are modified.
 
@@ -104,6 +111,7 @@ npx vitest run --reporter=verbose          # Verbose output
 | `GoogleIdentity.test.ts` | 17 | Google Identity Services integration |
 | `ProductRecommendations.test.tsx` | 12 | Display, loading, errors |
 | `useIdempotencyKey.test.ts` | 11 | Idempotency key generation and management |
+| `ChatCodeBlock.test.tsx` | 10 | Chat markdown / code-block rendering regression scenarios |
 
 ### Mocking Strategy
 - API service modules mocked via `vi.mock()` (e.g., `@/services/order.service`)

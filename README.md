@@ -33,11 +33,11 @@
 - Order confirmation emails with safe HTTPS image rendering
 
 ### AI Chatbot
-- RAG pipeline: intent classification (product_query|small_talk|complaint) → MongoDB Atlas `$vectorSearch` → text fallback → constraint parsing (price range, brands, specs) → ranking by soft preferences → response via OpenAI `gpt-4o` (primary) or Gemini `gemini-2.0-flash` (fallback), streamed via Socket.IO
+- RAG pipeline: intent classification (product_query|small_talk|complaint) → MongoDB Atlas `$vectorSearch` → text fallback → constraint parsing (price range, brands, specs) → ranking by soft preferences → response via OpenAI `gpt-4o` (primary) or Gemini `gemini-2.0-flash` (fallback), delivered as one complete response over real-time Socket.IO transport (single `aiResponse` emit; no token-by-token streaming)
 - Multi-turn conversation context (Redis-backed, 30-min TTL, 20 max turns)
 - Complaint handling agent (structured: priority, tags, contact info)
 - Content-hash based embedding deduplication
-- Evaluation framework at `evaluation/chatbot/`
+- Offline evaluation framework at `evaluation/chatbot/` — 40 deterministic mocked scenarios covering constraint parsing, MRR/ranking, multi-turn context, and fallback behavior, with CLI thresholds (`--fail-under`); does not measure live chatbot accuracy or production latency
 
 ### Admin Dashboard
 - Product management
@@ -129,7 +129,7 @@
 │    Services: productImage, productSearch, productRanking,    │
 │              recommendation, cache, conversationContext      │
 │    BullMQ Workers: system (ping), email, embedding           │
-│    Socket.IO Handlers: chat streaming, notifications         │
+│    Socket.IO Handlers: chat (single aiResponse), notifications │
 └──────┬──────────────────┬──────────────────┬────────────────┘
        │                  │                  │
        ▼                  ▼                  ▼
@@ -243,6 +243,7 @@ docker compose up --build
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `VITE_API_BASE_URL` | **Yes** | Backend API base URL (absolute, http/https, not matching frontend origin) |
+| `VITE_API_URL` | No | Backend URL for non-API endpoints (socket origin derivation) |
 | `VITE_GOOGLE_CLIENT_ID` | Conditional | Google OAuth client ID |
 
 ---
@@ -293,11 +294,13 @@ docker compose up --build
 
 ## Testing
 
+> **Verification metadata**: totals below verified on **2026-08-04** on branch **`docs/synchronize-project-documentation`** at commit **`8dca92e`** (latest merged main baseline).
+
 ### Backend (Jest + Supertest)
 
 ```bash
 cd Smart_AI_backend
-npm test                           # Full suite (1287 tests, 30 suites; snapshot base commit 87fc52d)
+npm test                           # Full suite (1611 tests, 39 suites; verified 2026-08-04)
 npm test -- --runInBand            # Sequential (recommended)
 ```
 
@@ -305,7 +308,7 @@ npm test -- --runInBand            # Sequential (recommended)
 
 ```bash
 cd Smart_AI_frontend
-npm test                           # Vitest run (119 tests, 8 files; snapshot base commit 82a333a)
+npm test                           # Vitest run (129 tests, 9 files; verified 2026-08-04)
 npx tsc --noEmit                   # TypeScript strict check
 npm run build                      # Production build (tsc -b + vite build)
 ```
@@ -351,6 +354,9 @@ Triggers on push to `main` with frontend changes.
 | [ROADMAP.md](./docs/ROADMAP.md) | Completed items, next priorities, technical debt |
 | [CHANGELOG.md](./docs/CHANGELOG.md) | Keep a Changelog format — unreleased changes |
 | [CODING_STANDARD.md](./docs/CODING_STANDARD.md) | Code style, naming conventions, documentation workflow |
+| [ERD.md](./docs/ERD.md) | Database schema, relationships, indexes, scaling recommendations |
+| [PROJECT_TECHNICAL_AUDIT.md](./docs/PROJECT_TECHNICAL_AUDIT.md) | Point-in-time technical audit (read-only) |
+| [REPOSITORY_HYGIENE_REPORT.md](./docs/REPOSITORY_HYGIENE_REPORT.md) | Point-in-time hygiene report with resolved-after-audit status |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch strategy, commit conventions, PR checklist, testing, doc policy |
 | [SECURITY.md](./SECURITY.md) | Supported versions, vulnerability reporting, secrets, env vars, dependency policy |
 | [API_OVERVIEW.md](./docs/API_OVERVIEW.md) | Endpoint groups, authentication, Swagger UI link, common errors |
