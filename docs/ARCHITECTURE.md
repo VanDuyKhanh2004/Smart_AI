@@ -85,7 +85,7 @@ Each domain module in `features/` contains:
 ### Testing
 - Vitest with @testing-library/react
 - Mocked API modules via `vi.mock()`
-- 9 test files, 129 tests (verified 2026-08-04)
+- 11 test files, 153 tests (verified 2026-08-04)
 - Radix UI portal considerations: close Select via Escape before asserting button states
 
 ## Backend
@@ -129,6 +129,41 @@ On SIGTERM/SIGINT:
 5. MongoDB disconnected
 6. Logger flushed
 7. `process.exit(0)`
+
+## Real-time Chat (Socket.IO)
+
+### Handshake Authentication
+Chat sockets authenticate at connection time. `socketHandler.js` registers `io.use(authenticateSocket)` (`middlewares/socketAuthMiddleware.js`) so the handshake is verified **before** any event can be processed.
+
+- Token accepted from `socket.handshake.auth.token` (frontend handoff) or an `Authorization: Bearer <token>` header.
+- Query-string tokens are **not** accepted.
+- Tokens are verified with the same `JWT_SECRET` used by REST endpoints (`utils/jwt.js` → `verifyAccessToken`); refresh tokens (signed with `JWT_REFRESH_SECRET`) are rejected.
+- On success, only safe identity data is attached: `socket.data.user = { id, email, role }`. Password, hashes, refresh tokens, and full user documents are never attached.
+- On failure the connection is rejected with a stable code; raw JWT errors, secrets, and stack traces are never exposed to the client.
+
+### Stable Auth Error Codes
+- `SOCKET_AUTH_REQUIRED` — token missing
+- `SOCKET_AUTH_INVALID` — malformed token, bad signature, or refresh token used as access token
+- `SOCKET_AUTH_EXPIRED` — expired access token
+- `SOCKET_USER_NOT_FOUND` — token is valid but the user no longer exists
+
+### Protected Events
+The following events run only after `requireSocketAuth` (defense-in-depth beyond the handshake gate):
+- `sendMessage` (routes to the RAG/AI pipeline)
+- `joinRoom` / `leaveRoom`
+- `typing` / `stopTyping`
+
+`sendMessage` is the only event that reaches AI processing, conversation persistence, and Redis context; unauthenticated sockets never reach `chatController.processMessage`.
+
+### Frontend Token Handoff
+`chat.service.ts` sends the access token via `io(backendOrigin, { auth: { token } })` (no query params). `connect_error` auth codes are mapped to Vietnamese user messages, and the socket disconnects on auth errors so invalid tokens are not retried forever. `reconnectWithToken()` reconnects with the latest token after login/refresh, and `authStore.logout()` disconnects the live socket so stale credentials are not reused.
+
+### Identity Integrity
+The authenticated `socket.data.user.id` is the server-side identity. Client-supplied `userId` in event payloads is ignored — `sendMessage` passes only `sessionId`/`message` through, so payload `userId` cannot impersonate another user.
+
+### Tests
+- `tests/socketAuth.test.js` — real in-memory HTTP + Socket.IO server with `socket.io-client` (13 scenarios).
+- `frontend/src/tests/ChatServiceAuth.test.ts` — mocked `socket.io-client` (7 scenarios).
 
 ## Database
 

@@ -10,6 +10,13 @@ and this project intends to follow [Semantic Versioning](https://semver.org/spec
 > **Historical note (2026-08-04):** The centralized error-handling migration described incrementally below (Phases 1–3) is now **complete** — all 18 controllers use `asyncHandler` + `AppError`. Earlier entries that describe intermediate states (e.g., "createOrder remains legacy (Phase 3)") are historical snapshots of prior PRs and no longer describe the current code. The legacy `{ success, message }` error envelope remains only on product create/update and the store, appointment, profile, and address route groups.
 
 ### Added
+- Socket.IO chat handshake JWT authentication (`middlewares/socketAuthMiddleware.js`) — access token via `handshake.auth.token` or `Authorization: Bearer`; query-string tokens rejected; refresh tokens rejected; stable codes `SOCKET_AUTH_REQUIRED`/`SOCKET_AUTH_INVALID`/`SOCKET_AUTH_EXPIRED`/`SOCKET_USER_NOT_FOUND`
+- Socket identity attach — `socket.data.user = { id, email, role }` only; no password/hash/refresh tokens/full documents
+- Per-event auth guard (`requireSocketAuth`) on `sendMessage`, `joinRoom`, `leaveRoom`, `typing`, `stopTyping` so unauthenticated clients cannot reach AI processing, conversation persistence, or Redis context
+- Frontend token handoff — `chat.service.ts` sends the access token via `io(backendOrigin, { auth: { token } })` (no query params); `connect_error` auth codes mapped to Vietnamese messages; disconnect on auth error (no infinite retry); `reconnectWithToken()` reconnects with the latest token; `authStore.logout()` disconnects the live socket
+- `tests/socketAuth.test.js` (13 scenarios: real in-memory HTTP + Socket.IO server, token/header handoff, all 4 auth codes, query-param rejection, `socket.data.user` shape, `sendMessage` → AI pipeline, impersonation guard, protected auxiliary events)
+- `frontend/src/tests/ChatServiceAuth.test.ts` (7 scenarios: token handoff, no-token connect, auth-code → Vietnamese mapping, no infinite reconnect, reconnect with fresh token, logout disconnect, event compatibility)
+- `socket.io-client` dev dependency (backend) for the socket auth integration tests
 - `tests/appointment.test.js` (42 tests: CRUD, validation, auth, ownership, admin status transitions, `generateTimeSlots` unit tests)
 - `tests/compare.test.js` (21 tests: CRUD, validation, auth, duplicate detection, ownership, error paths)
 - `tests/question.test.js` (29 tests: CRUD, validation, auth, admin status update, ownership, upvote toggle, error paths)

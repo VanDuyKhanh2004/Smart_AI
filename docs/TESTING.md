@@ -15,9 +15,9 @@ npm test -- --runInBand                    # Sequential (recommended for DB conn
 npm test -- --watch                        # Watch mode
 ```
 
-### Test Suite (39 files, 1611 tests, verified on branch `docs/synchronize-project-documentation` at commit `8dca92e`, 2026-08-04)
+### Test Suite (40 files, 1624 tests, verified on branch `feat/socket-authentication`, 2026-08-04)
 
-> Documentation-only changes do not alter these totals. Update the hash after each merged PR when tests are modified.
+> Test totals are updated after code changes. Update the hash after each merged PR when tests are modified.
 
 | File | Main Coverage |
 |------|--------------|
@@ -36,6 +36,7 @@ npm test -- --watch                        # Watch mode
 | `embeddingQueue.test.js` | Embedding job processing |
 | `bullmq.test.js` | Queue lifecycle |
 | `shutdown.test.js` | Graceful shutdown sequence |
+| `socketAuth.test.js` | Socket.IO handshake auth (13 tests: token via `auth.token`/Bearer header, `SOCKET_AUTH_REQUIRED`/`INVALID`/`EXPIRED`/`USER_NOT_FOUND`, refresh-token and query-param rejection, `socket.data.user` shape, authenticated `sendMessage` → AI pipeline, impersonation guard, rooms/typing) |
 | `observability.test.js` | Logging, correlation IDs |
 | `cors.test.js` | CORS header validation |
 | `searchSemantic.test.js` | Semantic search endpoint |
@@ -71,6 +72,7 @@ npm test -- --watch                        # Watch mode
 - No real database, no real API calls in tests
 - Mock factory helpers: `mockRes()` for Express response, `defaultOrderDoc()` for Order fixtures
 - Mongoose session mocked with `startTransaction`, `abortTransaction`, `commitTransaction`, `endSession`
+- Socket.IO integration tests (`socketAuth.test.js`) run a real in-memory HTTP + Socket.IO server and connect real `socket.io-client` sockets (WebSocket transport), while mocking the `User` model lookup and `chatController.processMessage` — no real MongoDB, Redis, or AI calls.
 
 ### Test Patterns
 - `beforeEach` reset of all mocks and state
@@ -97,26 +99,29 @@ npx vitest                                 # Watch mode
 npx vitest run --reporter=verbose          # Verbose output
 ```
 
-### Test Suite (9 files, 129 tests, verified on branch `docs/synchronize-project-documentation` at commit `8dca92e`, 2026-08-04)
+### Test Suite (11 files, 153 tests, verified on branch `feat/socket-authentication`, 2026-08-04)
 
-> Documentation-only changes do not alter these totals. Update the hash after each merged PR when tests are modified.
+> Test totals are updated after code changes. Update the hash after each merged PR when tests are modified.
 
 | File | Approx. Tests | Coverage |
 |------|---------------|----------|
 | `AdminOrderDetailDialog.test.tsx` | 14 | Status dropdown, button states, error handling |
 | `orderStatusTransitions.test.ts` | 16 | getAllowedNextStatuses, canTransition, isTerminal |
 | `OrderDetailPage.test.tsx` | 5 | Rendering, skeleton, error states |
-| `ApiBaseUrl.test.ts` | 29 | URL resolution, validation, edge cases |
+| `ApiBaseUrl.test.ts` | 40 | URL resolution, validation, edge cases |
+| `ApiConfigBootstrap.test.tsx` | 6 | API config bootstrap gate, axios config state |
 | `AuthRefreshFlow.test.ts` | 15 | Token refresh, interceptor behavior |
 | `GoogleIdentity.test.ts` | 17 | Google Identity Services integration |
 | `ProductRecommendations.test.tsx` | 12 | Display, loading, errors |
 | `useIdempotencyKey.test.ts` | 11 | Idempotency key generation and management |
 | `ChatCodeBlock.test.tsx` | 10 | Chat markdown / code-block rendering regression scenarios |
+| `ChatServiceAuth.test.ts` | 7 | Chat socket token handoff, `connect_error` auth-code mapping, no infinite retries, reconnect with fresh token, logout disconnect |
 
 ### Mocking Strategy
 - API service modules mocked via `vi.mock()` (e.g., `@/services/order.service`)
 - Zustand stores pre-populated via `useAuthStore.setState()`
 - Axios errors constructed manually for error handling tests
+- `socket.io-client` mocked in `ChatServiceAuth.test.ts` with an in-memory fake socket to assert handshake options, `connect_error` handling, and reconnect behavior
 - No real HTTP calls
 
 ### Radix UI Testing Notes

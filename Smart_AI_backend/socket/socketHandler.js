@@ -1,19 +1,35 @@
 const logger = require('../utils/logger');
+const { authenticateSocket, SOCKET_AUTH_REQUIRED } = require('../middlewares/socketAuthMiddleware');
 
 let _io = null;
+
+const requireSocketAuth = (socket) => {
+  if (socket.data && socket.data.user) {
+    return true;
+  }
+
+  socket.emit('error', {
+    type: SOCKET_AUTH_REQUIRED,
+    message: 'Vui lòng đăng nhập để sử dụng chat.',
+    timestamp: new Date().toISOString(),
+  });
+  return false;
+};
 
 const initializeSocketHandlers = (io) => {
   _io = io;
   logger.info('Initializing Socket.IO handlers...');
 
+  io.use(authenticateSocket);
+
   io.on('connection', (socket) => {
     const clientIP = socket.handshake.address;
     const userAgent = socket.handshake.headers['user-agent'];
-    
-    console.log(`New client connected: ${socket.id} from ${clientIP}`);
-    
+
+    logger.info({ socketId: socket.id, clientIP }, 'New client connected');
+
     const clientCount = io.sockets.sockets.size;
-    console.log(`Total connected clients: ${clientCount}`);
+    logger.info({ socketId: socket.id, clientCount }, 'Total connected clients');
 
     socket.emit('welcome', {
       message: 'Connected to Smart AI Backend',
@@ -61,20 +77,25 @@ const initializeSocketHandlers = (io) => {
   });
 
   io.on('connect_error', (error) => {
-    console.error('Socket.IO connection error:', error);
+    logger.error({ err: error }, 'Socket.IO connection error');
   });
 
-  console.log('Socket.IO handlers initialized successfully');
+  logger.info('Socket.IO handlers initialized successfully');
 };
 
 
 const handleSendMessage = async (socket, data) => {
   try {
-    console.log(`Received message from ${socket.id}:`, {
+    if (!requireSocketAuth(socket)) {
+      return;
+    }
+
+    logger.info({
+      socketId: socket.id,
       sessionId: data?.sessionId,
       messageLength: data?.message?.length || 0,
       timestamp: new Date().toISOString()
-    });
+    }, 'Received message');
 
     // Validation
     if (!data || !data.sessionId || !data.message) {
@@ -122,10 +143,10 @@ const handleSendMessage = async (socket, data) => {
 
     // Import và sử dụng ChatController
     const chatController = require('../controllers/chatController');
-    
+
     // Process message through full RAG pipeline
     const result = await chatController.processMessage(socket, data);
-    
+
     // Emit processing completed
     socket.emit('messageProcessing', {
       sessionId: data.sessionId,
@@ -135,8 +156,8 @@ const handleSendMessage = async (socket, data) => {
     });
 
   } catch (error) {
-    console.error('Error processing message:', error);
-    
+    logger.error({ err: error }, 'Error processing message');
+
     socket.emit('error', {
       type: 'PROCESSING_ERROR',
       message: 'Lỗi khi xử lý tin nhắn. Vui lòng thử lại sau.',
@@ -148,6 +169,10 @@ const handleSendMessage = async (socket, data) => {
 
 const handleJoinRoom = (socket, roomId) => {
   try {
+    if (!requireSocketAuth(socket)) {
+      return;
+    }
+
     if (!roomId || typeof roomId !== 'string') {
       socket.emit('error', {
         type: 'INVALID_ROOM',
@@ -158,15 +183,15 @@ const handleJoinRoom = (socket, roomId) => {
     }
 
     socket.join(roomId);
-    console.log(`Socket ${socket.id} joined room: ${roomId}`);
-    
+    logger.info({ socketId: socket.id, roomId }, 'Socket joined room');
+
     socket.emit('roomJoined', {
       roomId: roomId,
       timestamp: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('Error joining room:', error);
+    logger.error({ err: error }, 'Error joining room');
     socket.emit('error', {
       type: 'ROOM_JOIN_ERROR',
       message: 'Không thể tham gia room.',
@@ -178,22 +203,30 @@ const handleJoinRoom = (socket, roomId) => {
 
 const handleLeaveRoom = (socket, roomId) => {
   try {
+    if (!requireSocketAuth(socket)) {
+      return;
+    }
+
     if (roomId) {
       socket.leave(roomId);
-      console.log(`Socket ${socket.id} left room: ${roomId}`);
-      
+      logger.info({ socketId: socket.id, roomId }, 'Socket left room');
+
       socket.emit('roomLeft', {
         roomId: roomId,
         timestamp: new Date().toISOString()
       });
     }
   } catch (error) {
-    console.error('Error leaving room:', error);
+    logger.error({ err: error }, 'Error leaving room');
   }
 };
 
 
 const handleTyping = (socket, data) => {
+  if (!requireSocketAuth(socket)) {
+    return;
+  }
+
   if (data && data.sessionId) {
     socket.broadcast.emit('userTyping', {
       sessionId: data.sessionId,
@@ -205,6 +238,10 @@ const handleTyping = (socket, data) => {
 
 
 const handleStopTyping = (socket, data) => {
+  if (!requireSocketAuth(socket)) {
+    return;
+  }
+
   if (data && data.sessionId) {
     socket.broadcast.emit('userStoppedTyping', {
       sessionId: data.sessionId,
@@ -216,15 +253,15 @@ const handleStopTyping = (socket, data) => {
 
 
 const handleDisconnect = (socket, reason) => {
-  console.log(`Client disconnected: ${socket.id}, reason: ${reason}`);
-  
+  logger.info({ socketId: socket.id, reason }, 'Client disconnected');
+
   if (process.env.NODE_ENV === 'development') {
-    console.log(`Disconnect details:`, {
+    logger.info({
       socketId: socket.id,
       reason: reason,
       timestamp: new Date().toISOString(),
       connectionDuration: Date.now() - (socket.connectedAt || Date.now())
-    });
+    }, 'Disconnect details');
   }
 
   const clientCount = socket.server.sockets.sockets.size;
@@ -233,15 +270,15 @@ const handleDisconnect = (socket, reason) => {
 
 
 const handleSocketError = (socket, error) => {
-  console.error(`Socket error for ${socket.id}:`, error);
-  
+  logger.error({ err: error }, 'Socket error');
+
   if (process.env.NODE_ENV === 'development') {
-    console.error('Socket error details:', {
+    logger.error({
       socketId: socket.id,
       error: error.message,
       stack: error.stack,
       timestamp: new Date().toISOString()
-    });
+    }, 'Socket error details');
   }
 
   socket.emit('error', {
@@ -254,7 +291,7 @@ const handleSocketError = (socket, error) => {
 const getSocketStats = (io) => {
   const sockets = io.sockets.sockets;
   const connectedClients = sockets.size;
-  
+
   const rooms = {};
   for (const [socketId, socket] of sockets) {
     socket.rooms.forEach(room => {

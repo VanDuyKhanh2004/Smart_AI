@@ -1,6 +1,6 @@
 # Roadmap
 
-> Verification: status, test totals, and priorities below reflect the repository as verified on **2026-08-04** on branch **`docs/synchronize-project-documentation`** at commit **`8dca92e`** (latest merged main baseline).
+> Verification: status, test totals, and priorities below reflect the repository as verified on **2026-08-04** on branch **`feat/socket-authentication`** (working tree; latest merged main baseline commit **`8dca92e`**).
 
 ## Completed
 
@@ -14,6 +14,7 @@
 - [x] Login IP rate limiting (Redis-backed, 20 attempts/15min)
 - [x] Admin role middleware
 - [x] Complaint route authorization — all 8 endpoints protected with `protect` + `adminMiddleware`
+- [x] Socket.IO chat authentication — JWT handshake (`io.use(...)`) so anonymous clients cannot drive paid AI calls; token from `handshake.auth.token` or `Authorization: Bearer`; refresh tokens rejected; stable auth error codes
 
 ### E-commerce Core
 - [x] Product catalog CRUD with image upload
@@ -67,15 +68,18 @@
 - [x] Centralized error handling — all 18 controllers migrated to `asyncHandler` + `AppError` (legacy `{ success, message }` envelope retained only on product create/update and store/appointment/profile/address routes)
 
 ### Testing & Quality
-- [x] Backend test suite (1611 tests, 39 suites; verified 2026-08-04)
-- [x] Frontend test suite (129 tests, 9 files; verified 2026-08-04, includes chat markdown/code-block regression tests)
+- [x] Backend test suite (1624 tests, 40 suites; verified 2026-08-04)
+- [x] Frontend test suite (153 tests, 11 files; verified 2026-08-04, includes chat markdown/code-block regression tests and chat socket auth tests)
 - [x] CI-enforced TypeScript strict mode check
 - [x] Chat code-block regression coverage — `frontend/src/tests/ChatCodeBlock.test.tsx` (10 scenarios)
+- [x] Socket.IO integration tests — `backend/tests/socketAuth.test.js` (13 scenarios: handshake auth via token/header, all 4 auth error codes, query-param rejection, `socket.data.user` shape, `sendMessage` → AI pipeline, impersonation guard)
+- [x] Frontend chat socket auth tests — `frontend/src/tests/ChatServiceAuth.test.ts` (7 scenarios: token handoff, `connect_error` mapping, no infinite retries, reconnect with fresh token, logout disconnect)
 - [x] Repository hygiene cleanup — untracked `.env.docker`, `uploads/avatars/*.jpg`, root `hortlog -sne`; removed leftover `_probe.test.tsx`
 
 ## Current Baseline
 
-- Backend: 39 suites / **1611 tests** passing; Frontend: 9 files / **129 tests** passing; lint, `tsc -b`, and `npm run build` pass.
+- Backend: 40 suites / **1624 tests** passing; Frontend: 11 files / **153 tests** passing; lint, `tsc -b`, and `npm run build` pass.
+- Chat sockets require a JWT handshake; unauthenticated sockets cannot reach the paid AI pipeline.
 - Production: frontend on Vercel (auto-deploy), backend on Render (manual), MongoDB Atlas (`$vectorSearch`), managed Redis, Cloudinary images, Brevo email (API-only), Google OAuth.
 - Chat responses are a single complete `aiResponse` event (no token-by-token streaming).
 - AI evaluation is offline/mocked only — it does **not** measure live chatbot accuracy or production latency.
@@ -84,19 +88,17 @@
 
 Prioritized by security/cost exposure first, then reliability, then performance. None started.
 
-1. **Socket.IO authentication** — JWT handshake (`io.use(...)`) on the chat socket so anonymous clients cannot drive paid AI calls (currently unauthenticated).
-2. **Chat / general / admin rate limiting** — extend beyond the login endpoint to the chat endpoint, general API, and admin routes.
-3. **Helmet** — add security headers (CSP, `X-Frame-Options`, `X-Content-Type-Options`).
-4. **Startup environment validation** — fail fast / warn on missing required env vars (`BREVO_*`, `GEMINI_API_KEY`, `GOOGLE_*`, etc.) instead of silently skipping features.
-5. **Shiki migration** — replace the dead 621-line Shiki code-block component and unused `shiki`/`react-simple-icons` deps with the active `ai/code-block.tsx` (Shiki-ready).
-6. **Bundle optimization** — address the 1.15 MB main chunk (Vite `>500 kB` warning) with `manualChunks` / vendor splitting.
-7. **E2E tests** — add Playwright/Cypress smoke flows (login → browse → checkout → order; admin moderation).
-8. **Socket.IO integration tests** — cover `sendMessage` → `aiResponse`, validation, rooms, and typing events.
-9. **Controller/service refactoring** — split oversized controllers (`orderController` 803 L, `authController` 726 L, etc.) and extract services for cart/wishlist/compare/review/store/address/promotion/appointment/dashboard.
-10. **True token streaming** — implement token-by-token `aiResponse` chunks (requires backend + frontend changes).
-11. **Live RAG evaluation** — run a small live eval against real Atlas + real LLM to replace mocked-only numbers.
-12. **Observability/metrics** — route remaining `console.*` calls through Pino; add metrics/APM and log aggregation.
-13. **Backend CD** — automate Render deployment (workflow or blueprint) to match frontend CD.
+1. **Chat / general / admin rate limiting** — extend beyond the login endpoint to the chat endpoint, general API, and admin routes.
+2. **Helmet** — add security headers (CSP, `X-Frame-Options`, `X-Content-Type-Options`).
+3. **Startup environment validation** — fail fast / warn on missing required env vars (`BREVO_*`, `GEMINI_API_KEY`, `GOOGLE_*`, etc.) instead of silently skipping features.
+4. **Shiki migration** — replace the dead 621-line Shiki code-block component and unused `shiki`/`react-simple-icons` deps with the active `ai/code-block.tsx` (Shiki-ready).
+5. **Bundle optimization** — address the 1.15 MB main chunk (Vite `>500 kB` warning) with `manualChunks` / vendor splitting.
+6. **E2E tests** — add Playwright/Cypress smoke flows (login → browse → checkout → order; admin moderation).
+7. **Controller/service refactoring** — split oversized controllers (`orderController` 803 L, `authController` 726 L, etc.) and extract services for cart/wishlist/compare/review/store/address/promotion/appointment/dashboard.
+8. **True token streaming** — implement token-by-token `aiResponse` chunks (requires backend + frontend changes).
+9. **Live RAG evaluation** — run a small live eval against real Atlas + real LLM to replace mocked-only numbers.
+10. **Observability/metrics** — route remaining `console.*` calls through Pino; add metrics/APM and log aggregation.
+11. **Backend CD** — automate Render deployment (workflow or blueprint) to match frontend CD.
 
 ## Future Ideas
 
@@ -116,16 +118,15 @@ Prioritized by security/cost exposure first, then reliability, then performance.
 
 ## Technical Debt
 
-- [ ] Socket.IO chat is **unauthenticated** — anonymous AI-cost exposure
 - [ ] No Helmet (CSP / security headers)
 - [ ] Rate limiting only on the login endpoint — chat/general/admin unprotected
 - [ ] Tokens stored in `localStorage` (XSS exposure; `httpOnly` cookie strategy not implemented)
 - [ ] Two error envelopes coexist (`{ success, error: {...} }` vs `{ success, message }` on product create/update and store/appointment/profile/address routes)
 - [ ] Some controller tests mock implementation details (tight coupling to mocks)
 - [ ] No database migration tool for schema changes
-- [ ] Frontend test coverage limited to select components (9 test files vs ~13 feature modules)
+- [ ] Frontend test coverage limited to select components (11 test files vs ~13 feature modules)
 - [ ] No automated performance or load testing
-- [ ] No E2E tests; no Socket.IO integration tests
+- [ ] No E2E tests
 - [ ] Dead code: Shiki code-block component (621 L, no importers), `systemQueue` with no producer, unused exports (`getSocketStats`), unused deps (`nodemailer`, `googleapis`, `@google/generative-ai`, `uuid`, `shiki`, `react-simple-icons`)
 - [ ] Main bundle 1.15 MB with no `manualChunks`
 - [ ] TanStack Query underused (most pages fetch via `useState`/`useEffect`)

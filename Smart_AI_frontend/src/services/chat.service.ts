@@ -1,6 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 
+const ACCESS_TOKEN_KEY = 'accessToken';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -17,11 +19,36 @@ export interface ChatServiceConfig {
   onProcessingStatus: (isProcessing: boolean) => void;
 }
 
+type SocketAuthErrorCode =
+  | 'SOCKET_AUTH_REQUIRED'
+  | 'SOCKET_AUTH_INVALID'
+  | 'SOCKET_AUTH_EXPIRED'
+  | 'SOCKET_USER_NOT_FOUND';
+
+type SocketConnectError = Error & { data?: { code?: string } };
+
+const SOCKET_AUTH_ERROR_MESSAGES: Record<SocketAuthErrorCode, string> = {
+  SOCKET_AUTH_REQUIRED: 'Vui lòng đăng nhập để sử dụng chat',
+  SOCKET_AUTH_INVALID: 'Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.',
+  SOCKET_AUTH_EXPIRED: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+  SOCKET_USER_NOT_FOUND: 'Tài khoản không tồn tại. Vui lòng đăng nhập lại.',
+};
+
+function getSocketAuthErrorMessage(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  return SOCKET_AUTH_ERROR_MESSAGES[code as SocketAuthErrorCode];
+}
+
+function isSocketAuthErrorCode(code: string | undefined): code is SocketAuthErrorCode {
+  return code !== undefined && getSocketAuthErrorMessage(code) !== undefined;
+}
+
 class ChatService {
   private socket: Socket | null = null;
   private sessionId: string;
   private config: ChatServiceConfig | null = null;
   private isConnected = false;
+  private currentToken: string | null = null;
 
   constructor() {
     this.sessionId = uuidv4();
@@ -29,16 +56,48 @@ class ChatService {
 
   initialize(config: ChatServiceConfig) {
     this.config = config;
-    this.connect();
+
+    // Never create a token-less socket. If the user is logged out, show the
+    // login-required state locally instead of attempting a handshake.
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    if (!token) {
+      this.ensureDisconnectedState();
+      return;
+    }
+
+    this.connect(token);
   }
 
-  private connect() {
+  // Ensures no socket exists and notifies the UI (locally) that login is required.
+  private ensureDisconnectedState() {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this.isConnected = false;
+    this.currentToken = null;
+    this.config?.onDisconnected?.();
+    this.config?.onError(SOCKET_AUTH_ERROR_MESSAGES.SOCKET_AUTH_REQUIRED);
+    this.config?.onProcessingStatus?.(false);
+  }
+
+  private connect(explicitToken?: string | null) {
     const serverUrl = import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000';
-    
+    const token = explicitToken !== undefined ? explicitToken : localStorage.getItem(ACCESS_TOKEN_KEY);
+
+    // Defensive: never connect an unauthenticated socket.
+    if (!token) {
+      this.ensureDisconnectedState();
+      return;
+    }
+
+    this.currentToken = token;
+
     this.socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       timeout: 10000,
       forceNew: true,
+      auth: { token },
     });
 
     this.setupEventListeners();
@@ -47,28 +106,36 @@ class ChatService {
   private setupEventListeners() {
     if (!this.socket || !this.config) return;
 
+    // Events from a socket that was disconnected or replaced (e.g. during
+    // logout) must be ignored, otherwise a stale handshake failure could still
+    // surface as SOCKET_AUTH_REQUIRED after the user logged out.
+    const socket = this.socket;
+
     // Connection events
-    this.socket.on('connect', () => {
-      console.log('Connected to chat server:', this.socket?.id);
+    socket.on('connect', () => {
+      if (this.socket !== socket) return;
+      console.log('Connected to chat server:', socket.id);
       this.isConnected = true;
       this.config?.onConnected();
     });
 
-    this.socket.on('disconnect', (reason) => {
+    socket.on('disconnect', (reason) => {
+      if (this.socket !== socket) return;
       console.log('Disconnected from chat server:', reason);
       this.isConnected = false;
       this.config?.onDisconnected();
     });
 
     // Welcome message
-    this.socket.on('welcome', (data) => {
+    socket.on('welcome', (data) => {
       console.log('Welcome message:', data);
     });
 
     // AI Response
-    this.socket.on('aiResponse', (data) => {
+    socket.on('aiResponse', (data) => {
+      if (this.socket !== socket) return;
       const { sessionId, message, timestamp } = data;
-      
+
       if (sessionId === this.sessionId) {
         const chatMessage: ChatMessage = {
           id: uuidv4(),
@@ -76,21 +143,23 @@ class ChatService {
           content: message,
           timestamp: new Date(timestamp),
         };
-        
+
         this.config?.onMessage(chatMessage);
         this.config?.onProcessingStatus(false);
       }
     });
 
     // Error handling
-    this.socket.on('error', (error) => {
+    socket.on('error', (error) => {
+      if (this.socket !== socket) return;
       console.error('Chat error:', error);
       this.config?.onError(error.message || 'Đã xảy ra lỗi khi chat');
       this.config?.onProcessingStatus(false);
     });
 
     // Processing status
-    this.socket.on('messageProcessing', (data) => {
+    socket.on('messageProcessing', (data) => {
+      if (this.socket !== socket) return;
       if (data.sessionId === this.sessionId) {
         const isProcessing = data.status === 'started';
         this.config?.onProcessingStatus(isProcessing);
@@ -98,8 +167,21 @@ class ChatService {
     });
 
     // Connection error
-    this.socket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
+    socket.on('connect_error', (error: SocketConnectError) => {
+      if (this.socket !== socket) return;
+      const code = error.data?.code;
+
+      if (isSocketAuthErrorCode(code)) {
+        const message = getSocketAuthErrorMessage(code) as string;
+        console.error('Socket connect error (auth):', code);
+        this.isConnected = false;
+        this.config?.onError(message);
+        this.config?.onProcessingStatus(false);
+        // Stop auto-reconnection so invalid tokens are not retried forever.
+        this.socket?.disconnect();
+        return;
+      }
+
       this.config?.onError('Không thể kết nối đến server chat');
     });
   }
@@ -141,11 +223,44 @@ class ChatService {
     return userMessage;
   }
 
+  // Reconnect with a fresh access token (call after login or token refresh).
+  reconnectWithToken(token?: string | null): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this.isConnected = false;
+    this.connect(token);
+  }
+
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
+    }
+    this.currentToken = null;
+  }
+
+  // Keep the socket in sync with the current auth token.
+  // Call after password login, Google login, hydration, token refresh, or logout.
+  // When the token is omitted it is re-read from localStorage; null means logged out.
+  syncAuthentication(token?: string | null): void {
+    const resolved = token !== undefined ? token : localStorage.getItem(ACCESS_TOKEN_KEY);
+    const nextToken = resolved && resolved.length > 0 ? resolved : null;
+
+    if (!nextToken) {
+      this.ensureDisconnectedState();
+      return;
+    }
+
+    if (!this.socket) {
+      this.connect(nextToken);
+      return;
+    }
+
+    if (this.currentToken !== nextToken) {
+      this.reconnectWithToken(nextToken);
     }
   }
 
