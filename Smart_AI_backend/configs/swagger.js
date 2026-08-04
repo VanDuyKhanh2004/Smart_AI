@@ -2235,3 +2235,4 @@ const options = {
 };
 
 module.exports = swaggerJsdoc(options);
+module.exports.shouldServeSwagger = () => process.env.NODE_ENV !== 'production';

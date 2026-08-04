@@ -7,6 +7,8 @@ require("dotenv").config();
 const logger = require("./utils/logger");
 const correlationId = require("./middlewares/correlationId");
 const requestLogger = require("./middlewares/requestLogger");
+const securityHeaders = require("./middlewares/securityHeaders");
+const { trustProxyHops } = require("./configs/trustProxy");
 
 const { connectDatabase } = require("./configs/database");
 const { connectRedis } = require("./configs/redis");
@@ -55,8 +57,17 @@ const io = socketIo(server, {
   transports: ["websocket", "polling"],
 });
 
+app.disable("x-powered-by");
+
+// Bounded numeric trust proxy so req.ip resolves the real client address
+// behind Cloudflare + Render. TRUST_PROXY_HOPS is never unrestricted `true`.
+app.set("trust proxy", trustProxyHops);
+
 // Correlation ID must run first so all downstream middleware/routes have req.requestId
 app.use(correlationId);
+
+// Security headers applied before body parsers so every response is covered
+app.use(securityHeaders());
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -83,10 +94,12 @@ app.use(requestLogger);
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./configs/swagger");
 
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: ".swagger-ui .topbar { display: none }",
-  customSiteTitle: "Smart AI API Docs",
-}));
+if (swaggerSpec.shouldServeSwagger()) {
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customCss: ".swagger-ui .topbar { display: none }",
+    customSiteTitle: "Smart AI API Docs",
+  }));
+}
 
 /* ============================================================
    Basic Routes
