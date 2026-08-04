@@ -5,10 +5,22 @@ const { search: semanticSearch } = require("../services/productSearchService");
 const { recommend: productRecommend } = require("../services/productRecommendationService");
 const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddingContent");
 const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
-const { uploadProductImageIfNeeded, ProductImageValidationError } = require("../services/productImageService");
+const { uploadProductImageIfNeeded, deleteImageFromCloudinary, ProductImageValidationError } = require("../services/productImageService");
 const logger = require("../utils/logger");
 const asyncHandler = require("../utils/asyncHandler");
 const { AppError, BadRequestError, NotFoundError } = require("../utils/errors");
+
+/**
+ * Best-effort Cloudinary image cleanup. Never throws, so it can safely run
+ * during rollback without masking the original error.
+ */
+async function cleanupProductImage(publicId, log, requestId) {
+  if (!publicId) return;
+  const result = await deleteImageFromCloudinary(publicId);
+  if (!result.deleted) {
+    log.warn({ publicId, requestId }, 'Cloudinary image cleanup failed; continuing without it');
+  }
+}
 
 const createProduct = asyncHandler(async (req, res) => {
   req.errorResponseFormat = 'legacy-top-level-message';
@@ -65,7 +77,15 @@ const createProduct = asyncHandler(async (req, res) => {
     embeddingStatus: 'pending',
   });
 
-  const savedProduct = await newProduct.save();
+  let savedProduct;
+  try {
+    savedProduct = await newProduct.save();
+  } catch (error) {
+    if (processedPublicId) {
+      await cleanupProductImage(processedPublicId, log, req.requestId);
+    }
+    throw error;
+  }
   log.info({ productId: savedProduct._id.toString(), requestId: req.requestId }, 'Product created');
 
   const canonicalText = buildEmbeddingContent(savedProduct);
@@ -350,6 +370,11 @@ const getRecommendations = asyncHandler(async (req, res) => {
 
 /**
  * Delete product (soft delete by setting isActive = false)
+ *
+ * Deliberately does NOT destroy the Cloudinary image: order items copy
+ * product.image at purchase time (orderController.js -> orderItemSchema.image),
+ * so the Cloudinary URL remains referenced by order history. Permanent asset
+ * cleanup is deferred to a future reference-aware cleanup job.
  */
 const deleteProduct = asyncHandler(async (req, res) => {
   const productId = req.params.id;
@@ -469,13 +494,28 @@ const updateProduct = asyncHandler(async (req, res) => {
     updateOp.$unset = $unset;
   }
 
-  const updatedProduct = await Product.findByIdAndUpdate(productId, updateOp, {
-    new: true,
-    runValidators: true,
-  });
+  let updatedProduct;
+  try {
+    updatedProduct = await Product.findByIdAndUpdate(productId, updateOp, {
+      new: true,
+      runValidators: true,
+    });
+  } catch (error) {
+    if (processedPublicId) {
+      await cleanupProductImage(processedPublicId, log, req.requestId);
+    }
+    throw error;
+  }
 
   if (!updatedProduct) {
+    if (processedPublicId) {
+      await cleanupProductImage(processedPublicId, log, req.requestId);
+    }
     throw new NotFoundError("Không tìm thấy sản phẩm");
+  }
+
+  if (image !== undefined && existing.imagePublicId && processedImage !== existing.image) {
+    await cleanupProductImage(existing.imagePublicId, log, req.requestId);
   }
 
   if (shouldEnqueue) {

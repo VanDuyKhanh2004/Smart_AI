@@ -6,6 +6,12 @@ const MAX_DECODED_SIZE_BYTES = 5 * 1024 * 1024;
 const DATA_URI_REGEX = /^data:(image\/([a-zA-Z0-9+]+));base64,(.*)$/;
 const BASE64_STRICT = /^[A-Za-z0-9+/]*={0,2}$/;
 
+const UPLOAD_OPTIONS = {
+  folder: 'smart-ai/products',
+  resource_type: 'image',
+  allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+};
+
 class ProductImageValidationError extends Error {
   constructor(message) {
     super(message);
@@ -140,6 +146,31 @@ function validateImageInput(image) {
   return { valid: false, error: 'Invalid image format. Provide an HTTPS URL or a valid data URI.' };
 }
 
+function getClientOrThrow() {
+  const client = getClient();
+  if (!client) {
+    throw new Error('Cloudinary is not configured');
+  }
+  return client;
+}
+
+function uploadStreamToCloudinary(buffer) {
+  const client = getClientOrThrow();
+  return new Promise((resolve, reject) => {
+    const uploadStream = client.uploader.upload_stream(
+      UPLOAD_OPTIONS,
+      (error, result) => {
+        if (error) {
+          reject(new Error('Cloudinary upload failed'));
+        } else {
+          resolve(result);
+        }
+      }
+    );
+    uploadStream.end(buffer);
+  });
+}
+
 async function uploadProductImageIfNeeded(image) {
   const validation = validateImageInput(image);
 
@@ -155,30 +186,52 @@ async function uploadProductImageIfNeeded(image) {
     return { imageUrl: validation.value, imagePublicId: null };
   }
 
-  const client = getClient();
-  if (!client) {
-    throw new Error('Cloudinary is not configured');
-  }
-
-  const result = await new Promise((resolve, reject) => {
-    const uploadStream = client.uploader.upload_stream(
-      {
-        folder: 'smart-ai/products',
-        resource_type: 'image',
-        allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-      },
-      (error, result) => {
-        if (error) {
-          reject(new Error('Cloudinary upload failed'));
-        } else {
-          resolve(result);
-        }
-      }
-    );
-    uploadStream.end(validation.buffer);
-  });
+  const result = await uploadStreamToCloudinary(validation.buffer);
 
   return { imageUrl: result.secure_url, imagePublicId: result.public_id };
 }
 
-module.exports = { uploadProductImageIfNeeded, validateImageInput, isBase64DataUri, isAbsoluteHttpsUrl, ProductImageValidationError };
+/**
+ * Best-effort Cloudinary asset deletion for product images.
+ * Never throws. Returns a stable status object so callers can decide
+ * whether to log a warning without masking their original error.
+ *
+ * @param {string|null|undefined} publicId Cloudinary public id to destroy.
+ * @returns {Promise<{deleted: boolean, publicId: string|null, result: 'deleted'|'not_found'|'skipped'|'failed', error?: Error}>}
+ */
+async function deleteImageFromCloudinary(publicId) {
+  if (typeof publicId !== 'string' || publicId.length === 0) {
+    return { deleted: true, publicId: null, result: 'skipped' };
+  }
+
+  const client = getClient();
+  if (!client) {
+    return { deleted: false, publicId, result: 'failed', error: new Error('Cloudinary is not configured') };
+  }
+
+  let response;
+  try {
+    response = await client.uploader.destroy(publicId);
+  } catch (error) {
+    return { deleted: false, publicId, result: 'failed', error };
+  }
+
+  if (response && response.result === 'ok') {
+    return { deleted: true, publicId, result: 'deleted' };
+  }
+
+  if (response && response.result === 'not found') {
+    return { deleted: true, publicId, result: 'not_found' };
+  }
+
+  return { deleted: false, publicId, result: 'failed', error: new Error('Cloudinary destroy returned an unexpected result') };
+}
+
+module.exports = {
+  uploadProductImageIfNeeded,
+  validateImageInput,
+  isBase64DataUri,
+  isAbsoluteHttpsUrl,
+  deleteImageFromCloudinary,
+  ProductImageValidationError,
+};
