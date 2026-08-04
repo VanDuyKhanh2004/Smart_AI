@@ -55,6 +55,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         error: null,
       });
 
+      // Sync the chat socket with the fresh access token so it reconnects with auth.
+      try {
+        const { default: chatService } = await import('@/services/chat.service');
+        chatService.syncAuthentication(accessToken);
+      } catch {
+        // Ignore chat sync errors during login
+      }
+
       // Merge guest cart with user cart after successful login (don't block on failure)
       useCartStore.getState().mergeGuestCart().catch(() => {
         // Ignore cart merge errors
@@ -116,12 +124,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     } finally {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
-      
+
+      // Disconnect any live chat socket so it cannot keep using the cleared token.
+      try {
+        const { default: chatService } = await import('@/services/chat.service');
+        chatService.syncAuthentication(null);
+      } catch {
+        // Ignore chat disconnect errors during logout
+      }
+
       // Clear local cart state on logout
       useCartStore.getState().clearLocalCart();
       // Clear wishlist state on logout
       useWishlistStore.getState().reset();
-      
+
       set({
         user: null,
         accessToken: null,
@@ -143,12 +159,28 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       
       localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
       set({ accessToken });
+
+      // Sync the chat socket with the refreshed token.
+      try {
+        const { default: chatService } = await import('@/services/chat.service');
+        chatService.syncAuthentication(accessToken);
+      } catch {
+        // Ignore chat sync errors during token refresh
+      }
       return true;
     } catch {
       // Refresh failed, clear auth state
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
-      
+
+      // Disconnect the chat socket so it cannot keep using the cleared token.
+      try {
+        const { default: chatService } = await import('@/services/chat.service');
+        chatService.syncAuthentication(null);
+      } catch {
+        // Ignore chat sync errors during refresh failure
+      }
+
       set({
         user: null,
         accessToken: null,
@@ -177,6 +209,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       isAuthenticated: true,
       error: null,
     });
+
+    // Sync the chat socket with the fresh access token (Google login).
+    import('@/services/chat.service')
+      .then(({ default: chatService }) => {
+        chatService.syncAuthentication(accessToken);
+      })
+      .catch(() => {
+        // Ignore chat sync errors during Google login
+      });
 
     // Merge guest cart and fetch wishlist
     useCartStore.getState().mergeGuestCart().catch(() => {});
@@ -224,6 +265,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
       });
+      // Sync the chat socket with the hydrated token.
+      try {
+        const { default: chatService } = await import('@/services/chat.service');
+        chatService.syncAuthentication();
+      } catch {
+        // Ignore chat sync errors during initialization
+      }
       // Fetch cart for authenticated user (don't await to prevent blocking)
       useCartStore.getState().fetchCart().catch(() => {
         // Ignore cart fetch errors
@@ -237,6 +285,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       // If we reach here, the interceptor's refresh failed and
       // localStorage tokens have been cleared by the interceptor.
       // No need to retry refresh — just set unauthenticated state.
+      // Disconnect the chat socket so it cannot keep using the cleared token.
+      try {
+        const { default: chatService } = await import('@/services/chat.service');
+        chatService.syncAuthentication(null);
+      } catch {
+        // Ignore chat sync errors during initialization failure
+      }
       set({
         user: null,
         accessToken: null,

@@ -105,7 +105,7 @@ This address is public. Reporters may alternatively use GitHub private vulnerabi
 1. **Environment separation** — Use separate API keys, databases, and Redis instances for development and production.
 2. **HTTPS only** — The production backend must be served over HTTPS (handled by Render). The frontend on Vercel is HTTPS by default.
 3. **CORS hardening** — `FRONTEND_URL` must be set to the exact production frontend origin. Do not use wildcard `*` in production.
-4. **Rate limiting** — Currently only on the login endpoint (Redis-backed, IP-based). **Known limitation:** no general/admin/chat rate limiting yet. Add rate limiting on admin endpoints, general API, and the unauthenticated chat endpoint in production.
+4. **Rate limiting** — Currently only on the login endpoint (Redis-backed, IP-based). **Known limitation:** no general/admin/chat rate limiting yet. Add rate limiting on admin endpoints, general API, and the chat endpoint in production.
 5. **Error handler middleware** — Implemented. `middlewares/errorHandler.js` is a centralized `errorHandler` (with `notFoundHandler` and `AppError` classes in `utils/errors/`) that normalizes Mongoose/JWT errors and returns consistent error envelopes. A small set of legacy controllers still produce legacy response shapes (see `docs/API_OVERVIEW.md`).
 6. **Redis auto-reconnect** — Implemented with exponential backoff (`min(500 × 2^attempt, 30000)ms`, infinite retries); disabled during graceful shutdown.
 7. **No SMS fallback** — Email-only via Brevo (API, not SMTP). If SMS is added later, manage credentials separately.
@@ -115,7 +115,7 @@ This address is public. Reporters may alternatively use GitHub private vulnerabi
 
 ## Known Limitations
 
-- **Socket.IO chat is unauthenticated** — any client can connect and call `sendMessage`, driving paid OpenAI/Gemini calls anonymously. A JWT handshake (`io.use(...)`) is the recommended next security work item.
+- **Socket.IO chat requires JWT handshake authentication** — the chat socket verifies an access token (`handshake.auth.token` or `Authorization: Bearer`) at connection time via `io.use(...)` and rejects unauthenticated clients with stable codes (`SOCKET_AUTH_REQUIRED`/`INVALID`/`EXPIRED`/`USER_NOT_FOUND`) before they can drive paid AI calls. **Known limitation:** the access token originates from `localStorage` on the frontend (see the `localStorage` item below); a rate limiter for the chat endpoint is not yet implemented.
 - **Helmet is not implemented** — no CSP / `X-Frame-Options` / `X-Content-Type-Options` security headers are set.
 - **Broad rate limiting is not implemented** — only the login endpoint is rate-limited (Redis-backed).
 - **Tokens in `localStorage`** — the frontend stores access and refresh tokens in `localStorage` (`src/lib/axios.ts`, `src/stores/authStore.ts`). This is exposed to any XSS that runs in the page context; an `httpOnly` cookie strategy would remove that exposure but requires backend session/refresh changes.

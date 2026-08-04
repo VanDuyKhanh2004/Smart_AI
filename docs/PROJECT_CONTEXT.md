@@ -4,10 +4,10 @@
 |-------|-------|
 | **Last updated** | 2026-08-04 |
 | **Verified commit** | `8dca92e` (latest merged main baseline: merge of PR #77 `chore/repository-hygiene`) |
-| **Verified branch** | `docs/synchronize-project-documentation` |
-| **Current branch** | `docs/synchronize-project-documentation` |
-| **Current task** | Documentation synchronization (README, SECURITY, docs/*, env templates) against verified production facts |
-| **Next task (recommended)** | Socket.IO chat authentication — attach JWT handshake so chat cannot be used to drive paid AI calls anonymously (see `docs/ROADMAP.md`). **Not started.** |
+| **Verified branch** | `feat/socket-authentication` (working tree) |
+| **Current branch** | `feat/socket-authentication` |
+| **Current task** | Socket.IO chat authentication — JWT handshake on the chat socket so anonymous clients cannot drive paid AI calls. **Implemented; awaiting review/merge.** |
+| **Next task (recommended)** | Chat / general / admin rate limiting (next ROADMAP priority after Socket.IO auth). |
 | **Known blockers** | None |
 
 > Update this block after each merged PR.
@@ -45,11 +45,11 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details. Chat responses are de
 - Cache/Queue: Redis managed
 - Images: Cloudinary (all product images migrated)
 - Email: Brevo configured (API-only; no SMTP)
-- Frontend test total: 129 tests / 9 files; Backend: 1611 tests / 39 suites (verified 2026-08-04)
+- Frontend test total: 153 tests / 11 files; Backend: 1624 tests / 40 suites (verified 2026-08-04)
 
 # Known Limitations
 
-- Socket.IO chat is **unauthenticated** — any client can drive paid AI calls (known limitation; see ROADMAP next priority).
+- Socket.IO chat requires a JWT access-token handshake — unauthenticated clients are rejected before reaching AI processing (see ROADMAP / SECURITY). Known limitation: the access token still originates from `localStorage` on the frontend.
 - No Helmet (CSP/security headers) and rate limiting covers only the login endpoint (see ROADMAP / SECURITY).
 - Access and refresh tokens are stored in `localStorage` on the frontend (XSS exposure trade-off; see SECURITY.md).
 - Centralized error handling: `middlewares/errorHandler.js` is fully implemented with `AppError` classes; **all 18 controllers use `asyncHandler` + `AppError`** (order `createOrder` included). A subset of paths still requests the legacy `{ success, message }` top-level error envelope via `req.errorResponseFormat = 'legacy-top-level-message'`: product `createProduct`/`updateProduct`, and the store, appointment, profile, and address route groups (`routes/storeRoutes.js`, `appointmentRoutes.js`, `profileRoutes.js`, `addressRoutes.js`).

@@ -103,6 +103,7 @@ describe('shutdownSocketIO', () => {
     const io = new EventEmitter();
     io.sockets = { sockets: new Map() };
     io.emit = jest.fn();
+    io.use = jest.fn();
     let closeCalled = false;
     io.close = jest.fn((cb) => {
       closeCalled = true;
@@ -124,7 +125,9 @@ describe('shutdownSocketIO', () => {
     const sigintCount = process.listeners('SIGINT').length;
     const sigtermCount = process.listeners('SIGTERM').length;
 
-    socketHandler.initializeSocketHandlers(new EventEmitter());
+    const io = new EventEmitter();
+    io.use = jest.fn();
+    socketHandler.initializeSocketHandlers(io);
 
     expect(process.listeners('SIGINT').length).toBe(sigintCount);
     expect(process.listeners('SIGTERM').length).toBe(sigtermCount);
