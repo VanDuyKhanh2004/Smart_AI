@@ -11,10 +11,11 @@ const {
 } = require('../controllers/productController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { semanticSearchLimiter } = require('../middlewares/rateLimiters');
 
 // Public routes
 router.get('/', getAllProducts);
-router.get('/search/semantic', searchSemantic);
+router.get('/search/semantic', semanticSearchLimiter, searchSemantic);
 router.get('/:id/recommendations', getRecommendations);
 router.get('/:id', getProductById);
 

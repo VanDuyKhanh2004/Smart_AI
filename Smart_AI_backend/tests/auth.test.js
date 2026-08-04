@@ -113,6 +113,7 @@ jest.mock('google-auth-library', () => ({
 
 const authRoutes = require('../routes/authRoutes');
 const errorHandler = require('../middlewares/errorHandler');
+const { resetRateLimiters } = require('../middlewares/rateLimiters');
 const express = require('express');
 
 function buildApp() {
@@ -132,6 +133,7 @@ describe('Auth Controller — centralized error handling', () => {
   const mockFindById = (...results) => { findByIdQueue.push(...results); };
 
   beforeEach(() => {
+    resetRateLimiters();
     app = buildApp();
     jest.clearAllMocks();
     findOneQueue = [];

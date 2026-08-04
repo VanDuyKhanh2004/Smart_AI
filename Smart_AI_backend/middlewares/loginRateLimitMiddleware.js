@@ -7,13 +7,7 @@ const LOGIN_IP_BLOCK_MINUTES = Number(process.env.LOGIN_IP_BLOCK_MINUTES || 15);
 const WINDOW_MS = LOGIN_IP_WINDOW_MINUTES * 60 * 1000;
 const BLOCK_MS = LOGIN_IP_BLOCK_MINUTES * 60 * 1000;
 
-const getClientIp = (req) => {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim();
-  }
-  return req.ip || req.connection?.remoteAddress || 'unknown';
-};
+const getClientIp = (req) => req.ip || req.connection?.remoteAddress || 'unknown';
 
 const loginRateLimit = async (req, res, next) => {
   try {
