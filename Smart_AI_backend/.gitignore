@@ -12,6 +12,8 @@ coverage/
 
 uploads/
 
+uploads/.gitkeep
+
 npm-debug.log*
 
 evaluation-results/

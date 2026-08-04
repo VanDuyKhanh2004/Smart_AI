@@ -24,6 +24,8 @@ pnpm-debug.log*
 dist/
 build/
 coverage/
+.vite/
+*.tsbuildinfo
 
 #################################################
 # Logs
