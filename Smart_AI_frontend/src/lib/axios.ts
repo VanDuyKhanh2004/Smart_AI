@@ -1,12 +1,32 @@
 import axios from 'axios';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { resolveApiBaseUrl } from './apiBaseUrl';
+import { resolveApiBaseUrl, ApiConfigError, type ApiConfigState } from './apiBaseUrl';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 
+let apiConfigState: ApiConfigState;
+
+try {
+  apiConfigState = { status: 'ok', baseUrl: resolveApiBaseUrl() };
+} catch (error) {
+  if (error instanceof ApiConfigError) {
+    apiConfigState = { status: error.reason };
+  } else {
+    throw error;
+  }
+}
+
+export function getApiConfigState(): ApiConfigState {
+  return apiConfigState;
+}
+
+export function isApiConfigured(): boolean {
+  return apiConfigState.status === 'ok';
+}
+
 const apiClient = axios.create({
-  baseURL: resolveApiBaseUrl(),
+  baseURL: apiConfigState.status === 'ok' ? apiConfigState.baseUrl : '',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -32,6 +52,9 @@ const processQueue = (error: Error | null, token: string | null = null) => {
 
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    if (apiConfigState.status !== 'ok') {
+      return Promise.reject(new ApiConfigError(apiConfigState.status));
+    }
     const token = localStorage.getItem(ACCESS_TOKEN_KEY);
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;

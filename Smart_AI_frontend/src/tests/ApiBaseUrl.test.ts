@@ -1,6 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveApiBaseUrl, resolveBackendOrigin } from '@/lib/apiBaseUrl';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { resolveApiBaseUrl, resolveBackendOrigin, ApiConfigError } from '@/lib/apiBaseUrl';
 import { isHtmlResponse } from '@/lib/axios';
+
+function captureError(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected function to throw');
+}
 
 describe('resolveApiBaseUrl', () => {
   it('uses configured Render URL', () => {
@@ -41,54 +50,75 @@ describe('resolveApiBaseUrl', () => {
     })).toBe('http://localhost:5000/api');
   });
 
-  it('throws when config is missing in production', () => {
-    expect(() => resolveApiBaseUrl({
+  it('throws typed missing error when config is missing in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
       configuredUrl: '',
       isDev: false,
-    })).toThrow('VITE_API_BASE_URL is not set');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('missing');
   });
 
-  it('rejects relative URL starting with slash', () => {
-    expect(() => resolveApiBaseUrl({
-      configuredUrl: '/api',
+  it('rejects relative URL starting with slash as typed invalid', () => {
+    const raw = '/private-path';
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: raw,
       isDev: false,
-    })).toThrow('must be an absolute HTTP/HTTPS URL');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).not.toContain(raw);
   });
 
-  it('rejects relative URL without scheme', () => {
-    expect(() => resolveApiBaseUrl({
-      configuredUrl: 'api',
+  it('rejects relative URL without scheme as typed invalid', () => {
+    const raw = 'relative-value-xyz';
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: raw,
       isDev: false,
-    })).toThrow('must be an absolute HTTP/HTTPS URL');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).not.toContain(raw);
   });
 
-  it('rejects malformed URL with invalid port', () => {
-    expect(() => resolveApiBaseUrl({
+  it('rejects malformed URL with invalid port as typed invalid', () => {
+    const error = captureError(() => resolveApiBaseUrl({
       configuredUrl: 'http://example.com:abc/api',
       isDev: false,
-    })).toThrow('not a valid URL');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).not.toContain('example.com');
   });
 
-  it('rejects bare http:// (becomes http: after slash normalization)', () => {
-    expect(() => resolveApiBaseUrl({
+  it('rejects bare http:// as typed invalid', () => {
+    const error = captureError(() => resolveApiBaseUrl({
       configuredUrl: 'http://',
       isDev: false,
-    })).toThrow('must be an absolute HTTP/HTTPS URL');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
   });
 
-  it('rejects non-HTTP protocol', () => {
-    expect(() => resolveApiBaseUrl({
+  it('rejects non-HTTP protocol as typed invalid', () => {
+    const error = captureError(() => resolveApiBaseUrl({
       configuredUrl: 'ftp://backend.example.com/api',
       isDev: false,
-    })).toThrow('must use http: or https: protocol');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).not.toContain('backend.example.com');
   });
 
-  it('rejects URL pointing at the frontend origin', () => {
-    expect(() => resolveApiBaseUrl({
+  it('rejects URL pointing at the frontend origin as typed invalid', () => {
+    const error = captureError(() => resolveApiBaseUrl({
       configuredUrl: 'http://localhost:3000/api',
       isDev: false,
       frontendOrigin: 'http://localhost:3000',
-    })).toThrow('resolves to the frontend origin');
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).toContain('frontend origin');
   });
 });
 
@@ -255,5 +285,117 @@ describe('Integration: Google login URL uses backend origin', () => {
     });
     const googleLoginUrl = `${origin}/api/auth/google-login`;
     expect(googleLoginUrl).toBe('https://smart-ai-backend-twe5.onrender.com/api/auth/google-login');
+  });
+});
+
+describe('Regression: production API URL validation', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('accepts production HTTPS API base URL ending with /api', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com/api',
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
+  });
+
+  it('accepts production HTTPS backend origin', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'https://smart-ai-backend-twe5.onrender.com',
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com');
+  });
+
+  it('accepts localhost HTTP URL in development', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:5000/api',
+      isDev: true,
+      frontendOrigin: 'http://localhost:5173',
+    })).toBe('http://localhost:5000/api');
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: '  https://smart-ai-backend-twe5.onrender.com/api  \n',
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
+  });
+
+  it('rejects relative URL without echoing the value', () => {
+    const raw = 'backend.example.com/api';
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: raw,
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).not.toContain(raw);
+  });
+
+  it('rejects unsupported protocol without echoing the value', () => {
+    const raw = 'ws://backend.example.com/api';
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: raw,
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).not.toContain(raw);
+  });
+
+  it('does not fall back to localhost when the variable is missing in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: '',
+      isDev: false,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('missing');
+    expect((error as Error).message).not.toBe('http://localhost:5000/api');
+  });
+
+  it('converts invalid production configuration into the typed configuration error', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: 'not a url',
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('never includes the configured raw value in error output', () => {
+    const raw = 'private-token.example';
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: raw,
+      isDev: false,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as Error).message).not.toContain(raw);
+  });
+
+  it('derives backend origin without corrupting a hostname or path containing "api"', () => {
+    expect(resolveBackendOrigin({
+      configuredUrl: 'https://api.smart-ai-backend.example.com:8443/api/v1/',
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    })).toBe('https://api.smart-ai-backend.example.com:8443');
+  });
+
+  it('valid production configuration does not throw during application initialization', () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://smart-ai-backend-twe5.onrender.com/api');
+    expect(() => resolveApiBaseUrl({
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    })).not.toThrow();
+    expect(resolveApiBaseUrl({
+      isDev: false,
+      frontendOrigin: 'https://smart-ai-shop.vercel.app',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
   });
 });

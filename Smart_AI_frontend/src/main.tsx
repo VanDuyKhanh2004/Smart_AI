@@ -2,8 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import 'leaflet/dist/leaflet.css'
-import './App.css'  
-import App from './App.tsx'
+import './App.css'
+import App from '@/App'
+import { getApiConfigState } from '@/lib/axios'
+import { ConfigErrorPage } from '@/components/config/ConfigErrorPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,10 +16,21 @@ const queryClient = new QueryClient({
   },
 })
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root')
+if (!rootElement) {
+  throw new Error('Root element #root not found')
+}
+
+const apiConfigState = getApiConfigState()
+
+createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    {apiConfigState.status === 'ok' ? (
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    ) : (
+      <ConfigErrorPage state={apiConfigState} />
+    )}
   </StrictMode>,
 )
