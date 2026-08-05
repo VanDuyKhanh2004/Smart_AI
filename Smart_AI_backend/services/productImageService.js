@@ -12,6 +12,15 @@ const UPLOAD_OPTIONS = {
   allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
 };
 
+const MAGIC_BYTES = {
+  'image/jpeg': [0xff, 0xd8, 0xff],
+  'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  'image/webp': null, // RIFF....WEBP, checked by string comparison below
+};
+
+const WEBP_RIFF = 'RIFF';
+const WEBP_MARKER = 'WEBP';
+
 class ProductImageValidationError extends Error {
   constructor(message) {
     super(message);
@@ -171,6 +180,66 @@ function uploadStreamToCloudinary(buffer) {
   });
 }
 
+/**
+ * Verify that a buffer's leading bytes match the magic signature of the
+ * declared MIME type. Rejects spoofed MIME types (e.g. a PNG disguised as
+ * image/jpeg).
+ *
+ * @param {Buffer} buffer
+ * @param {string} mimetype declared Content-Type of the upload
+ * @returns {boolean}
+ */
+function matchesMagicBytes(buffer, mimetype) {
+  if (mimetype === 'image/webp') {
+    // RIFF (4) .... (4) WEBP (4)
+    if (buffer.length < 12) return false;
+    return (
+      buffer.toString('ascii', 0, 4) === WEBP_RIFF &&
+      buffer.toString('ascii', 8, 12) === WEBP_MARKER
+    );
+  }
+
+  const signature = MAGIC_BYTES[mimetype];
+  if (!signature || buffer.length < signature.length) return false;
+  return signature.every((byte, index) => buffer[index] === byte);
+}
+
+/**
+ * Upload a raw image buffer (e.g. from multer memory storage) to Cloudinary.
+ *
+ * Validates:
+ *  - buffer present and non-empty
+ *  - MIME is JPEG/PNG/WebP
+ *  - magic bytes match the declared MIME (rejects spoofed MIME types)
+ *  - size <= 5 MB
+ *
+ * @param {Buffer} buffer raw image bytes
+ * @param {string} mimetype declared image MIME type
+ * @returns {Promise<{imageUrl: string|null, imagePublicId: string|null}>}
+ */
+async function uploadProductImageBuffer(buffer, mimetype) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new ProductImageValidationError('Image file is empty');
+  }
+
+  const mime = (mimetype || '').toLowerCase();
+  if (!ALLOWED_MIME_TYPES.includes(mime)) {
+    throw new ProductImageValidationError('Unsupported image type. Allowed: image/jpeg, image/png, image/webp');
+  }
+
+  if (buffer.length > MAX_DECODED_SIZE_BYTES) {
+    const mb = MAX_DECODED_SIZE_BYTES / (1024 * 1024);
+    throw new ProductImageValidationError(`Image too large. Maximum ${mb} MB after decoding.`);
+  }
+
+  if (!matchesMagicBytes(buffer, mime)) {
+    throw new ProductImageValidationError('Image content does not match its declared type');
+  }
+
+  const result = await uploadStreamToCloudinary(buffer);
+  return { imageUrl: result.secure_url, imagePublicId: result.public_id };
+}
+
 async function uploadProductImageIfNeeded(image) {
   const validation = validateImageInput(image);
 
@@ -229,6 +298,7 @@ async function deleteImageFromCloudinary(publicId) {
 
 module.exports = {
   uploadProductImageIfNeeded,
+  uploadProductImageBuffer,
   validateImageInput,
   isBase64DataUri,
   isAbsoluteHttpsUrl,

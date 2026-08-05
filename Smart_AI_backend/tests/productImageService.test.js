@@ -2,7 +2,7 @@ jest.mock('../configs/cloudinary', () => ({
   getClient: jest.fn(),
 }));
 
-const { uploadProductImageIfNeeded, deleteImageFromCloudinary, validateImageInput, isBase64DataUri, isAbsoluteHttpsUrl } = require('../services/productImageService');
+const { uploadProductImageIfNeeded, uploadProductImageBuffer, deleteImageFromCloudinary, validateImageInput, isBase64DataUri, isAbsoluteHttpsUrl } = require('../services/productImageService');
 const { getClient } = require('../configs/cloudinary');
 
 function makeJpegBase64(length = 100) {
@@ -343,6 +343,159 @@ describe('uploadProductImageIfNeeded', () => {
   it('rejects malformed Base64 in upload path', async () => {
     getClient.mockReturnValue({ uploader: { upload_stream: jest.fn() } });
     await expect(uploadProductImageIfNeeded('data:image/jpeg;base64,!!!invalid!!!')).rejects.toThrow(/malformed/i);
+  });
+});
+
+/* ============================================================
+   uploadProductImageBuffer
+============================================================ */
+describe('uploadProductImageBuffer', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function jpegBuffer(length = 100) {
+    const buf = Buffer.alloc(length, 0x00);
+    buf[0] = 0xff; buf[1] = 0xd8; buf[2] = 0xff;
+    return buf;
+  }
+
+  function pngBuffer(length = 100) {
+    const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf = Buffer.alloc(length, 0x00);
+    sig.copy(buf, 0);
+    return buf;
+  }
+
+  function webpBuffer(length = 100) {
+    const buf = Buffer.alloc(length, 0x00);
+    buf.write('RIFF', 0, 'ascii');
+    buf.write('WEBP', 8, 'ascii');
+    return buf;
+  }
+
+  function mockSuccessfulUpload() {
+    const mockUploadStream = jest.fn((_opts, cb) => {
+      const { Writable } = require('stream');
+      const stream = new Writable({
+        write(chunk, _encoding, next) { next(); },
+        final(next) {
+          cb(null, {
+            secure_url: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/buf.jpg',
+            public_id: 'smart-ai/products/buf',
+          });
+          next();
+        },
+      });
+      return stream;
+    });
+    getClient.mockReturnValue({ uploader: { upload_stream: mockUploadStream } });
+    return mockUploadStream;
+  }
+
+  it('valid JPEG buffer uploads to Cloudinary and returns contract', async () => {
+    const mockUploadStream = mockSuccessfulUpload();
+    const result = await uploadProductImageBuffer(jpegBuffer(), 'image/jpeg');
+    expect(result).toEqual({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/smart-ai/products/buf.jpg',
+      imagePublicId: 'smart-ai/products/buf',
+    });
+    expect(mockUploadStream).toHaveBeenCalledWith(
+      expect.objectContaining({ folder: 'smart-ai/products', resource_type: 'image' }),
+      expect.any(Function),
+    );
+  });
+
+  it('valid PNG buffer uploads to Cloudinary', async () => {
+    mockSuccessfulUpload();
+    const result = await uploadProductImageBuffer(pngBuffer(), 'image/png');
+    expect(result.imageUrl).toBe('https://res.cloudinary.com/demo/image/upload/smart-ai/products/buf.jpg');
+    expect(result.imagePublicId).toBe('smart-ai/products/buf');
+  });
+
+  it('valid WebP buffer uploads to Cloudinary', async () => {
+    mockSuccessfulUpload();
+    const result = await uploadProductImageBuffer(webpBuffer(), 'image/webp');
+    expect(result.imageUrl).toBe('https://res.cloudinary.com/demo/image/upload/smart-ai/products/buf.jpg');
+    expect(result.imagePublicId).toBe('smart-ai/products/buf');
+  });
+
+  it('rejects empty buffer', async () => {
+    await expect(uploadProductImageBuffer(Buffer.alloc(0), 'image/jpeg')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+      code: 'INVALID_PRODUCT_IMAGE',
+    });
+  });
+
+  it('rejects non-buffer input', async () => {
+    await expect(uploadProductImageBuffer('not-a-buffer', 'image/jpeg')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+    });
+  });
+
+  it('rejects unsupported MIME type', async () => {
+    await expect(uploadProductImageBuffer(jpegBuffer(), 'image/gif')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+    });
+  });
+
+  it('rejects MIME mismatch - PNG bytes declared as JPEG', async () => {
+    await expect(uploadProductImageBuffer(pngBuffer(), 'image/jpeg')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+      message: expect.stringMatching(/declared type/i),
+    });
+  });
+
+  it('rejects MIME mismatch - JPEG bytes declared as PNG', async () => {
+    await expect(uploadProductImageBuffer(jpegBuffer(), 'image/png')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+    });
+  });
+
+  it('rejects WebP buffer without the WEBP marker', async () => {
+    const buf = Buffer.alloc(100, 0x00);
+    buf.write('RIFF', 0, 'ascii');
+    buf.write('XXXX', 8, 'ascii');
+    await expect(uploadProductImageBuffer(buf, 'image/webp')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+    });
+  });
+
+  it('rejects oversized buffer (>5MB)', async () => {
+    const oversized = jpegBuffer(5 * 1024 * 1024 + 1);
+    await expect(uploadProductImageBuffer(oversized, 'image/jpeg')).rejects.toMatchObject({
+      name: 'ProductImageValidationError',
+      message: expect.stringMatching(/too large/i),
+    });
+  });
+
+  it('accepts buffer exactly at size limit', async () => {
+    mockSuccessfulUpload();
+    const atLimit = jpegBuffer(5 * 1024 * 1024);
+    const result = await uploadProductImageBuffer(atLimit, 'image/jpeg');
+    expect(result.imageUrl).toBe('https://res.cloudinary.com/demo/image/upload/smart-ai/products/buf.jpg');
+  });
+
+  it('wraps Cloudinary failure in controlled error without raw details', async () => {
+    const mockUploadStream = jest.fn((_opts, cb) => {
+      const { Writable } = require('stream');
+      const stream = new Writable({
+        write(chunk, _encoding, next) { next(); },
+        final(next) {
+          cb(new Error('socket hang up'), null);
+          next();
+        },
+      });
+      return stream;
+    });
+    getClient.mockReturnValue({ uploader: { upload_stream: mockUploadStream } });
+
+    await expect(uploadProductImageBuffer(jpegBuffer(), 'image/jpeg')).rejects.toThrow('Cloudinary upload failed');
+  });
+
+  it('throws cleanly when Cloudinary is not configured', async () => {
+    getClient.mockReturnValue(null);
+    await expect(uploadProductImageBuffer(jpegBuffer(), 'image/jpeg')).rejects.toThrow('Cloudinary is not configured');
   });
 });
 
