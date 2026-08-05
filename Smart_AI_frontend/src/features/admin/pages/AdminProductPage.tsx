@@ -18,7 +18,7 @@ import {
 import { ProductForm } from '../components/ProductForm';
 import { AdminProductTable } from '../components/AdminProductTable';
 import { productService } from '@/services/product.service';
-import type { Product, CreateProductRequest } from '@/types/product.type';
+import type { Product, ProductFormPayload } from '@/types/product.type';
 import type { Pagination as PaginationType } from '@/types/api.type';
 
 const DEFAULT_PAGINATION: PaginationType = {
@@ -38,6 +38,7 @@ export function AdminProductPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -68,10 +69,17 @@ export function AdminProductPage() {
     }
   }, [notification]);
 
-  const handleCreateProduct = async (data: CreateProductRequest) => {
+  const handleCreateProduct = async (data: ProductFormPayload) => {
     setIsSubmitting(true);
+    setUploadProgress(0);
     try {
-      await productService.createProduct(data);
+      await productService.createProduct(data, {
+        onUploadProgress: (event) => {
+          if (event.total) {
+            setUploadProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        },
+      });
       setNotification({ type: 'success', message: 'Thêm sản phẩm thành công' });
       setIsFormOpen(false);
       fetchProducts();
@@ -79,6 +87,7 @@ export function AdminProductPage() {
       setNotification({ type: 'error', message: 'Không thể thêm sản phẩm' });
     } finally {
       setIsSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -87,11 +96,18 @@ export function AdminProductPage() {
     setIsFormOpen(true);
   };
 
-  const handleUpdateProduct = async (data: CreateProductRequest) => {
+  const handleUpdateProduct = async (data: ProductFormPayload) => {
     if (!editingProduct) return;
     setIsSubmitting(true);
+    setUploadProgress(0);
     try {
-      await productService.updateProduct(editingProduct._id, data);
+      await productService.updateProduct(editingProduct._id, data, {
+        onUploadProgress: (event) => {
+          if (event.total) {
+            setUploadProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        },
+      });
       setNotification({ type: 'success', message: 'Cập nhật sản phẩm thành công' });
       setIsFormOpen(false);
       setEditingProduct(null);
@@ -100,6 +116,7 @@ export function AdminProductPage() {
       setNotification({ type: 'error', message: 'Không thể cập nhật sản phẩm' });
     } finally {
       setIsSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -220,6 +237,7 @@ export function AdminProductPage() {
             onSubmit={editingProduct ? handleUpdateProduct : handleCreateProduct}
             onCancel={() => { setEditingProduct(null); setIsFormOpen(false); }}
             isLoading={isSubmitting}
+            uploadProgress={uploadProgress}
             initialData={editingProduct || undefined}
           />
         </DialogContent>
