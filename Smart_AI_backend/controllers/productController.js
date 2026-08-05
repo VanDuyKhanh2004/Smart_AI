@@ -168,6 +168,7 @@ const createProduct = asyncHandler(async (req, res) => {
   );
 
   await cache.invalidatePattern("products:*");
+  await cache.del("product-meta");
 
   res.status(201).json({
     success: true,
@@ -343,6 +344,51 @@ const getAllProducts = asyncHandler(async (req, res) => {
   res.status(200).json(responseData);
 });
 
+/**
+ * Lightweight product metadata (brands) used to populate filter UIs.
+ *
+ * Uses a small, dedicated cache key ("product-meta") so it never pollutes the
+ * high-cardinality products:* list cache, and a `distinct` query so full
+ * product documents are never fetched. Inactive products are excluded and the
+ * result is normalized (trimmed, lowercased — matching the Product schema
+ * `lowercase` convention), de-duplicated and sorted.
+ */
+const getProductMeta = asyncHandler(async (req, res) => {
+  const log = req.logger || logger;
+  const cacheKey = "product-meta";
+
+  const cached = await cache.get(cacheKey);
+  if (cached && cached.success === true && Array.isArray(cached.data?.brands)) {
+    log.info({ cache: 'hit', cacheKey }, 'Product meta served from cache');
+    return res.status(200).json(cached);
+  }
+
+  log.info({ cache: 'miss', cacheKey }, 'Product meta cache miss');
+
+  const rawBrands = await Product.distinct("brand", { isActive: true });
+
+  const brands = [
+    ...new Set(
+      rawBrands
+        .filter((brand) => typeof brand === 'string' && brand.trim() !== '')
+        .map((brand) => brand.trim().toLowerCase()),
+    ),
+  ].sort();
+
+  const responseData = {
+    success: true,
+    data: { brands },
+  };
+
+  try {
+    await cache.set(cacheKey, responseData, 300);
+  } catch (error) {
+    log.warn({ cacheKey, error: error.message }, 'Product meta cache write failed');
+  }
+
+  res.status(200).json(responseData);
+});
+
 // Tìm kiếm ngữ nghĩa sản phẩm
 const searchSemantic = asyncHandler(async (req, res) => {
   const query = (req.query.q || '').trim();
@@ -461,6 +507,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
 
   await cache.del("product:" + productId);
   await cache.invalidatePattern("products:*");
+  await cache.del("product-meta");
 
   res.status(200).json({
     success: true,
@@ -605,6 +652,7 @@ const updateProduct = asyncHandler(async (req, res) => {
   // Invalidate cache
   await cache.del("product:" + productId);
   await cache.invalidatePattern("products:*");
+  await cache.del("product-meta");
 
   res.status(200).json({
     success: true,
@@ -616,6 +664,7 @@ const updateProduct = asyncHandler(async (req, res) => {
 module.exports = {
   createProduct,
   getAllProducts,
+  getProductMeta,
   searchSemantic,
   getProductById,
   getRecommendations,

@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createProduct,
   getAllProducts,
+  getProductMeta,
   searchSemantic,
   getProductById,
   getRecommendations,
@@ -17,6 +18,7 @@ const { uploadProductImage } = require('../middlewares/uploadMiddleware');
 // Public routes
 router.get('/', getAllProducts);
 router.get('/search/semantic', semanticSearchLimiter, searchSemantic);
+router.get('/meta', getProductMeta);
 router.get('/:id/recommendations', getRecommendations);
 router.get('/:id', getProductById);
 

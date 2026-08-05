@@ -33,6 +33,7 @@ const routeMap = {
   'GET /api/products':                    { auth: false },
   'POST /api/products':                   { auth: true },
   'GET /api/products/search/semantic':    { auth: false },
+  'GET /api/products/meta':               { auth: false },
   'GET /api/products/{id}':              { auth: false },
   'PUT /api/products/{id}':              { auth: true },
   'DELETE /api/products/{id}':           { auth: true },

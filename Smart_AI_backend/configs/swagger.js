@@ -739,6 +739,35 @@ const options = {
           },
         },
       },
+      '/api/products/meta': {
+        get: {
+          tags: ['Products'],
+          summary: 'Get lightweight product metadata for filter UIs',
+          description:
+            'Returns the distinct list of active product brands, normalized (trimmed, lowercased) and sorted. Lightweight endpoint backed by its own cache key; no product documents are returned.',
+          responses: {
+            200: {
+              description: 'Product metadata',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean' },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          brands: { type: 'array', items: { type: 'string' } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       '/api/products/{id}': {
         get: {
           tags: ['Products'],
