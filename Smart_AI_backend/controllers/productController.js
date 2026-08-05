@@ -5,10 +5,79 @@ const { search: semanticSearch } = require("../services/productSearchService");
 const { recommend: productRecommend } = require("../services/productRecommendationService");
 const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddingContent");
 const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
-const { uploadProductImageIfNeeded, deleteImageFromCloudinary, ProductImageValidationError } = require("../services/productImageService");
+const { uploadProductImageIfNeeded, uploadProductImageBuffer, deleteImageFromCloudinary, ProductImageValidationError } = require("../services/productImageService");
 const logger = require("../utils/logger");
 const asyncHandler = require("../utils/asyncHandler");
 const { AppError, BadRequestError, NotFoundError } = require("../utils/errors");
+
+/**
+ * Multipart text fields arrive as strings. Coerce the known product fields to
+ * their JSON types only when a file upload is present; JSON bodies pass through
+ * untouched so the existing API contract is preserved.
+ */
+function parseMultipartProductFields(req) {
+  if (!req.file || !req.body || typeof req.body !== 'object') return;
+
+  const { body } = req;
+
+  const toNumber = (field, name) => {
+    if (body[field] === undefined || body[field] === null) return;
+    if (typeof body[field] === 'number') return;
+    const num = Number(body[field]);
+    if (Number.isNaN(num)) {
+      throw new BadRequestError(`${name} phải là số hợp lệ`, 'INVALID_MULTIPART_FIELD');
+    }
+    body[field] = num;
+  };
+
+  const toJson = (field) => {
+    if (body[field] === undefined || body[field] === null) return;
+    if (typeof body[field] !== 'string') return;
+    const trimmed = body[field].trim();
+    if (trimmed === '') {
+      body[field] = undefined;
+      return;
+    }
+    try {
+      body[field] = JSON.parse(trimmed);
+    } catch {
+      throw new BadRequestError(`Trường ${field} phải là JSON hợp lệ`, 'INVALID_MULTIPART_FIELD');
+    }
+  };
+
+  toNumber('price', 'Giá');
+  toNumber('inStock', 'Số lượng tồn kho');
+  toJson('colors');
+  toJson('tags');
+  toJson('specs');
+}
+
+/**
+ * A product image must come from exactly one source: a multipart file OR the
+ * JSON image field. Returns a summary of which source is present.
+ */
+function resolveImageSource(req) {
+  const hasFile = Boolean(req.file);
+  const bodyImage = req.body.image;
+  const hasBodyImage = typeof bodyImage === 'string' && bodyImage.trim() !== '';
+
+  if (hasFile && hasBodyImage) {
+    throw new BadRequestError(
+      'Chỉ cung cấp một nguồn ảnh: file tải lên hoặc URL/Base64',
+      'IMAGE_SOURCE_CONFLICT',
+    );
+  }
+
+  return { hasFile, hasBodyImage };
+}
+
+async function processProductImage(req) {
+  const { hasFile } = resolveImageSource(req);
+  if (hasFile) {
+    return uploadProductImageBuffer(req.file.buffer, req.file.mimetype);
+  }
+  return uploadProductImageIfNeeded(req.body.image);
+}
 
 /**
  * Best-effort Cloudinary image cleanup. Never throws, so it can safely run
@@ -26,6 +95,8 @@ const createProduct = asyncHandler(async (req, res) => {
   req.errorResponseFormat = 'legacy-top-level-message';
   const log = req.logger || logger;
 
+  parseMultipartProductFields(req);
+
   const {
     name,
     brand,
@@ -35,7 +106,6 @@ const createProduct = asyncHandler(async (req, res) => {
     inStock,
     colors,
     tags,
-    image,
   } = req.body;
 
   if (!name || !brand || !price || !description) {
@@ -53,7 +123,7 @@ const createProduct = asyncHandler(async (req, res) => {
 
   let processedImage, processedPublicId;
   try {
-    const result = await uploadProductImageIfNeeded(image);
+    const result = await processProductImage(req);
     processedImage = result.imageUrl;
     processedPublicId = result.imagePublicId;
   } catch (error) {
@@ -412,6 +482,8 @@ const updateProduct = asyncHandler(async (req, res) => {
     throw new NotFoundError("Không tìm thấy sản phẩm");
   }
 
+  parseMultipartProductFields(req);
+
   const {
     name,
     brand,
@@ -428,12 +500,14 @@ const updateProduct = asyncHandler(async (req, res) => {
     throw new BadRequestError("Thiếu thông tin bắt buộc: name, brand, price, description");
   }
 
+  const imageProvided = Boolean(req.file) || image !== undefined;
+
   // Build update payload — only include explicitly provided fields
   let processedImage;
   let processedPublicId;
-  if (image !== undefined) {
+  if (imageProvided) {
     try {
-      const result = await uploadProductImageIfNeeded(image);
+      const result = await processProductImage(req);
       processedImage = result.imageUrl;
       processedPublicId = result.imagePublicId;
     } catch (error) {
@@ -456,7 +530,7 @@ const updateProduct = asyncHandler(async (req, res) => {
   };
   const $unset = {};
 
-  if (image !== undefined) {
+  if (imageProvided) {
     $set.image = processedImage;
     if (processedPublicId) {
       $set.imagePublicId = processedPublicId;
@@ -514,7 +588,7 @@ const updateProduct = asyncHandler(async (req, res) => {
     throw new NotFoundError("Không tìm thấy sản phẩm");
   }
 
-  if (image !== undefined && existing.imagePublicId && processedImage !== existing.image) {
+  if (imageProvided && existing.imagePublicId && processedImage !== existing.image) {
     await cleanupProductImage(existing.imagePublicId, log, req.requestId);
   }
 

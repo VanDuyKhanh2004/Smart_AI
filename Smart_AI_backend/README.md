@@ -55,3 +55,10 @@ Starts on `http://localhost:5000`. Swagger UI is served at `/api-docs`.
 npm test                 # Full suite (1611 tests, 39 suites; verified 2026-08-04)
 npm test -- --runInBand  # Sequential (recommended)
 ```
+
+## Product Image Upload
+
+`POST /api/products` and `PUT /api/products/:id` (both admin) accept two content types:
+
+- **`application/json`** — the `image` field accepts a Base64 data URI or an external HTTPS URL.
+- **`multipart/form-data`** — send an image file in the `image` field (single file). Allowed formats are `image/jpeg`, `image/png`, `image/webp`, maximum 5 MB. Text fields (`price`, `inStock`, `specs`, `colors`, `tags`) are coerced: numeric fields are parsed as numbers, and list/object fields must be JSON-encoded strings. Provide either a file or a JSON `image` (URL/Base64), not both — supplying both returns `400 IMAGE_SOURCE_CONFLICT`. Returns `400 IMAGE_FILE_TOO_LARGE` / `INVALID_IMAGE_FILE` for invalid uploads.
