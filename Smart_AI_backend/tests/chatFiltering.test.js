@@ -13,7 +13,7 @@ jest.mock('../services/cacheService', () => {
   };
 });
 
-const mockSocket = { handshake: { headers: { 'user-agent': 'test' }, address: '127.0.0.1' }, emit: jest.fn() };
+const mockSocket = { handshake: { headers: { 'user-agent': 'test' }, address: '127.0.0.1' }, data: { user: { id: 'user-test-1' } }, emit: jest.fn() };
 
 jest.mock('../models/Product', () => ({
   aggregate: jest.fn(),
@@ -1162,7 +1162,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         sessionId: 'session-save-ok',
         message: 'Samsung dưới 15 triệu',
       });
-      const ctx = await contextService.loadContext('session-save-ok');
+      const ctx = await contextService.loadContext('user-test-1', 'session-save-ok');
       expect(ctx).not.toBeNull();
       expect(ctx.filters.brands).toContain('samsung');
     });
@@ -1180,7 +1180,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         sessionId: 'session-deter-ok',
         message: 'iPhone dưới 20 triệu',
       });
-      const ctx = await contextService.loadContext('session-deter-ok');
+      const ctx = await contextService.loadContext('user-test-1', 'session-deter-ok');
       expect(ctx).not.toBeNull();
       expect(ctx.filters.brands).toContain('apple');
       expect(ctx.filters.maxPrice).toBeLessThanOrEqual(20000000);
@@ -1198,7 +1198,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         sessionId: 'session-noresult',
         message: 'Samsung dưới 5 triệu',
       });
-      const ctx = await contextService.loadContext('session-noresult');
+      const ctx = await contextService.loadContext('user-test-1', 'session-noresult');
       expect(ctx).not.toBeNull();
       expect(ctx.filters.brands).toContain('samsung');
       expect(ctx.filters.maxPrice).toBeLessThanOrEqual(5000000);
@@ -1226,7 +1226,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 15 triệu',
       })).rejects.toThrow();
 
-      const ctx = await contextService.loadContext('session-throw');
+      const ctx = await contextService.loadContext('user-test-1', 'session-throw');
       expect(ctx).toBeNull();
     });
 
@@ -1245,7 +1245,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 15 triệu',
       })).rejects.toThrow();
 
-      const ctx = await contextService.loadContext('session-null');
+      const ctx = await contextService.loadContext('user-test-1', 'session-null');
       expect(ctx).toBeNull();
     });
 
@@ -1264,7 +1264,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 15 triệu',
       })).rejects.toThrow();
 
-      const ctx = await contextService.loadContext('session-undef');
+      const ctx = await contextService.loadContext('user-test-1', 'session-undef');
       expect(ctx).toBeNull();
     });
 
@@ -1283,7 +1283,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 15 triệu',
       });
 
-      const ctx = await contextService.loadContext('session-empty');
+      const ctx = await contextService.loadContext('user-test-1', 'session-empty');
       expect(ctx).toBeNull();
     });
   });
@@ -1302,7 +1302,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
       });
 
       // Verify context saved
-      const ctxBefore = await contextService.loadContext('session-prev-ok');
+      const ctxBefore = await contextService.loadContext('user-test-1', 'session-prev-ok');
       expect(ctxBefore).not.toBeNull();
       expect(ctxBefore.filters.brands).toContain('samsung');
 
@@ -1322,7 +1322,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
       })).rejects.toThrow();
 
       // Context must remain unchanged from first turn
-      const ctxAfter = await contextService.loadContext('session-prev-ok');
+      const ctxAfter = await contextService.loadContext('user-test-1', 'session-prev-ok');
       expect(ctxAfter).not.toBeNull();
       expect(ctxAfter.filters.brands).toContain('samsung');
       expect(ctxAfter.filters.brands).not.toContain('apple'); // was never saved
@@ -1364,7 +1364,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 15 triệu',
       });
 
-      const ctx = await contextService.loadContext('session-prod-ids');
+      const ctx = await contextService.loadContext('user-test-1', 'session-prod-ids');
       expect(ctx).not.toBeNull();
       expect(Array.isArray(ctx.lastProductIds)).toBe(true);
       expect(ctx.lastProductIds.length).toBeGreaterThan(0);
@@ -1381,7 +1381,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 5 triệu',
       });
 
-      const ctx = await contextService.loadContext('session-empty-ids');
+      const ctx = await contextService.loadContext('user-test-1', 'session-empty-ids');
       expect(ctx).not.toBeNull();
       expect(Array.isArray(ctx.lastProductIds)).toBe(true);
     });
@@ -1400,7 +1400,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
         message: 'Samsung dưới 15 triệu',
       });
 
-      let ctx = await contextService.loadContext('session-reset-me');
+      let ctx = await contextService.loadContext('user-test-1', 'session-reset-me');
       expect(ctx).not.toBeNull();
 
       // Reset via product_query with reset phrase
@@ -1415,7 +1415,7 @@ describe('Product constraint integration — pipeline enforcement', () => {
       });
 
       // Old filters should be deleted; fresh empty context may remain
-      ctx = await contextService.loadContext('session-reset-me');
+      ctx = await contextService.loadContext('user-test-1', 'session-reset-me');
       expect(ctx).not.toBeNull();
       expect(ctx.filters.brands).toBeNull();
       expect(ctx.preferences.camera).toBe(false);

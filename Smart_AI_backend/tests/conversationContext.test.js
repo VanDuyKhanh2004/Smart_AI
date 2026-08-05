@@ -483,15 +483,15 @@ describe('Context storage', () => {
 
   // 17. Saves context with TTL
   it('saves context', async () => {
-    const result = await ctxService.saveContext('session-test-1', { filters: {}, preferences: {}, lastProductIds: [], turnCount: 1 });
+    const result = await ctxService.saveContext('user-1', 'session-test-1', { filters: {}, preferences: {}, lastProductIds: [], turnCount: 1 });
     expect(result).toBe(true);
   });
 
   // 18. Loads valid context
   it('loads valid context', async () => {
     const ctx = { filters: { brands: ['samsung'] }, preferences: {}, lastProductIds: [], turnCount: 2 };
-    await ctxService.saveContext('session-test-2', ctx);
-    const loaded = await ctxService.loadContext('session-test-2');
+    await ctxService.saveContext('user-1', 'session-test-2', ctx);
+    const loaded = await ctxService.loadContext('user-1', 'session-test-2');
     expect(loaded).toBeDefined();
     expect(loaded.filters.brands).toEqual(['samsung']);
     expect(loaded.turnCount).toBe(2);
@@ -499,7 +499,7 @@ describe('Context storage', () => {
 
   // 19. Missing context returns null
   it('missing context returns null', async () => {
-    const loaded = await ctxService.loadContext('nonexistent-session');
+    const loaded = await ctxService.loadContext('user-1', 'nonexistent-session');
     expect(loaded).toBeNull();
   });
 
@@ -507,15 +507,15 @@ describe('Context storage', () => {
   it('Redis error degrades safely to in-memory', async () => {
     // cacheService is mocked to return null, so contextService uses in-memory fallback
     const ctx = { filters: { brands: ['apple'] }, preferences: {}, lastProductIds: [], turnCount: 1 };
-    await ctxService.saveContext('session-fallback', ctx);
-    const loaded = await ctxService.loadContext('session-fallback');
+    await ctxService.saveContext('user-1', 'session-fallback', ctx);
+    const loaded = await ctxService.loadContext('user-1', 'session-fallback');
     expect(loaded.filters.brands).toEqual(['apple']);
   });
 
   // 21. Context keys are user/conversation scoped
   it('builds scoped keys', () => {
-    const key1 = ctxService.buildKey('session-abc');
-    const key2 = ctxService.buildKey('session-xyz');
+    const key1 = ctxService.buildKey('user-1', 'session-abc');
+    const key2 = ctxService.buildKey('user-1', 'session-xyz');
     expect(key1).not.toBe(key2);
     expect(key1).toContain('abc');
     expect(key2).toContain('xyz');
@@ -525,10 +525,10 @@ describe('Context storage', () => {
   it('different users cannot collide', async () => {
     const ctxA = { filters: { brands: ['samsung'] }, preferences: {}, lastProductIds: [], turnCount: 1 };
     const ctxB = { filters: { brands: ['apple'] }, preferences: {}, lastProductIds: [], turnCount: 1 };
-    await ctxService.saveContext('user-a', ctxA);
-    await ctxService.saveContext('user-b', ctxB);
-    const loadedA = await ctxService.loadContext('user-a');
-    const loadedB = await ctxService.loadContext('user-b');
+    await ctxService.saveContext('user-a', 'shared-session', ctxA);
+    await ctxService.saveContext('user-b', 'shared-session', ctxB);
+    const loadedA = await ctxService.loadContext('user-a', 'shared-session');
+    const loadedB = await ctxService.loadContext('user-b', 'shared-session');
     expect(loadedA.filters.brands).toEqual(['samsung']);
     expect(loadedB.filters.brands).toEqual(['apple']);
   });
@@ -537,10 +537,10 @@ describe('Context storage', () => {
   it('anonymous conversations cannot collide', async () => {
     const ctx1 = { filters: { colors: ['black'] }, preferences: {}, lastProductIds: [], turnCount: 1 };
     const ctx2 = { filters: { colors: ['white'] }, preferences: {}, lastProductIds: [], turnCount: 1 };
-    await ctxService.saveContext('anon-conv-1', ctx1);
-    await ctxService.saveContext('anon-conv-2', ctx2);
-    const loaded1 = await ctxService.loadContext('anon-conv-1');
-    const loaded2 = await ctxService.loadContext('anon-conv-2');
+    await ctxService.saveContext(null, 'anon-conv-1', ctx1);
+    await ctxService.saveContext(null, 'anon-conv-2', ctx2);
+    const loaded1 = await ctxService.loadContext(null, 'anon-conv-1');
+    const loaded2 = await ctxService.loadContext(null, 'anon-conv-2');
     expect(loaded1.filters.colors).toEqual(['black']);
     expect(loaded2.filters.colors).toEqual(['white']);
   });
@@ -548,22 +548,22 @@ describe('Context storage', () => {
   // 24. Delete context makes it unloadable
   it('deleted context returns null', async () => {
     const ctx = { filters: {}, preferences: {}, lastProductIds: [], turnCount: 1 };
-    await ctxService.saveContext('session-to-delete', ctx);
-    await ctxService.deleteContext('session-to-delete');
-    const loaded = await ctxService.loadContext('session-to-delete');
+    await ctxService.saveContext('user-1', 'session-to-delete', ctx);
+    await ctxService.deleteContext('user-1', 'session-to-delete');
+    const loaded = await ctxService.loadContext('user-1', 'session-to-delete');
     expect(loaded).toBeNull();
   });
 
   // 25. contextExists works
   it('contextExists returns true for saved context', async () => {
     const ctx = { filters: {}, preferences: {}, lastProductIds: [], turnCount: 1 };
-    await ctxService.saveContext('session-exists', ctx);
-    const exists = await ctxService.contextExists('session-exists');
+    await ctxService.saveContext('user-1', 'session-exists', ctx);
+    const exists = await ctxService.contextExists('user-1', 'session-exists');
     expect(exists).toBe(true);
   });
 
   it('contextExists returns false for missing context', async () => {
-    const exists = await ctxService.contextExists('no-such-session');
+    const exists = await ctxService.contextExists('user-1', 'no-such-session');
     expect(exists).toBe(false);
   });
 });
@@ -596,37 +596,37 @@ describe('Production mode (no memory fallback)', () => {
   it('memory fallback is disabled by default outside test mode', async () => {
     // cache.set rejects, cache.get returns null (via mock at top of file)
     // In production no memory fallback -> saveContext returns false
-    const saveResult = await prodCtx.saveContext('prod-session', { filters: {} });
+    const saveResult = await prodCtx.saveContext('user-1', 'prod-session', { filters: {} });
     expect(saveResult).toBe(false);
   });
 
   it('Redis get failure returns null (no memory fallback)', async () => {
-    const loaded = await prodCtx.loadContext('prod-nonexistent');
+    const loaded = await prodCtx.loadContext('user-1', 'prod-nonexistent');
     expect(loaded).toBeNull();
   });
 
   it('Redis set failure returns false (no memory fallback)', async () => {
-    const result = await prodCtx.saveContext('prod-set-fail', { filters: {} });
+    const result = await prodCtx.saveContext('user-1', 'prod-set-fail', { filters: {} });
     expect(result).toBe(false);
   });
 
   it('no memory write after Redis failure in production', async () => {
     // Try to save via the production-mode service (which has no memory)
     // The cache mock rejects, so saveContext returns false
-    const saveResult = await prodCtx.saveContext('prod-no-mem', { filters: { brands: ['samsung'] } });
+    const saveResult = await prodCtx.saveContext('user-1', 'prod-no-mem', { filters: { brands: ['samsung'] } });
     expect(saveResult).toBe(false);
 
     // Try to load via the test-mode service (which has memory, but the
     // production service never wrote to memory since it has none)
-    const loadedViaTest = await testCtx.loadContext('prod-no-mem');
+    const loadedViaTest = await testCtx.loadContext('user-1', 'prod-no-mem');
     expect(loadedViaTest).toBeNull();
   });
 
   it('CHAT_CONTEXT_ENABLED=false is fully stateless', async () => {
-    const saveResult = await disabledCtx.saveContext('disabled-session', { filters: {} });
+    const saveResult = await disabledCtx.saveContext('user-1', 'disabled-session', { filters: {} });
     expect(saveResult).toBe(false);
 
-    const loadResult = await disabledCtx.loadContext('disabled-session');
+    const loadResult = await disabledCtx.loadContext('user-1', 'disabled-session');
     expect(loadResult).toBeNull();
   });
 });

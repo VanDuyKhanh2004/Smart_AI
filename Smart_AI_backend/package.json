@@ -17,6 +17,8 @@
     "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js",
     "migrate:product-images:dry-run": "node scripts/migrateProductImagesToCloudinary.js --dry-run",
     "migrate:product-images": "node scripts/migrateProductImagesToCloudinary.js",
+    "migrate:conversation-ownership-index:dry-run": "node scripts/migrateConversationOwnershipIndex.js --dry-run",
+    "migrate:conversation-ownership-index": "node scripts/migrateConversationOwnershipIndex.js",
     "benchmark:products": "node scripts/benchmarkProductApi.js"
   },
   "dependencies": {

@@ -353,13 +353,18 @@ All many-to-many relationships are implicit through junction collections or embe
 ### conversations
 | Index | Key(s) | Unique | Notes |
 |-------|--------|--------|-------|
-| `sessionId` | `sessionId: 1` | Yes | Field-level unique |
+| `userId_sessionId` | `userId: 1, sessionId: 1` | Yes | Ownership pair (compound); a user owns a sessionId at most once |
+| `userId` | `userId: 1` | — | Owner lookup (single-field, part of compound) |
 | `lastMessageAt` | `lastMessageAt: -1` | — | Active conversations |
 | `createdAt` | `createdAt: -1` | — | Recent conversations |
 | `status` | `status: 1` | — | Filter by status |
 | `status_lastMessageAt` | `status: 1, lastMessageAt: -1` | — | Compound |
 | `messageCount_createdAt` | `messageCount: 1, createdAt: -1` | — | Engagement analysis |
 | Text | `messages.content` | — | Search message content |
+
+> **Ownership note:** `sessionId` is no longer globally unique. Two different users may each own the same client-visible `sessionId`. Uniqueness is enforced on the pair `{ userId, sessionId }` instead. Documents without a `userId` are pre-ownership/legacy and are never auto-claimed.
+>
+> **Index migration:** On databases that predate ownership, the legacy globally-unique `sessionId_1` index must be removed — a schema/code change alone does **not** drop it (a conflicting old unique index would reject two users owning the same `sessionId`). The repository migration `scripts/migrateConversationOwnershipIndex.js` performs the safe swap (create `userId_1_sessionId_1` unique → verify → drop `sessionId_1` → verify), dry-run via `npm run migrate:conversation-ownership-index:dry-run`, live via `npm run migrate:conversation-ownership-index`. See `docs/DEPLOYMENT.md`.
 
 ### comparehistories
 | Index | Key(s) | Unique | Notes |
@@ -404,7 +409,7 @@ All many-to-many relationships are implicit through junction collections or embe
 | products | `slug` | Single-field (sparse) | Unique URL-friendly identifier |
 | orders | `orderNumber` | Single-field | Unique order reference (ORD-YYYYMMDD-XXX) |
 | promotions | `code` | Single-field | Unique discount code |
-| conversations | `sessionId` | Single-field | Unique chatbot session |
+| conversations | `userId` + `sessionId` | Compound (`{ userId, sessionId }`) | Ownership pair; one owned conversation per user/session |
 | carts | `user` | Single-field | One cart per user |
 | wishlists | `user` | Single-field | One wishlist per user |
 | reviews | `user` + `product` | Compound | One review per user per product |

@@ -102,6 +102,30 @@ Deployed automatically via GitHub Actions (`.github/workflows/deploy-frontend.ym
   - `maxIdleTimeMS`: 30000
 - **Indexes**: Must be created on the target database (text indexes, vector index on `embedding_vector`, compound indexes on orders)
 
+### Chat Conversation Ownership Index Migration
+
+Per-user chat ownership enforces uniqueness on the pair `{ userId, sessionId }`. On databases that predate this change, the **legacy globally-unique `sessionId_1` index must be removed** — a code/schema deployment alone does not drop it, and a stale unique `sessionId_1` index would reject two users owning the same client-visible `sessionId`. Run the repository migration **before** (or concurrently with) deploying the ownership code:
+
+```bash
+# From Smart_AI_backend, with MONGO_CONNECTION_STRING set (.env)
+
+# 1. Dry run — connects, inspects, and reports only; makes no DB changes
+npm run migrate:conversation-ownership-index:dry-run
+
+# 2. Review the plan: it will abort (no index change) if duplicate
+#    { userId, sessionId } pairs exist or the target index is not unique,
+#    and it will report legacy documents without a userId without touching them.
+
+# 3. Live run — creates userId_1_sessionId_1 (unique), verifies it, then
+#    drops sessionId_1, then verifies the final state. Idempotent: re-running
+#    after success is a no-op ("already migrated").
+npm run migrate:conversation-ownership-index
+```
+
+- **Safety order**: create the target unique index → verify it exists and is unique → drop the legacy index → verify the final state. Any failure before the drop leaves the legacy index untouched; the script exits non-zero on real failures and closes the connection cleanly.
+- **Legacy conversations**: documents without a `userId` are never auto-claimed or modified by this migration; they remain visible to no authenticated owner until a policy decision is made.
+- **Deployment order**: `dry-run` → review output → `migrate` → deploy the ownership code (or verify the two are mutually compatible; both are required for the feature to function).
+
 ## Redis
 
 - **Version**: Redis 7
