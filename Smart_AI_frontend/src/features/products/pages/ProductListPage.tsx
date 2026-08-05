@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
@@ -50,22 +50,33 @@ const ProductListPage: React.FC = () => {
     );
   }, [currentFilters]);
 
-  // Fetch brands on initial load
+  // Fetch brands on initial load from the lightweight metadata endpoint
   useEffect(() => {
+    const controller = new AbortController();
     const fetchBrands = async () => {
       try {
-        // Fetch all products to extract unique brands
-        const response = await productService.getAllProducts({ limit: 1000 });
-        const uniqueBrands = [...new Set(response.data.products.map((p) => p.brand))].sort();
-        setAllBrands(uniqueBrands);
+        const data = await productService.getProductMeta({ signal: controller.signal });
+        if (!controller.signal.aborted) {
+          setAllBrands(data.brands);
+        }
       } catch (err) {
-        console.error('Error fetching brands:', err);
+        if (!controller.signal.aborted) {
+          console.error('Error fetching brands:', err);
+        }
       }
     };
     fetchBrands();
+    return () => controller.abort();
   }, []);
 
+  // Abort controller for the product-list request so a stale request can never
+  // overwrite newer results and cancelled requests produce no error.
+  const productsAbortRef = useRef<AbortController | null>(null);
+
   const fetchProducts = async (page: number = 1, filters: ProductFilterState = currentFilters) => {
+    productsAbortRef.current?.abort();
+    const controller = new AbortController();
+    productsAbortRef.current = controller;
     try {
       setLoading(true);
       setError(null);
@@ -88,21 +99,26 @@ const ProductListPage: React.FC = () => {
         ...(filters.minRating !== undefined && { minRating: filters.minRating }),
       };
 
-      const response = await productService.getAllProducts(params);
+      const response = await productService.getAllProducts(params, { signal: controller.signal });
 
+      if (controller.signal.aborted) return;
       setProducts(response.data.products);
       setPagination(response.data.pagination);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError('Không thể tải danh sách sản phẩm. Vui lòng thử lại sau.');
       console.error('Error fetching products:', err);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   };
 
   // Fetch whenever currentPage or currentFilters changes
   useEffect(() => {
     fetchProducts(currentPage, currentFilters);
+    return () => productsAbortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, currentFilters]);
 

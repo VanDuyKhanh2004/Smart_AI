@@ -75,6 +75,15 @@ export interface GetProductByIdResponse {
   data: Product;
 }
 
+export interface ProductMetaData {
+  brands: string[];
+}
+
+export interface ProductMetaResponse {
+  success: boolean;
+  data: ProductMetaData;
+}
+
 export interface GetProductsParams {
   page?: number;
   limit?: number;

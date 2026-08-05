@@ -13,6 +13,7 @@ vi.mock('@/lib/axios', () => ({
 
 const mockPost = vi.mocked((await import('@/lib/axios')).default.post);
 const mockPut = vi.mocked((await import('@/lib/axios')).default.put);
+const mockGet = vi.mocked((await import('@/lib/axios')).default.get);
 
 function makeFile(type = 'image/jpeg', name = 'photo.jpg'): File {
   return new File([new ArrayBuffer(1024)], name, { type });
@@ -234,5 +235,122 @@ describe('productService multipart', () => {
     expect(body.get('image')).toBe(file);
     expect((body.get('image') as File).type).toBe('image/webp');
     expect((body.get('image') as File).name).toBe('shot.webp');
+  });
+});
+
+describe('productService product metadata', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGet.mockReset();
+  });
+
+  it('calls GET /products/meta and returns the brands array', async () => {
+    mockGet.mockResolvedValue({
+      data: { success: true, data: { brands: ['apple', 'samsung'] } },
+    });
+
+    const result = await productService.getProductMeta();
+
+    expect(mockGet).toHaveBeenCalledWith('/products/meta', expect.any(Object));
+    expect(result).toEqual({ brands: ['apple', 'samsung'] });
+  });
+
+  it('forwards the AbortSignal through to the axios request', async () => {
+    mockGet.mockResolvedValue({
+      data: { success: true, data: { brands: ['apple'] } },
+    });
+
+    const controller = new AbortController();
+    await productService.getProductMeta({ signal: controller.signal });
+
+    const config = mockGet.mock.calls[0][1] as { signal?: AbortSignal };
+    expect(config.signal).toBe(controller.signal);
+  });
+
+  it('accepts metadata without an options argument', async () => {
+    mockGet.mockResolvedValue({
+      data: { success: true, data: { brands: [] } },
+    });
+
+    const result = await productService.getProductMeta();
+
+    expect(result).toEqual({ brands: [] });
+  });
+
+  it('rejects when response body is missing the brands array', async () => {
+    mockGet.mockResolvedValue({ data: { success: true, data: {} } });
+
+    await expect(productService.getProductMeta()).rejects.toThrow(
+      'API returned unexpected response format',
+    );
+  });
+
+  it('rejects when the response body is not an object', async () => {
+    mockGet.mockResolvedValue({ data: null });
+
+    await expect(productService.getProductMeta()).rejects.toThrow(
+      'API returned unexpected response format',
+    );
+  });
+});
+
+describe('productService list requests with abort signal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGet.mockReset();
+  });
+
+  it('passes the abort signal to GET /products', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        success: true,
+        message: 'ok',
+        data: {
+          products: [],
+          pagination: {
+            currentPage: 1,
+            totalPages: 1,
+            totalCount: 0,
+            limit: 10,
+            hasNextPage: false,
+            hasPrevPage: false,
+            nextPage: null,
+            prevPage: null,
+          },
+        },
+      },
+    });
+
+    const controller = new AbortController();
+    await productService.getAllProducts({ page: 1 }, { signal: controller.signal });
+
+    const config = mockGet.mock.calls[0][1] as { signal?: AbortSignal };
+    expect(config.signal).toBe(controller.signal);
+  });
+
+  it('still works when no abort signal is provided', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        success: true,
+        message: 'ok',
+        data: {
+          products: [],
+          pagination: {
+            currentPage: 1,
+            totalPages: 1,
+            totalCount: 0,
+            limit: 10,
+            hasNextPage: false,
+            hasPrevPage: false,
+            nextPage: null,
+            prevPage: null,
+          },
+        },
+      },
+    });
+
+    const result = await productService.getAllProducts({ page: 1 });
+
+    expect(result.success).toBe(true);
   });
 });

@@ -43,6 +43,7 @@ jest.mock('../middlewares/adminMiddleware', () => ({
 jest.mock('../controllers/productController', () => ({
   createProduct: (req, res) => res.status(201).json({ ok: 'create' }),
   getAllProducts: (req, res) => res.json({ ok: 'products' }),
+  getProductMeta: (req, res) => res.json({ ok: 'meta' }),
   searchSemantic: (req, res) => res.json({ ok: 'semantic' }),
   getProductById: (req, res) => res.json({ ok: 'product' }),
   getRecommendations: (req, res) => res.json({ ok: 'recommendations' }),

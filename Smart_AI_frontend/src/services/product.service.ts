@@ -4,6 +4,8 @@ import type {
   GetAllProductsResponse,
   GetProductByIdResponse,
   GetProductsParams,
+  ProductMetaResponse,
+  ProductMetaData,
   CreateProductRequest,
   CreateProductResponse,
   UpdateProductRequest,
@@ -15,6 +17,7 @@ import type {
 
 export interface ProductRequestConfig {
   onUploadProgress?: (event: AxiosProgressEvent) => void;
+  signal?: AbortSignal;
 }
 
 function buildProductFormData(payload: ProductFormPayload): FormData {
@@ -41,7 +44,10 @@ function buildProductFormData(payload: ProductFormPayload): FormData {
 
 export const productService = {
 
-  getAllProducts: async (params: GetProductsParams = {}): Promise<GetAllProductsResponse> => {
+  getAllProducts: async (
+    params: GetProductsParams = {},
+    config?: { signal?: AbortSignal },
+  ): Promise<GetAllProductsResponse> => {
     try {
       const response = await apiClient.get<GetAllProductsResponse>('/products', {
         params: {
@@ -56,6 +62,7 @@ export const productService = {
           ...(params.sortOrder && { sortOrder: params.sortOrder }),
           ...(params.minRating && { minRating: params.minRating }),
         },
+        signal: config?.signal,
       });
 
       const body = response.data;
@@ -77,6 +84,27 @@ export const productService = {
   },
 
  
+  getProductMeta: async (options?: { signal?: AbortSignal }): Promise<ProductMetaData> => {
+    try {
+      const response = await apiClient.get<ProductMetaResponse>('/products/meta', {
+        signal: options?.signal,
+      });
+
+      const body = response.data;
+      if (!body || typeof body !== 'object') {
+        throw new Error('API returned unexpected response format');
+      }
+      const data = body.data;
+      if (!data || typeof data !== 'object' || !Array.isArray(data.brands)) {
+        throw new Error('API returned unexpected response format');
+      }
+
+      return data;
+    } catch (error) {
+      throw new Error(error as string);
+    }
+  },
+
   getProductById: async (id: string): Promise<GetProductByIdResponse> => {
     try {
       const response = await apiClient.get<GetProductByIdResponse>(`/products/${id}`);
@@ -171,4 +199,4 @@ export const productService = {
 };
 
 // Export các hàm riêng lẻ để sử dụng trực tiếp nếu cần
-export const { getAllProducts, getProductById, createProduct, updateProduct, deleteProduct, getProductRecommendations } = productService;
+export const { getAllProducts, getProductById, createProduct, updateProduct, deleteProduct, getProductRecommendations, getProductMeta } = productService;

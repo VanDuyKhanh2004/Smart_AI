@@ -22,7 +22,7 @@ Navigate to `/api-docs` on a running instance to browse, test, and explore all e
 | Tag | Prefix | Authentication | Description |
 |-----|--------|----------------|-------------|
 | Auth | `/api/auth` | Mixed | Register, login, Google OAuth, email verification, password reset, account unlock |
-| Products | `/api/products` | Mixed | Product CRUD, search, recommendations |
+| Products | `/api/products` | Mixed | Product CRUD, search, recommendations, lightweight metadata (`/products/meta`) |
 | Orders | `/api/orders` | Authenticated | Create and manage orders; admin: list all, update status |
 | Cart | `/api/cart` | Authenticated | Shopping cart operations |
 | Reviews | `/api/reviews` | Mixed | Product reviews and moderation |

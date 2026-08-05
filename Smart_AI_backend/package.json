@@ -16,7 +16,8 @@
     "test:watch": "jest --watch --forceExit --detectOpenHandles",
     "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js",
     "migrate:product-images:dry-run": "node scripts/migrateProductImagesToCloudinary.js --dry-run",
-    "migrate:product-images": "node scripts/migrateProductImagesToCloudinary.js"
+    "migrate:product-images": "node scripts/migrateProductImagesToCloudinary.js",
+    "benchmark:products": "node scripts/benchmarkProductApi.js"
   },
   "dependencies": {
     "@getbrevo/brevo": "^6.0.2",
