@@ -118,6 +118,9 @@ export const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Tên: A-Z' },
 ] as const;
 
+// Frontend form image source selection
+export type ProductImageSource = 'file' | 'url';
+
 // Admin Product Management Types
 export interface CreateProductRequest {
   name: string;
@@ -129,6 +132,24 @@ export interface CreateProductRequest {
   specs?: ProductSpecs;
   colors?: string[];
   tags?: string[];
+}
+
+// Frontend-only form payload. Kept distinct from the API DTO so a File
+// object never leaks into the persisted Product domain model.
+export interface ProductFormPayload {
+  name: string;
+  brand: string;
+  price: number;
+  description: string;
+  inStock: number;
+  colors: string[];
+  tags: string[];
+  specs?: ProductSpecs;
+  imageSource: ProductImageSource;
+  imageFile: File | null;
+  imageUrl: string;
+  /** Edit-only: explicitly clear the existing image (sends image: ""). */
+  clearImage?: boolean;
 }
 
 export interface CreateProductResponse {
