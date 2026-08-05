@@ -161,9 +161,25 @@ The following events run only after `requireSocketAuth` (defense-in-depth beyond
 ### Identity Integrity
 The authenticated `socket.data.user.id` is the server-side identity. Client-supplied `userId` in event payloads is ignored — `sendMessage` passes only `sessionId`/`message` through, so payload `userId` cannot impersonate another user.
 
+### Conversation Ownership
+Conversations are owned by the authenticated user, not by the client-supplied `sessionId`. The `Conversation` model stores a `userId` (ObjectId → `User`) and enforces ownership with a unique compound index on `{ userId, sessionId }` — the global `sessionId` uniqueness is removed so two users can each hold the same client-visible `sessionId`.
+
+- **Trusted identity source**: `chatController` reads `userId` exclusively from `socket.data.user.id`. Payload `userId` is ignored.
+- **Compound lookup**: every conversation operation (find/create, history load, user-message save, assistant-response save, complaint persistence) queries by `{ sessionId, userId }`. A foreign or legacy `sessionId` simply misses and a fresh owned conversation is created for the current user.
+- **Isolation invariant**: User A and User B may submit the same `sessionId` and still get separate MongoDB conversations and separate LLM prompt contexts. Nothing reveals another user's existence, email, ID, messages, or session ownership.
+- **Legacy policy**: documents created before ownership (no `userId`) are never auto-claimed by a `sessionId`. A new owned conversation is started for the presenting user; legacy documents remain untouched. No ownership migration runs automatically.
+
+### Redis Context Isolation
+Chat multi-turn context is Redis-backed (`services/contextService.js`) and scoped per user:
+- Authenticated: `chat:context:user:<userId>:<sessionId>`
+- Anonymous/local: `chat:context:anon:<sessionId>` (unchanged)
+
+Authenticated flows never read the legacy anonymous keys, so two users sharing a `sessionId` cannot share Redis context. TTL (default 30 min, `CHAT_CONTEXT_TTL_SECONDS`) and the "Redis-unavailable is non-fatal" behavior are unchanged.
+
 ### Tests
 - `tests/socketAuth.test.js` — real in-memory HTTP + Socket.IO server with `socket.io-client` (13 scenarios).
 - `frontend/src/tests/ChatServiceAuth.test.ts` — mocked `socket.io-client` (7 scenarios).
+- `tests/chatConversationOwnership.test.js` — 18 ownership/isolation scenarios (no real MongoDB/Redis/LLM).
 
 ## Database
 

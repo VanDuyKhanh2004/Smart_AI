@@ -5,7 +5,7 @@ const conversationSchema = new mongoose.Schema({
   sessionId: {
     type: String,
     required: [true, 'Session ID là bắt buộc'],
-    unique: true,
+    // Not `unique: true` globally: a conversation is owned by (userId, sessionId).
     trim: true,
     validate: {
       validator: function(v) {
@@ -15,7 +15,15 @@ const conversationSchema = new mongoose.Schema({
       message: 'Session ID phải có định dạng UUID hợp lệ'
     }
   },
-  
+
+  // Security-scoped owner of the conversation. Populated from the trusted
+  // authenticated identity (socket.data.user.id) — never from client payload.
+  // Legacy documents created before ownership existed have this field absent.
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+
   messages: [{
     role: {
       type: String,
@@ -126,8 +134,10 @@ const conversationSchema = new mongoose.Schema({
 });
 
 
-// `sessionId` is declared `unique: true` on the field; avoid duplicate index
-// conversationSchema.index({ sessionId: 1 }, { unique: true });
+// Ownership is the logical pair { userId, sessionId }.
+// Unique compound index enforces a user owning a sessionId at most once.
+conversationSchema.index({ userId: 1, sessionId: 1 }, { unique: true });
+
 conversationSchema.index({ lastMessageAt: -1 });
 conversationSchema.index({ createdAt: -1 });
 conversationSchema.index({ status: 1 });

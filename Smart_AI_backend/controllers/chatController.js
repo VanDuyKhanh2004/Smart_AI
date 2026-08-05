@@ -1,5 +1,6 @@
 const Conversation = require("../models/Conversation");
 const Complaint = require("../models/Complaint");
+const logger = require("../utils/logger");
 const productSearchService = require("../services/productSearchService");
 const {
   classifyIntentAndRespond,
@@ -17,17 +18,21 @@ class ChatController {
    * Phase 1: Session Management
    * Quản lý phiên trò chuyện và lưu tin nhắn
    */
-  async manageSession(sessionId, userMessage, metadata = {}) {
+  async manageSession(sessionId, userId, userMessage, metadata = {}) {
     try {
-      console.log(`Phase 1: Managing session ${sessionId}`);
+      logger.info({ sessionId }, 'Phase 1: Managing session');
 
-      // Tìm hoặc tạo conversation
-      let conversation = await Conversation.findOne({ sessionId });
+      // A conversation is looked up by the ownership pair { sessionId, userId }.
+      // A client-supplied sessionId alone can never resolve a conversation that
+      // belongs to another user. On a foreign/legacy sessionId the lookup simply
+      // misses and a fresh owned conversation is created for the current user.
+      let conversation = await Conversation.findOne({ sessionId, userId });
 
       if (!conversation) {
-        console.log(`Creating new conversation for session ${sessionId}`);
+        logger.info({ sessionId }, 'Creating new conversation for session');
         conversation = new Conversation({
           sessionId,
+          userId,
           messages: [],
         });
       }
@@ -49,8 +54,9 @@ class ChatController {
       // Lấy lịch sử chat gần đây (4-6 tin nhắn cuối)
       const recentMessages = conversation.messages.slice(-6);
 
-      console.log(
-        `Phase 1 completed: ${recentMessages.length} messages in context`
+      logger.info(
+        { sessionId, messageCount: recentMessages.length },
+        'Phase 1 completed'
       );
 
       return {
@@ -58,7 +64,7 @@ class ChatController {
         chatHistory: recentMessages,
       };
     } catch (error) {
-      console.error("Phase 1 error:", error.message);
+      logger.error({ err: error }, 'Phase 1 error');
       throw new Error(`Session management failed: ${error.message}`);
     }
   }
@@ -73,7 +79,7 @@ class ChatController {
         chatHistory,
         userQuery
       );
-      console.log("intentResult2", intentResult);
+      logger.info({ intentResult }, 'Intent classification result');
 
 
       if (intentResult.intent === "small_talk") {
@@ -233,23 +239,24 @@ class ChatController {
    * Handle Complaint - Xử lý khiếu nại khách hàng
    * Sử dụng specialized complaint agent và multi-turn conversation
    */
-  async handleComplaint(socket, sessionId, chatHistory, userMessage) {
+  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage) {
     try {
-      console.log(`Handling complaint for session ${sessionId}`);
+      logger.info({ sessionId }, 'Handling complaint for session');
 
-      // Kiểm tra xem đã có complaint cho session này chưa
-      let existingComplaint = await Complaint.findOne({ 
-        sessionId: sessionId,
-        status: { $in: ['open', 'in_progress'] }
-      }).sort({ createdAt: -1 });
-
-      console.log(`Existing complaint found: ${!!existingComplaint}`);
-
-      // Lấy thông tin conversation để có conversationId
-      const conversation = await Conversation.findOne({ sessionId });
+      // Lấy thông tin conversation bằng cặp ownership { sessionId, userId } để
+      // đảm bảo không truy cập conversation của người dùng khác.
+      const conversation = await Conversation.findOne({ sessionId, userId });
       if (!conversation) {
         throw new Error("Conversation not found for session");
       }
+
+      // Kiểm tra xem đã có complaint cho conversation (thuộc sở hữu người dùng này) chưa
+      let existingComplaint = await Complaint.findOne({
+        conversationId: conversation._id,
+        status: { $in: ['open', 'in_progress'] }
+      }).sort({ createdAt: -1 });
+
+      logger.info({ sessionId, found: !!existingComplaint }, 'Existing complaint found');
 
       // Gọi specialized complaint agent
       const complaintResponse = await generateComplaintResponse(
@@ -257,7 +264,10 @@ class ChatController {
         userMessage
       );
 
-      console.log(`Complaint response generated, isComplete: ${complaintResponse.isComplete}`);
+      logger.info(
+        { sessionId, isComplete: complaintResponse.isComplete },
+        'Complaint response generated'
+      );
 
       // Emit response to user
       socket.emit("aiResponse", {
@@ -315,7 +325,10 @@ class ChatController {
         });
 
         complaintRecord = await complaintRecord.save();
-        console.log(`New complaint record created with ID: ${complaintRecord._id}`);
+        logger.info(
+          { sessionId, complaintId: complaintRecord._id },
+          'New complaint record created'
+        );
       }
 
       return {
@@ -328,7 +341,7 @@ class ChatController {
       };
 
     } catch (error) {
-      console.error("Error in handleComplaint:", error.message);
+      logger.error({ err: error }, 'Error in handleComplaint');
 
       // Fallback response
       const fallbackResponse = "Em rất xin lỗi về sự bất tiện này. Hiện tại hệ thống đang gặp sự cố. Anh/chị có thể liên hệ hotline 1900xxxx để được hỗ trợ trực tiếp không ạ?";
@@ -358,9 +371,9 @@ class ChatController {
   /**
    * Lưu phản hồi của AI vào database
    */
-  async saveAIResponse(sessionId, aiResponse, metadata = {}) {
+  async saveAIResponse(sessionId, userId, aiResponse, metadata = {}) {
     try {
-      const conversation = await Conversation.findOne({ sessionId });
+      const conversation = await Conversation.findOne({ sessionId, userId });
 
       if (conversation) {
         const aiMessageObj = {
@@ -381,13 +394,20 @@ class ChatController {
 
       }
     } catch (error) {
-      console.error("Error saving AI response:", error.message);
+      logger.error({ err: error }, 'Error saving AI response');
     }
   }
 
   async processMessage(socket, data) {
     const startTime = Date.now();
     const { sessionId, message } = data;
+
+    // Trusted identity comes exclusively from socket.data.user (set by the
+    // socket auth middleware). Never from the client payload.
+    const userId = socket && socket.data && socket.data.user && socket.data.user.id;
+    if (!userId) {
+      throw new Error("Missing authenticated user");
+    }
 
     const metadata = {
       userAgent: socket.handshake.headers["user-agent"],
@@ -396,6 +416,7 @@ class ChatController {
 
     const { conversation, chatHistory } = await this.manageSession(
       sessionId,
+      userId,
       message,
       metadata
     );
@@ -404,7 +425,7 @@ class ChatController {
       chatHistory,
       message
     );
-    console.log("intentResult", intentResult);
+    logger.info({ intentResult }, 'Intent result');
     let responseResult;
 
     if (intentResult.intent === "small_talk") {
@@ -417,6 +438,7 @@ class ChatController {
       responseResult = await this.handleComplaint(
         socket,
         sessionId,
+        userId,
         chatHistory,
         message
       );
@@ -427,13 +449,13 @@ class ChatController {
       const clarifiedQuery = intentResult.clarifiedQuery;
       const parsed = parseProductConstraints(clarifiedQuery);
       const queryType = classifyQuery(clarifiedQuery, parsed);
-      const previousContext = await contextService.loadContext(sessionId);
+      const previousContext = await contextService.loadContext(userId, sessionId);
       let mergedFilters = parsed.filters;
       let mergedPreferences = parsed.preferences;
       let contextReset = false;
 
       if (queryType.action === 'reset') {
-        await contextService.deleteContext(sessionId);
+        await contextService.deleteContext(userId, sessionId);
         contextReset = true;
       } else if (queryType.action === 'follow_up' && previousContext) {
         const { mergedParsed } = resolveFollowUpQuery(parsed, previousContext);
@@ -488,7 +510,7 @@ class ChatController {
           if (previousContext && !contextReset) {
             newContext.turnCount = (previousContext.turnCount || 0) + 1;
           }
-          await contextService.saveContext(sessionId, sanitizeConversationContext(newContext));
+          await contextService.saveContext(userId, sessionId, sanitizeConversationContext(newContext));
         } catch (_ctxErr) {
           // context save failure must not fail the chat response
         }
@@ -496,7 +518,7 @@ class ChatController {
     }
 
     const processingTime = Date.now() - startTime;
-    await this.saveAIResponse(sessionId, responseResult.fullResponse, {
+    await this.saveAIResponse(sessionId, userId, responseResult.fullResponse, {
       processingTime,
       retrievedProducts: responseResult.relatedProducts || [],
       responseType: responseResult.responseType || "product_query",

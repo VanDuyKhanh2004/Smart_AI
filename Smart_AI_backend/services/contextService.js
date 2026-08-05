@@ -6,11 +6,20 @@
  * Test/dev:     In-memory fallback only when
  *               CHAT_CONTEXT_MEMORY_FALLBACK_ENABLED=true or NODE_ENV=test.
  *
- * Keys: chat:context:anon:<sessionId>
+ * Keys:
+ *   Authenticated  -> chat:context:user:<userId>:<sessionId>
+ *   Anonymous      -> chat:context:anon:<sessionId>
+ *
+ * Legacy: pre-ownership deployments only ever wrote `chat:context:anon:<sessionId>`
+ * (and very old `user:`-prefixed identities via the old buildKey). After this fix
+ * authenticated callers always scope by trusted userId, so they never read those
+ * legacy anonymous keys. Legacy anon keys are simply ignored going forward; no
+ * migration of ownership is performed and no ownership is guessed.
  * TTL:  configurable via CHAT_CONTEXT_TTL_SECONDS (default 1800 = 30 min)
  */
 
 const cache = require('./cacheService');
+const logger = require('../utils/logger');
 
 /* ------------------------------------------------------------------ */
 /*  Configuration                                                      */
@@ -80,10 +89,12 @@ function memoryHas(key) {
 /*  Key helpers                                                        */
 /* ------------------------------------------------------------------ */
 
-function buildKey(identity) {
-  if (!identity || typeof identity !== 'string') return null;
-  if (identity.startsWith('user:')) return `${KEY_PREFIX}${identity}`;
-  return `${KEY_PREFIX}anon:${identity}`;
+function buildKey(userId, sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') return null;
+  if (userId && typeof userId === 'string') {
+    return `${KEY_PREFIX}user:${userId}:${sessionId}`;
+  }
+  return `${KEY_PREFIX}anon:${sessionId}`;
 }
 
 function isEnabled() {
@@ -95,7 +106,11 @@ function isEnabled() {
 /* ------------------------------------------------------------------ */
 
 /**
- * Save conversation context.
+ * Save conversation context scoped to a user.
+ *
+ * Authenticated callers pass the trusted userId; when userId is null/empty the
+ * context is stored under an anonymous session key (preserving the existing
+ * anonymous/local UX path).
  *
  * Production:   Writes to Redis via cacheService. Failure → log + return false.
  *               Never falls back to memory.
@@ -103,10 +118,10 @@ function isEnabled() {
  *
  * Returns true if saved successfully, false otherwise.
  */
-async function saveContext(identity, context) {
-  if (!isEnabled() || !identity || !context) return false;
+async function saveContext(userId, sessionId, context) {
+  if (!isEnabled() || !sessionId || !context) return false;
 
-  const key = buildKey(identity);
+  const key = buildKey(userId, sessionId);
   if (!key) return false;
 
   const safe = { ...context };
@@ -121,7 +136,7 @@ async function saveContext(identity, context) {
     return true;
   } catch (err) {
     // Redis failure — log safely and fall through to memory if allowed
-    console.log(`[Context] cache.set failed for ${key}: ${err.message}`);
+    logger.warn({ err, key }, 'Context cache set failed');
   }
 
   // In-memory fallback (only in test/dev when explicitly enabled)
@@ -133,16 +148,16 @@ async function saveContext(identity, context) {
 }
 
 /**
- * Load conversation context.
+ * Load conversation context scoped to a user.
  *
  * Production:   Reads from Redis via cacheService. Failure/not-found → null.
  *               No fallback to memory.
  * Test:         Same, unless MEMORY_FALLBACK is enabled.
  */
-async function loadContext(identity) {
-  if (!isEnabled() || !identity) return null;
+async function loadContext(userId, sessionId) {
+  if (!isEnabled() || !sessionId) return null;
 
-  const key = buildKey(identity);
+  const key = buildKey(userId, sessionId);
   if (!key) return null;
 
   // Try cacheService (Redis)
@@ -150,7 +165,7 @@ async function loadContext(identity) {
     const value = await cache.get(key);
     if (value != null) return value;
   } catch (err) {
-    console.log(`[Context] cache.get failed for ${key}: ${err.message}`);
+    logger.warn({ err, key }, 'Context cache get failed');
   }
 
   // In-memory fallback (only in test/dev when explicitly enabled)
@@ -161,18 +176,18 @@ async function loadContext(identity) {
 }
 
 /**
- * Delete conversation context.
+ * Delete conversation context scoped to a user.
  */
-async function deleteContext(identity) {
-  if (!identity) return;
+async function deleteContext(userId, sessionId) {
+  if (!sessionId) return;
 
-  const key = buildKey(identity);
+  const key = buildKey(userId, sessionId);
   if (!key) return;
 
   try {
     await cache.del(key);
   } catch (err) {
-    console.log(`[Context] cache.del failed for ${key}: ${err.message}`);
+    logger.warn({ err, key }, 'Context cache del failed');
   }
 
   memoryDelete(key);
@@ -181,10 +196,10 @@ async function deleteContext(identity) {
 /**
  * Check if context exists (primarily for testing).
  */
-async function contextExists(identity) {
-  if (!identity) return false;
+async function contextExists(userId, sessionId) {
+  if (!sessionId) return false;
 
-  const key = buildKey(identity);
+  const key = buildKey(userId, sessionId);
   if (!key) return false;
 
   try {
