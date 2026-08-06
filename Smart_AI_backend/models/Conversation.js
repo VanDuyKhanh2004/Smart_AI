@@ -40,6 +40,15 @@ const conversationSchema = new mongoose.Schema({
       trim: true,
       maxlength: [10000, 'Tin nhắn không được vượt quá 10000 ký tự']
     },
+
+    // Client-generated correlation id (UUID). Same value on the user message and
+    // its assistant reply so a submission can be traced end-to-end. Optional:
+    // legacy messages created before this field existed have it absent. No unique
+    // multikey index is placed on this field.
+    clientMessageId: {
+      type: String,
+      trim: true
+    },
     
     timestamp: {
       type: Date,

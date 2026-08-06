@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const Conversation = require("../models/Conversation");
 const Complaint = require("../models/Complaint");
 const logger = require("../utils/logger");
@@ -15,10 +16,27 @@ const contextService = require("../services/contextService");
 
 class ChatController {
   /**
+   * Builds the aiResponse payload shared by every branch. The same object is
+   * emitted to the client and cached for duplicate-id replay.
+   */
+  buildAiPayload(sessionId, clientMessageId, message, metadata) {
+    const payload = {
+      sessionId,
+      clientMessageId,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    if (metadata && typeof metadata === "object") {
+      payload.metadata = metadata;
+    }
+    return payload;
+  }
+
+  /**
    * Phase 1: Session Management
    * Quản lý phiên trò chuyện và lưu tin nhắn
    */
-  async manageSession(sessionId, userId, userMessage, metadata = {}) {
+  async manageSession(sessionId, userId, userMessage, metadata = {}, clientMessageId = null) {
     try {
       logger.info({ sessionId }, 'Phase 1: Managing session');
 
@@ -37,6 +55,14 @@ class ChatController {
         });
       }
 
+      // Defensive fallback: never append a duplicate user message for an id that
+      // is already persisted in this owned conversation.
+      const alreadyStored =
+        clientMessageId &&
+        conversation.messages.some(
+          (m) => m.role === "user" && m.clientMessageId === clientMessageId
+        );
+
       // Thêm tin nhắn của user
       const userMessageObj = {
         role: "user",
@@ -47,9 +73,14 @@ class ChatController {
           ipAddress: metadata.ipAddress,
         },
       };
+      if (clientMessageId) {
+        userMessageObj.clientMessageId = clientMessageId;
+      }
 
-      conversation.messages.push(userMessageObj);
-      await conversation.save();
+      if (!alreadyStored) {
+        conversation.messages.push(userMessageObj);
+        await conversation.save();
+      }
 
       // Lấy lịch sử chat gần đây (4-6 tin nhắn cuối)
       const recentMessages = conversation.messages.slice(-6);
@@ -153,7 +184,8 @@ class ChatController {
     sessionId,
     chatHistory,
     userQuery,
-    relatedProducts
+    relatedProducts,
+    clientMessageId
   ) {
     try {
       const validatedProducts = Array.isArray(relatedProducts)
@@ -167,11 +199,8 @@ class ChatController {
         validatedProducts
       );
 
-      socket.emit("aiResponse", {
-        sessionId,
-        message: text,
-        timestamp: new Date().toISOString(),
-      });
+      const payload = this.buildAiPayload(sessionId, clientMessageId, text);
+      socket.emit("aiResponse", payload);
 
       return {
         fullResponse: text,
@@ -181,14 +210,12 @@ class ChatController {
           name: p.name,
           score: p.score,
         })),
+        aiPayload: payload,
       };
     } catch (error) {
-      socket.emit("error", {
-        type: "GENERATION_ERROR",
-        message: "Không thể tạo phản hồi. Vui lòng thử lại.",
-        timestamp: new Date().toISOString(),
-      });
-
+      // Single terminal error is emitted by the socket boundary (socketHandler)
+      // so one failed generation yields exactly one correlated error event —
+      // not a GENERATION_ERROR here plus a PROCESSING_ERROR there.
       throw error;
     }
   }
@@ -196,41 +223,35 @@ class ChatController {
   /**
    * Handle Small Talk - Xử lý trò chuyện phiếm (early return optimization)
    */
-  async handleSmallTalk(socket, sessionId, directResponse) {
+  async handleSmallTalk(socket, sessionId, directResponse, clientMessageId) {
     try {
-      socket.emit("aiResponse", {
-        sessionId,
-        message: directResponse,
-        timestamp: new Date().toISOString(),
-        metadata: {
-          responseType: "small_talk",
-          skipRAG: true,
-        },
+      const payload = this.buildAiPayload(sessionId, clientMessageId, directResponse, {
+        responseType: "small_talk",
+        skipRAG: true,
       });
+      socket.emit("aiResponse", payload);
 
       return {
         fullResponse: directResponse,
         responseType: "small_talk",
         relatedProducts: [],
+        aiPayload: payload,
       };
     } catch (error) {
       const fallbackResponse = "Xin chào! Tôi có thể giúp gì cho bạn hôm nay?";
 
-      socket.emit("aiResponse", {
-        sessionId,
-        message: fallbackResponse,
-        timestamp: new Date().toISOString(),
-        metadata: {
-          responseType: "small_talk",
-          skipRAG: true,
-          fallback: true,
-        },
+      const payload = this.buildAiPayload(sessionId, clientMessageId, fallbackResponse, {
+        responseType: "small_talk",
+        skipRAG: true,
+        fallback: true,
       });
+      socket.emit("aiResponse", payload);
 
       return {
         fullResponse: fallbackResponse,
         responseType: "small_talk",
         relatedProducts: [],
+        aiPayload: payload,
       };
     }
   }
@@ -239,7 +260,7 @@ class ChatController {
    * Handle Complaint - Xử lý khiếu nại khách hàng
    * Sử dụng specialized complaint agent và multi-turn conversation
    */
-  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage) {
+  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage, clientMessageId) {
     try {
       logger.info({ sessionId }, 'Handling complaint for session');
 
@@ -270,16 +291,17 @@ class ChatController {
       );
 
       // Emit response to user
-      socket.emit("aiResponse", {
+      const complaintPayload = this.buildAiPayload(
         sessionId,
-        message: complaintResponse.responseText,
-        timestamp: new Date().toISOString(),
-        metadata: {
+        clientMessageId,
+        complaintResponse.responseText,
+        {
           responseType: "complaint",
           isComplete: complaintResponse.isComplete,
           priority: complaintResponse.complaintData.priority,
-        },
-      });
+        }
+      );
+      socket.emit("aiResponse", complaintPayload);
 
       // Cập nhật hoặc tạo mới complaint record
       let complaintRecord;
@@ -338,6 +360,7 @@ class ChatController {
         complaintId: complaintRecord ? complaintRecord._id : null,
         priority: complaintResponse.complaintData.priority,
         relatedProducts: [], // No product search for complaints
+        aiPayload: complaintPayload,
       };
 
     } catch (error) {
@@ -346,16 +369,17 @@ class ChatController {
       // Fallback response
       const fallbackResponse = "Em rất xin lỗi về sự bất tiện này. Hiện tại hệ thống đang gặp sự cố. Anh/chị có thể liên hệ hotline 1900xxxx để được hỗ trợ trực tiếp không ạ?";
 
-      socket.emit("aiResponse", {
+      const fallbackPayload = this.buildAiPayload(
         sessionId,
-        message: fallbackResponse,
-        timestamp: new Date().toISOString(),
-        metadata: {
+        clientMessageId,
+        fallbackResponse,
+        {
           responseType: "complaint",
           error: true,
           fallback: true,
-        },
-      });
+        }
+      );
+      socket.emit("aiResponse", fallbackPayload);
 
       return {
         fullResponse: fallbackResponse,
@@ -364,6 +388,7 @@ class ChatController {
         complaintId: null,
         priority: "medium",
         relatedProducts: [],
+        aiPayload: fallbackPayload,
       };
     }
   }
@@ -376,6 +401,16 @@ class ChatController {
       const conversation = await Conversation.findOne({ sessionId, userId });
 
       if (conversation) {
+        const clientMessageId = metadata.clientMessageId || null;
+
+        // Defensive guard: if an assistant reply for this clientMessageId is
+        // already persisted in this owned conversation, do not append again.
+        const alreadyStored =
+          clientMessageId &&
+          conversation.messages.some(
+            (m) => m.role === "assistant" && m.clientMessageId === clientMessageId
+          );
+
         const aiMessageObj = {
           role: "assistant",
           content: aiResponse,
@@ -388,10 +423,14 @@ class ChatController {
             skipRAG: metadata.skipRAG || false,
           },
         };
+        if (clientMessageId) {
+          aiMessageObj.clientMessageId = clientMessageId;
+        }
 
-        conversation.messages.push(aiMessageObj);
-        await conversation.save();
-
+        if (!alreadyStored) {
+          conversation.messages.push(aiMessageObj);
+          await conversation.save();
+        }
       }
     } catch (error) {
       logger.error({ err: error }, 'Error saving AI response');
@@ -400,7 +439,7 @@ class ChatController {
 
   async processMessage(socket, data) {
     const startTime = Date.now();
-    const { sessionId, message } = data;
+    const { sessionId, message, clientMessageId } = data;
 
     // Trusted identity comes exclusively from socket.data.user (set by the
     // socket auth middleware). Never from the client payload.
@@ -418,7 +457,8 @@ class ChatController {
       sessionId,
       userId,
       message,
-      metadata
+      metadata,
+      clientMessageId
     );
 
     const intentResult = await this.classifyAndProcessIntent(
@@ -432,7 +472,8 @@ class ChatController {
       responseResult = await this.handleSmallTalk(
         socket,
         sessionId,
-        intentResult.directResponse
+        intentResult.directResponse,
+        clientMessageId
       );
     } else if (intentResult.intent === "complaint") {
       responseResult = await this.handleComplaint(
@@ -440,7 +481,8 @@ class ChatController {
         sessionId,
         userId,
         chatHistory,
-        message
+        message,
+        clientMessageId
       );
     } else {
       // ================================================================
@@ -482,7 +524,8 @@ class ChatController {
         sessionId,
         chatHistory,
         message,
-        relatedProducts
+        relatedProducts,
+        clientMessageId
       );
 
       // ================================================================
@@ -524,6 +567,7 @@ class ChatController {
       responseType: responseResult.responseType || "product_query",
       skipRAG: responseResult.responseType === "small_talk",
       modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
+      clientMessageId,
     });
 
     return {

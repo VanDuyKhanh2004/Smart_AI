@@ -5,10 +5,19 @@ const ACCESS_TOKEN_KEY = 'accessToken';
 
 export interface ChatMessage {
   id: string;
+  clientMessageId?: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   isLoading?: boolean;
+  failed?: boolean;
+}
+
+export interface SendAck {
+  accepted: boolean;
+  duplicate: boolean;
+  status: 'accepted' | 'processing' | 'completed' | 'invalid' | 'error';
+  clientMessageId: string | null;
 }
 
 export interface ChatServiceConfig {
@@ -49,6 +58,13 @@ class ChatService {
   private config: ChatServiceConfig | null = null;
   private isConnected = false;
   private currentToken: string | null = null;
+
+  // Submissions currently in flight keyed by clientMessageId (the correlation
+  // id). Identity is the id, never the message text, so two independent
+  // submissions with identical content remain distinct.
+  private pendingByClientMessageId = new Map<string, ChatMessage>();
+  // clientMessageIds whose assistant response was already rendered once.
+  private renderedResponseIds = new Set<string>();
 
   constructor() {
     this.sessionId = uuidv4();
@@ -134,11 +150,28 @@ class ChatService {
     // AI Response
     socket.on('aiResponse', (data) => {
       if (this.socket !== socket) return;
-      const { sessionId, message, timestamp } = data;
+      const { sessionId, message, timestamp, clientMessageId } = data;
 
       if (sessionId === this.sessionId) {
+        // Render each response once per clientMessageId. A replayed or
+        // duplicated aiResponse for an already-rendered id is ignored.
+        if (clientMessageId && this.renderedResponseIds.has(clientMessageId)) {
+          this.config?.onProcessingStatus(false);
+          return;
+        }
+        if (clientMessageId) {
+          this.renderedResponseIds.add(clientMessageId);
+        }
+
+        // This request finished: free the pending slot keyed by the correlation
+        // id so a later submission is not blocked.
+        if (clientMessageId) {
+          this.pendingByClientMessageId.delete(clientMessageId);
+        }
+
         const chatMessage: ChatMessage = {
           id: uuidv4(),
+          clientMessageId,
           role: 'assistant',
           content: message,
           timestamp: new Date(timestamp),
@@ -153,6 +186,15 @@ class ChatService {
     socket.on('error', (error) => {
       if (this.socket !== socket) return;
       console.error('Chat error:', error);
+      // Correlated terminal failure: clear (and fail) the matching pending
+      // message for this clientMessageId so the user can send again.
+      if (error?.clientMessageId) {
+        const pending = this.pendingByClientMessageId.get(error.clientMessageId);
+        if (pending) {
+          pending.failed = true;
+          this.pendingByClientMessageId.delete(error.clientMessageId);
+        }
+      }
       this.config?.onError(error.message || 'Đã xảy ra lỗi khi chat');
       this.config?.onProcessingStatus(false);
     });
@@ -192,28 +234,47 @@ class ChatService {
       return null;
     }
 
-    if (!message.trim()) {
+    const content = message.trim();
+
+    if (!content) {
       this.config?.onError('Tin nhắn không thể để trống');
       return null;
     }
 
-    if (message.length > 1000) {
+    if (content.length > 1000) {
       this.config?.onError('Tin nhắn quá dài (tối đa 1000 ký tự)');
       return null;
     }
 
-    // Create user message
+    // Each call to sendMessage is a NEW submission with a fresh correlation id.
+    // Message text is never used as an idempotency key, so two independent
+    // submissions with identical content remain distinct (two ids, two emits).
+    const clientMessageId = uuidv4();
+
+    // Defensive in-flight guard keyed by clientMessageId: never emit the same
+    // id twice. The id is fresh per call so this only trips on an internal
+    // duplicate replay, never on a re-submission with identical text.
+    const inFlight = this.pendingByClientMessageId.get(clientMessageId);
+    if (inFlight) {
+      return inFlight;
+    }
+
     const userMessage: ChatMessage = {
-      id: uuidv4(),
+      id: clientMessageId,
+      clientMessageId,
       role: 'user',
-      content: message.trim(),
+      content,
       timestamp: new Date(),
     };
 
-    // Send to server
+    this.pendingByClientMessageId.set(clientMessageId, userMessage);
+
     this.socket.emit('sendMessage', {
       sessionId: this.sessionId,
-      message: message.trim(),
+      message: content,
+      clientMessageId,
+    }, (ack: SendAck) => {
+      this.handleSendAck(clientMessageId, ack);
     });
 
     // Notify config about user message
@@ -221,6 +282,25 @@ class ChatService {
     this.config?.onProcessingStatus(true);
 
     return userMessage;
+  }
+
+  // Process the delivery/dedup ack. The ack is a receipt, NOT a completion
+  // signal. The final outcome for an accepted message arrives via `aiResponse`
+  // (success) or the `error` event / messageProcessing 'error' (failure), both
+  // of which clear the pending entry keyed by clientMessageId.
+  //
+  // - 'accepted' / 'processing': receipt + dedup state only — DO NOT clear the pending.
+  // - 'invalid': terminal validation rejection — clear pending, surface error.
+  // - 'completed' (duplicate): delivery receipt for an already-finished id; the
+  //   replay arrives via aiResponse, which completes/clears the pending message.
+  private handleSendAck(clientMessageId: string, ack: SendAck) {
+    if (ack.clientMessageId && ack.clientMessageId !== clientMessageId) return;
+
+    if (ack.status === 'invalid') {
+      this.pendingByClientMessageId.delete(clientMessageId);
+      this.config?.onError('Tin nhắn không hợp lệ');
+      this.config?.onProcessingStatus(false);
+    }
   }
 
   // Reconnect with a fresh access token (call after login or token refresh).
@@ -240,6 +320,9 @@ class ChatService {
       this.isConnected = false;
     }
     this.currentToken = null;
+    // Free any in-flight slots so a manual resend after reconnect works.
+    // (Automatic resend on reconnect is intentionally out of scope.)
+    this.pendingByClientMessageId.clear();
   }
 
   // Keep the socket in sync with the current auth token.
@@ -275,6 +358,8 @@ class ChatService {
   // Reset session (tạo sessionId mới)
   resetSession() {
     this.sessionId = uuidv4();
+    this.pendingByClientMessageId.clear();
+    this.renderedResponseIds.clear();
   }
 }
 
