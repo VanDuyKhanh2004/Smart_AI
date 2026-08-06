@@ -17,18 +17,56 @@ const FloatingChat: React.FC = () => {
     if (isInitialized.current) return;
 
     const config: ChatServiceConfig = {
+      // Compatibility path (buffered/deterministic, or completed replay): a
+      // full assistant message replaces any transient loading / stream bubble.
       onMessage: (message) => {
         setMessages(prev => {
-          // Remove loading message if exists
-          const withoutLoading = prev.filter(msg => !msg.isLoading);
+          const withoutLoading = prev.filter(msg => !msg.isLoading && !(msg.id === `stream:${message.clientMessageId}`));
           return [...withoutLoading, message];
         });
         setError(null);
       },
+      // Live stream: create the ONE assistant placeholder for this id and drop
+      // the generic loading bubble.
+      onStreamStart: (message) => {
+        setMessages(prev => {
+          const withoutLoading = prev.filter(msg => !msg.isLoading);
+          if (withoutLoading.some(m => m.id === message.id)) return withoutLoading;
+          return [...withoutLoading, message];
+        });
+      },
+      // Live stream: append deltas into that same assistant message.
+      onMessageUpdate: (partial) => {
+        setMessages(prev => {
+          const found = prev.some(msg => msg.id === `stream:${partial.clientMessageId}`);
+          if (!found) return [...prev, partial];
+          return prev.map(msg =>
+            msg.id === `stream:${partial.clientMessageId}` ? { ...msg, content: partial.content } : msg
+          );
+        });
+      },
+      // Live stream: finalize the SAME placeholder with authoritative content.
+      onStreamComplete: (message) => {
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === `stream:${message.clientMessageId}` ? { ...msg, content: message.content, isLoading: false } : msg
+          )
+        );
+        setError(null);
+      },
+      // Correlated terminal failure for a streamed id: mark that placeholder
+      // failed and stop showing its loading state.
+      onStreamError: (clientMessageId) => {
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === `stream:${clientMessageId}` ? { ...msg, failed: true, isLoading: false } : msg
+          )
+        );
+      },
       onError: (errorMessage) => {
         setError(errorMessage);
         setIsProcessing(false);
-        // Remove loading message
+        // Remove loading bubbles (stream placeholders are handled via onStreamError).
         setMessages(prev => prev.filter(msg => !msg.isLoading));
       },
       onConnected: () => {
@@ -50,9 +88,10 @@ const FloatingChat: React.FC = () => {
       onProcessingStatus: (processing) => {
         setIsProcessing(processing);
         if (processing) {
-          // Add loading message only if not already present
+          // Add a generic loading bubble ONLY while waiting for aiResponseStart.
+          // Once a stream placeholder exists, this generic bubble is removed.
           setMessages(prev => {
-            const hasLoadingMessage = prev.some(msg => msg.isLoading);
+            const hasLoadingMessage = prev.some(msg => msg.id === 'loading');
             if (!hasLoadingMessage) {
               const loadingMessage: ChatMessageType = {
                 id: 'loading',
@@ -66,8 +105,8 @@ const FloatingChat: React.FC = () => {
             return prev;
           });
         } else {
-          // Remove loading message when processing is done
-          setMessages(prev => prev.filter(msg => !msg.isLoading));
+          // Remove only the generic 'loading' bubble, keep finalized streams.
+          setMessages(prev => prev.filter(msg => msg.id !== 'loading'));
         }
       },
     };

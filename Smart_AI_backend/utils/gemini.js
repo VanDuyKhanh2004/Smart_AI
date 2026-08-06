@@ -8,6 +8,12 @@ if (!process.env.OPENAI_API_KEY) {
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL_NAME = process.env.OPENAI_MODEL || "gpt-4o";
 
+// Safe ceiling for assembled final streamed text. Provider token limits are the
+// primary cap; this is a defensive guard so a runaway model never produces an
+// unbounded chat response. When hit, the stream stops and completes with
+// finishReason "max_tokens", persisting exactly the displayed content.
+const MAX_STREAMED_TEXT_CHARS = parseInt(process.env.MAX_CHAT_RESPONSE_CHARS, 10) || 4000;
+
 let googleGenAI = null;
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash";
 if (process.env.GEMINI_API_KEY) {
@@ -469,6 +475,181 @@ ${historyText ? `LỊCH SỬ CHAT GẦN ĐÂY:\n${historyText}` : ""}
 Không cần chào lại nếu đã chào trước đó. Trả lời bằng tiếng Việt thân thiện.`;
 };
 
+const throwIfAborted = (signal) => {
+  if (signal && signal.aborted) {
+    const error = new Error("Stream aborted");
+    error.aborted = true;
+    throw error;
+  }
+};
+
+/**
+ * Streams a chat completion from OpenAI-compatible providers.
+ * Emits text deltas via onDelta; resolves with { text, finishReason }.
+ * Never throws on partial progress — callers can distinguish success/error
+ * via whether any delta was emitted.
+ */
+const streamOpenAICompatible = async ({ messages, signal, onDelta, maxTokens = 600, temperature = 0.7 }) => {
+  throwIfAborted(signal);
+  const stream = await openai.chat.completions.create({
+    model: MODEL_NAME,
+    temperature,
+    max_tokens: maxTokens,
+    messages,
+    stream: true,
+    ...(signal ? { signal } : {}),
+  });
+
+  let text = "";
+  let finishReason = "stop";
+
+  for await (const chunk of stream) {
+    throwIfAborted(signal);
+    const delta = chunk?.choices?.[0]?.delta?.content;
+    if (typeof delta === "string" && delta.length > 0) {
+      text += delta;
+      if (onDelta) onDelta(delta);
+    }
+    if (chunk?.choices?.[0]?.finish_reason) {
+      finishReason = chunk.choices[0].finish_reason;
+    }
+  }
+
+  return { text, finishReason };
+};
+
+/**
+ * Streams a chat completion from Google Gemini (via @google/genai).
+ * Mirrors streamOpenAICompatible's contract so both can be used
+ * interchangeably by the orchestrator.
+ */
+const streamGeminiChat = async ({ systemPrompt, chatHistory, userMessage, signal, onDelta, maxOutputTokens = 600, temperature = 0.7 }) => {
+  if (!googleGenAI) {
+    throw new Error("Gemini SDK not initialized — GEMINI_API_KEY missing");
+  }
+
+  const contents = [];
+  if (Array.isArray(chatHistory)) {
+    for (const msg of chatHistory) {
+      contents.push({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }],
+      });
+    }
+  }
+  contents.push({
+    role: "user",
+    parts: [{ text: userMessage }],
+  });
+
+  throwIfAborted(signal);
+  const stream = await googleGenAI.models.generateContentStream({
+    model: GEMINI_CHAT_MODEL,
+    systemInstruction: systemPrompt,
+    contents,
+    config: {
+      temperature,
+      maxOutputTokens,
+    },
+  });
+
+  let text = "";
+  for await (const chunk of stream) {
+    throwIfAborted(signal);
+    const deltaText = chunk?.text;
+    const delta =
+      typeof deltaText === "string" ? deltaText : (chunk?.candidates?.[0]?.content?.parts?.[0]?.text || "");
+    if (typeof delta === "string" && delta.length > 0) {
+      text += delta;
+      if (onDelta) onDelta(delta);
+    }
+  }
+
+  return { text, finishReason: "stop" };
+};
+
+/**
+ * Orchestrator: streams a chat response with the same provider fallback chain
+ * and safety limits as generateChatResponse, but emits deltas progressively.
+ * Resolution shape: { fullResponse, provider, finishReason }.
+ * On a mid-stream provider error after partial output, throws the error with
+ * error.partialContent set to whatever was emitted so far.
+ */
+const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta }) => {
+  const systemPrompt = createSystemPrompt(productContext, chatHistory);
+  const messages = [
+    ...(Array.isArray(chatHistory) ? chatHistory.map((msg) => ({ role: msg.role, content: msg.content })) : []),
+    { role: "user", content: userMessage },
+  ];
+
+  let assembled = "";
+  let emittedAny = false;
+  let ceilingHit = false;
+
+  const guardedEmit = (delta) => {
+    if (ceilingHit) return;
+    const remaining = MAX_STREAMED_TEXT_CHARS - assembled.length;
+    if (delta.length > remaining) {
+      if (remaining > 0) {
+        const part = delta.slice(0, remaining);
+        assembled += part;
+        emittedAny = true;
+        if (onDelta) onDelta(part);
+      }
+      ceilingHit = true;
+      return;
+    }
+    assembled += delta;
+    emittedAny = true;
+    if (onDelta) onDelta(delta);
+  };
+
+  const finalizeReason = (reason) => (ceilingHit ? "max_tokens" : reason || "stop");
+
+  const partialError = (error) => {
+    if (emittedAny && assembled.length > 0) {
+      error.partialContent = assembled;
+    }
+    return error;
+  };
+
+  try {
+    // OpenAI-first, with Gemini fallback (mirrors generateChatResponse).
+    try {
+      const { text, finishReason } = await streamOpenAICompatible({ messages, signal, onDelta: guardedEmit });
+      return { fullResponse: assembled || text, provider: "openai", finishReason: finalizeReason(finishReason), streamed: true };
+    } catch (openAIError) {
+      if (emittedAny) throw partialError(openAIError);
+      console.log("Chat stream provider: OpenAI failed, falling back to Gemini. Error:", openAIError.message);
+    }
+
+    throwIfAborted(signal);
+
+    try {
+      const { text, finishReason } = await streamGeminiChat({
+        systemPrompt,
+        chatHistory,
+        userMessage,
+        signal,
+        onDelta: guardedEmit,
+      });
+      return { fullResponse: assembled || text, provider: "gemini", finishReason: finalizeReason(finishReason), streamed: true };
+    } catch (geminiError) {
+      if (emittedAny) throw partialError(geminiError);
+      console.log("Chat stream provider: Gemini failed, using deterministic fallback. Error:", geminiError.message);
+    }
+
+    throwIfAborted(signal);
+
+    // Deterministic is an intentionally BUFFERED fallback: it does not stream
+    // deltas. The caller emits a single compatibility aiResponse for it.
+    const text = buildDeterministicResponse(productContext, userMessage);
+    return { fullResponse: text, provider: "deterministic", finishReason: "stop", streamed: false };
+  } catch (error) {
+    throw partialError(error);
+  }
+};
+
 /**
  * Specialized complaint handling agent
  * Handles multi-turn conversation and extracts contact information
@@ -618,6 +799,9 @@ module.exports = {
   preclassifyIntent,
   generateResponse,
   generateChatResponse,
+  generateChatResponseStream,
+  streamOpenAICompatible,
+  streamGeminiChat,
   createSystemPrompt,
   generateComplaintResponse,
   testGeminiConnection,

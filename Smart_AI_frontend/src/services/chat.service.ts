@@ -13,6 +13,8 @@ export interface ChatMessage {
   failed?: boolean;
 }
 
+export type StreamFinishReason = 'stop' | 'max_tokens';
+
 export interface SendAck {
   accepted: boolean;
   duplicate: boolean;
@@ -22,6 +24,17 @@ export interface SendAck {
 
 export interface ChatServiceConfig {
   onMessage: (message: ChatMessage) => void;
+  // Streaming lifecycle callbacks. All deliver the SAME assistant message
+  // object (stable id = `stream:<clientMessageId>`) so the UI never appends a
+  // second bubble for a stream:
+  //   onStreamStart  -> creates the placeholder (isLoading: true, empty content)
+  //   onMessageUpdate-> appends a delta to that same message
+  //   onStreamComplete-> finalizes that same message (authoritative content)
+  onStreamStart?: (message: ChatMessage) => void;
+  onMessageUpdate?: (message: ChatMessage) => void;
+  onStreamComplete?: (message: ChatMessage) => void;
+  // A correlated terminal failure for a streaming id.
+  onStreamError?: (clientMessageId: string) => void;
   onError: (error: string) => void;
   onConnected: () => void;
   onDisconnected: () => void;
@@ -65,6 +78,40 @@ class ChatService {
   private pendingByClientMessageId = new Map<string, ChatMessage>();
   // clientMessageIds whose assistant response was already rendered once.
   private renderedResponseIds = new Set<string>();
+  // clientMessageIds finalized via aiResponseComplete (a live stream).
+  private deliveredStreamIds = new Set<string>();
+  // Live-stream bookkeeping per clientMessageId: the one assistant messenger
+  // plus chunk-sequence tracking (index must be sequential, starting at 0).
+  private streamByClientMessageId = new Map<string, {
+    message: ChatMessage;
+    nextChunkIndex: number;
+  }>();
+
+  private streamMessageId(clientMessageId: string) {
+    return `stream:${clientMessageId}`;
+  }
+
+  private createStreamMessage(clientMessageId: string): ChatMessage {
+    return {
+      id: this.streamMessageId(clientMessageId),
+      clientMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isLoading: true,
+    };
+  }
+
+  // Append a delta to the one assistant placeholder for this id. Ignores stale
+  // (duplicate/out-of-order) chunkIndex values, matching `nextChunkIndex`.
+  private appendChunk(clientMessageId: string, chunk: string, chunkIndex: number) {
+    const live = this.streamByClientMessageId.get(clientMessageId);
+    if (!live) return;
+    if (chunkIndex !== live.nextChunkIndex) return; // stale/out-of-order -> ignore
+    live.nextChunkIndex += 1;
+    live.message = { ...live.message, content: live.message.content + chunk };
+    this.config?.onMessageUpdate?.(live.message);
+  }
 
   constructor() {
     this.sessionId = uuidv4();
@@ -147,12 +194,25 @@ class ChatService {
       console.log('Welcome message:', data);
     });
 
-    // AI Response
+    // AI Response — compatibility path ONLY. Used for:
+    //   1. buffered/deterministic branches that intentionally do not stream
+    //   2. completed-duplicate replays (the dedup store re-emits a stored
+    //      aiResponse-shaped payload)
+    // A successful live stream uses aiResponseStart/Chunk/Complete and never
+    // delivers aiResponse. Any aiResponse for an already-delivered streaming id
+    // is ignored.
     socket.on('aiResponse', (data) => {
       if (this.socket !== socket) return;
       const { sessionId, message, timestamp, clientMessageId } = data;
 
       if (sessionId === this.sessionId) {
+        // A live stream was already delivered for this id — never render a
+        // second bubble from a stray/replayed aiResponse.
+        if (clientMessageId && this.deliveredStreamIds.has(clientMessageId)) {
+          this.config?.onProcessingStatus(false);
+          return;
+        }
+
         // Render each response once per clientMessageId. A replayed or
         // duplicated aiResponse for an already-rendered id is ignored.
         if (clientMessageId && this.renderedResponseIds.has(clientMessageId)) {
@@ -182,6 +242,56 @@ class ChatService {
       }
     });
 
+    // Live stream: creates the ONE assistant placeholder per clientMessageId.
+    socket.on('aiResponseStart', (data) => {
+      if (this.socket !== socket) return;
+      const { sessionId, clientMessageId } = data;
+      if (!clientMessageId) return;
+      if (sessionId !== this.sessionId) return;
+
+      // Exactly one placeholder per id; a duplicate start is a no-op.
+      if (this.streamByClientMessageId.has(clientMessageId)) return;
+
+      const message = this.createStreamMessage(clientMessageId);
+      this.streamByClientMessageId.set(clientMessageId, { message, nextChunkIndex: 0 });
+      this.config?.onStreamStart?.(message);
+    });
+
+    // Live stream: each chunk is a DELTA appended to the SAME placeholder.
+    socket.on('aiResponseChunk', (data) => {
+      if (this.socket !== socket) return;
+      const { sessionId, clientMessageId, chunk, chunkIndex } = data;
+      if (!clientMessageId || typeof chunk !== 'string' || chunk.length === 0) return;
+      if (sessionId !== this.sessionId) return;
+
+      this.appendChunk(clientMessageId, chunk, chunkIndex);
+    });
+
+    // Live stream: finalizes the placeholder with authoritative content.
+    socket.on('aiResponseComplete', (data) => {
+      if (this.socket !== socket) return;
+      const { sessionId, clientMessageId, content, timestamp } = data;
+      if (!clientMessageId) return;
+      if (sessionId !== this.sessionId) return;
+
+      const live = this.streamByClientMessageId.get(clientMessageId);
+      if (!live) return;
+
+      this.deliveredStreamIds.add(clientMessageId);
+      this.streamByClientMessageId.delete(clientMessageId);
+      this.pendingByClientMessageId.delete(clientMessageId);
+
+      // Authoritative content replaces whatever was locally accumulated.
+      const finalMessage: ChatMessage = {
+        ...live.message,
+        content,
+        timestamp: new Date(timestamp),
+        isLoading: false,
+      };
+      this.config?.onStreamComplete?.(finalMessage);
+      this.config?.onProcessingStatus(false);
+    });
+
     // Error handling
     socket.on('error', (error) => {
       if (this.socket !== socket) return;
@@ -189,6 +299,13 @@ class ChatService {
       // Correlated terminal failure: clear (and fail) the matching pending
       // message for this clientMessageId so the user can send again.
       if (error?.clientMessageId) {
+        // A streamed placeholder for this id is marked failed and removed.
+        const live = this.streamByClientMessageId.get(error.clientMessageId);
+        if (live) {
+          live.message = { ...live.message, failed: true, isLoading: false };
+          this.config?.onStreamError?.(error.clientMessageId);
+          this.streamByClientMessageId.delete(error.clientMessageId);
+        }
         const pending = this.pendingByClientMessageId.get(error.clientMessageId);
         if (pending) {
           pending.failed = true;
@@ -323,6 +440,8 @@ class ChatService {
     // Free any in-flight slots so a manual resend after reconnect works.
     // (Automatic resend on reconnect is intentionally out of scope.)
     this.pendingByClientMessageId.clear();
+    this.streamByClientMessageId.clear();
+    this.deliveredStreamIds.clear();
   }
 
   // Keep the socket in sync with the current auth token.
@@ -359,6 +478,8 @@ class ChatService {
   resetSession() {
     this.sessionId = uuidv4();
     this.pendingByClientMessageId.clear();
+    this.streamByClientMessageId.clear();
+    this.deliveredStreamIds.clear();
     this.renderedResponseIds.clear();
   }
 }
