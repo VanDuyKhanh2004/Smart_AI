@@ -38,14 +38,14 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({ message }) => {
       />
       <div className="flex flex-col gap-1">
         <MessageContent>
-          {isLoading ? (
+          {isLoading && !message.content ? (
             <div className="flex items-center gap-2">
               <Loader size={16} />
               <span className="text-sm">Quỳnh Như đang trả lời...</span>
             </div>
           ) : (
-            <Response className="text-sm">
-              {message.content}
+            <Response className={`text-sm ${isLoading ? 'streaming' : ''}`}>
+              {`${message.content}${isLoading ? '▍' : ''}`}
             </Response>
           )}
         </MessageContent>

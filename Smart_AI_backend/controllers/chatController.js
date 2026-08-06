@@ -6,8 +6,11 @@ const productSearchService = require("../services/productSearchService");
 const {
   classifyIntentAndRespond,
   generateChatResponse,
+  generateChatResponseStream,
   generateComplaintResponse,
 } = require("../utils/gemini");
+
+const { createChatStreamBatching } = require("../services/chatStreamBatching");
 const { parseProductConstraints } = require("../utils/productConstraintParser");
 const { matchesProductConstraints } = require("../utils/productValidator");
 const { rankProducts } = require("../utils/productRanking");
@@ -176,8 +179,13 @@ class ChatController {
   }
 
   /**
-   * Phase 4: Response Generation
-   * Tạo phản hồi bằng Gemini và trả về toàn bộ response một lần
+   * Phase 4: Response Generation (streaming)
+   * Tạo phản hồi bằng Gemini/OpenAI, truyền từng phần gửi về client qua các
+   * sự kiện `aiResponseStart`, `aiResponseChunk*`, `aiResponseComplete`.
+   *
+   * Live provider success (OpenAI/Gemini) uses start/chunk/complete and NEVER
+   * emits `aiResponse`. `aiResponse` is reserved for buffered/deterministic
+   * fallback branches and (at the socket boundary) completed duplicate replays.
    */
   async generateResponse(
     socket,
@@ -187,20 +195,108 @@ class ChatController {
     relatedProducts,
     clientMessageId
   ) {
+    let batching = null;
+    let startEmitted = false;
     try {
       const validatedProducts = Array.isArray(relatedProducts)
         ? relatedProducts
         : [];
       const validatedHistory = Array.isArray(chatHistory) ? chatHistory : [];
 
-      const { text, provider } = await generateChatResponse(
-        validatedHistory,
-        userQuery,
-        validatedProducts
-      );
+      // Streaming is used when the module provides it. Tests that mock
+      // `../utils/gemini` without the streaming export fall back to the classic
+      // single-shot path so their assertions (payload shape, failure handling)
+      // remain valid.
+      const streamFn = typeof generateChatResponseStream === 'function'
+        ? generateChatResponseStream
+        : null;
 
-      const payload = this.buildAiPayload(sessionId, clientMessageId, text);
-      socket.emit("aiResponse", payload);
+      // Exactly-once, emitted before the first streamed chunk, after the
+      // socket boundary's `messageProcessing started`.
+      const ensureStart = () => {
+        if (startEmitted) return;
+        socket.emit("aiResponseStart", {
+          sessionId,
+          clientMessageId,
+          timestamp: new Date().toISOString(),
+        });
+        startEmitted = true;
+      };
+
+      // Chunk index counting starts at 0 and increments by exactly 1 per chunk
+      // (the batching helper's own monotonic index).
+
+      try {
+        batching = createChatStreamBatching({
+          onChunk: (text, chunkIndex) => {
+            ensureStart();
+            // text is a DELTA chunk; never an accumulator.
+            socket.emit("aiResponseChunk", {
+              sessionId,
+              clientMessageId,
+              chunk: text,
+              chunkIndex,
+              timestamp: new Date().toISOString(),
+            });
+          },
+        });
+      } catch (_err) {
+        // A batching-setup failure must not fail an otherwise-valid response;
+        // the buffered fallback below still emits the compatibility aiResponse.
+      }
+
+      let text;
+      let provider = "deterministic";
+      let finishReason = "stop";
+      let streamed = false;
+      let totalChunks = 0;
+
+      if (streamFn && batching) {
+        const streamResult = await streamFn({
+          userMessage: userQuery,
+          chatHistory: validatedHistory,
+          productContext: validatedProducts,
+          onDelta: (delta) => batching.push(delta),
+        });
+        batching.flush(); // flush any residual buffered text before completion
+        totalChunks = batching.chunkCount();
+        batching.dispose();
+        batching = null;
+
+        text = streamResult.fullResponse;
+        provider = streamResult.provider;
+        finishReason = streamResult.finishReason;
+        streamed = streamResult.streamed === true;
+      } else {
+        const res = await generateChatResponse(validatedHistory, userQuery, validatedProducts);
+        text = res.text;
+        provider = res.provider;
+        if (batching) { batching.dispose(); batching = null; }
+      }
+
+      // Compatibility payload used by the dedup store for future completed
+      // replay — shaped exactly like an `aiResponse`.
+      const payload = this.buildAiPayload(sessionId, clientMessageId, text, {
+        provider,
+        finishReason,
+        streamed,
+      });
+
+      if (streamed) {
+        // LIVE success: terminal event is aiResponseComplete, never aiResponse.
+        socket.emit("aiResponseComplete", {
+          sessionId,
+          clientMessageId,
+          content: text,
+          finishReason,
+          totalChunks,
+          timestamp: new Date().toISOString(),
+          metadata: { provider, streamed: true },
+        });
+      } else {
+        // Buffered/deterministic fallback branch — one compatibility aiResponse.
+        socket.emit("aiResponse", payload);
+      }
 
       return {
         fullResponse: text,
@@ -213,6 +309,7 @@ class ChatController {
         aiPayload: payload,
       };
     } catch (error) {
+      try { batching && batching.dispose(); } catch (_e) { /* ignore */ }
       // Single terminal error is emitted by the socket boundary (socketHandler)
       // so one failed generation yields exactly one correlated error event —
       // not a GENERATION_ERROR here plus a PROCESSING_ERROR there.
