@@ -248,10 +248,15 @@ describe('ChatService socket authentication', () => {
 
     const userMessage = chatService.sendMessage('Xin chào');
     expect(userMessage).not.toBeNull();
-    expect(entry.socket.emit).toHaveBeenCalledWith('sendMessage', {
+    expect(entry.socket.emit).toHaveBeenCalledTimes(1);
+    const [event, payload, ack] = entry.socket.emit.mock.calls[0];
+    expect(event).toBe('sendMessage');
+    expect(payload).toEqual({
       sessionId: chatService.getSessionId(),
       message: 'Xin chào',
+      clientMessageId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
     });
+    expect(typeof ack).toBe('function');
     expect(config.onMessage).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'user', content: 'Xin chào' })
     );

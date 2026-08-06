@@ -205,7 +205,11 @@ describe('Authenticated event handling', () => {
 
     expect(completed.processingTime).toBe(12);
     expect(chatController.processMessage).toHaveBeenCalledTimes(1);
-    expect(chatController.processMessage.mock.calls[0][1]).toEqual(payload);
+    const passedData = chatController.processMessage.mock.calls[0][1];
+    expect(passedData.sessionId).toBe(VALID_SESSION_ID);
+    expect(passedData.message).toBe('Gợi ý điện thoại');
+    // The server supplies a generated correlation id when the legacy client does not.
+    expect(passedData.clientMessageId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 
   it('blocks sendMessage from reaching the AI pipeline when socket.data.user is missing', async () => {

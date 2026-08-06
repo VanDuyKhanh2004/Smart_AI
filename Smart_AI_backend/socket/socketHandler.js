@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { authenticateSocket, SOCKET_AUTH_REQUIRED } = require('../middlewares/socketAuthMiddleware');
 
@@ -43,8 +44,8 @@ const initializeSocketHandlers = (io) => {
 
     socket.broadcast.emit('userCount', { count: clientCount });
 
-    socket.on('sendMessage', async (data) => {
-      await handleSendMessage(socket, data);
+    socket.on('sendMessage', async (data, ack) => {
+      await handleSendMessage(socket, data, ack);
     });
 
     socket.on('ping', () => {
@@ -84,21 +85,70 @@ const initializeSocketHandlers = (io) => {
 };
 
 
-const handleSendMessage = async (socket, data) => {
+const handleSendMessage = async (socket, data, ack) => {
+  // One submission, one correlation id, one ack, one terminal error.
+  let clientMessageId = null;
+  let userId = null;
+  let sessionId = null;
+
+  const emitAck = (payload) => {
+    if (typeof ack === 'function') {
+      ack(payload);
+    }
+  };
+
   try {
     if (!requireSocketAuth(socket)) {
       return;
     }
 
+    // Trusted identity comes exclusively from socket.data.user (set by the
+    // socket auth middleware). Never from the client payload.
+    userId = socket.data.user.id;
+    sessionId = data?.sessionId;
+
     logger.info({
       socketId: socket.id,
-      sessionId: data?.sessionId,
+      sessionId,
       messageLength: data?.message?.length || 0,
+      hasClientMessageId: !!data?.clientMessageId,
       timestamp: new Date().toISOString()
     }, 'Received message');
 
-    // Validation
-    if (!data || !data.sessionId || !data.message) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // Resolve the correlation id. A well-formed client UUID is used as-is; a
+    // legacy client that omits it gets a server-generated UUID (structured
+    // warning, never a hard reject) so it keeps working; an explicitly supplied
+    // but malformed id is rejected.
+    const rawClientMessageId = data?.clientMessageId;
+    if (rawClientMessageId === undefined || rawClientMessageId === null) {
+      clientMessageId = crypto.randomUUID();
+      logger.warn({
+        socketId: socket.id,
+        sessionId,
+        clientMessageId
+      }, 'Client did not send clientMessageId; server generated one');
+    } else if (typeof rawClientMessageId === 'string' && uuidRegex.test(rawClientMessageId)) {
+      clientMessageId = rawClientMessageId;
+    } else {
+      emitAck({
+        accepted: false,
+        duplicate: false,
+        status: 'invalid',
+        clientMessageId: typeof rawClientMessageId === 'string' ? rawClientMessageId : null
+      });
+      socket.emit('error', {
+        type: 'VALIDATION_ERROR',
+        message: 'clientMessageId không hợp lệ. Cần UUID.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
+    // Validation (existing behavior preserved, ack sent where practical)
+    if (!data || !sessionId || !data.message) {
+      emitAck({ accepted: false, duplicate: false, status: 'invalid', clientMessageId });
       socket.emit('error', {
         type: 'VALIDATION_ERROR',
         message: 'Dữ liệu không hợp lệ. Cần sessionId và message.',
@@ -107,8 +157,8 @@ const handleSendMessage = async (socket, data) => {
       return;
     }
 
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(data.sessionId)) {
+    if (!uuidRegex.test(sessionId)) {
+      emitAck({ accepted: false, duplicate: false, status: 'invalid', clientMessageId });
       socket.emit('error', {
         type: 'INVALID_SESSION',
         message: 'Session ID không hợp lệ.',
@@ -118,6 +168,7 @@ const handleSendMessage = async (socket, data) => {
     }
 
     if (data.message.trim().length === 0) {
+      emitAck({ accepted: false, duplicate: false, status: 'invalid', clientMessageId });
       socket.emit('error', {
         type: 'EMPTY_MESSAGE',
         message: 'Tin nhắn không thể để trống.',
@@ -127,6 +178,7 @@ const handleSendMessage = async (socket, data) => {
     }
 
     if (data.message.length > 1000) {
+      emitAck({ accepted: false, duplicate: false, status: 'invalid', clientMessageId });
       socket.emit('error', {
         type: 'MESSAGE_TOO_LONG',
         message: 'Tin nhắn quá dài (tối đa 1000 ký tự).',
@@ -135,8 +187,41 @@ const handleSendMessage = async (socket, data) => {
       return;
     }
 
+    // Deduplicate: only the first submitter of a given clientMessageId (scoped
+    // to this trusted user + session) is accepted. Duplicates are answered with
+    // the stored result (replayed aiResponse) or a processing status — never
+    // reprocessed and never emitted twice.
+    const chatMessageDedup = require('../services/chatMessageDedupService');
+    const claim = await chatMessageDedup.claim(userId, sessionId, clientMessageId);
+
+    if (claim && claim.claimed === false) {
+      // Completed duplicate: acknowledge FIRST (one ack), then replay the cached
+      // aiResponse exactly once. Pipeline is never run and nothing is persisted.
+      const isCompleted = claim.duplicate && claim.state === 'completed';
+      emitAck({
+        accepted: false,
+        duplicate: true,
+        status: isCompleted ? 'completed' : 'processing',
+        clientMessageId
+      });
+      if (isCompleted && claim.payload) {
+        const aiPayload = chatMessageDedup.revivePayload(claim.payload);
+        if (aiPayload) {
+          socket.emit('aiResponse', aiPayload);
+        }
+      }
+      return;
+    }
+
+    // The ack is a DELIVERY/DEDUP acknowledgement, not a completion signal.
+    // Deliver it FIRST (once, exactly once) after a successful claim, then the
+    // 'started' progress signal, then run the AI pipeline — so the ack never
+    // waits for generation and never follows the started event.
+    emitAck({ accepted: true, duplicate: false, status: 'accepted', clientMessageId });
+
     socket.emit('messageProcessing', {
-      sessionId: data.sessionId,
+      sessionId,
+      clientMessageId,
       status: 'started',
       timestamp: new Date().toISOString()
     });
@@ -145,24 +230,72 @@ const handleSendMessage = async (socket, data) => {
     const chatController = require('../controllers/chatController');
 
     // Process message through full RAG pipeline
-    const result = await chatController.processMessage(socket, data);
+    const result = await chatController.processMessage(socket, {
+      ...data,
+      clientMessageId
+    });
 
     // Emit processing completed
     socket.emit('messageProcessing', {
-      sessionId: data.sessionId,
+      sessionId,
+      clientMessageId,
       status: 'completed',
       processingTime: result.processingTime,
       timestamp: new Date().toISOString()
     });
 
-  } catch (error) {
-    logger.error({ err: error }, 'Error processing message');
+    // Remember the emitted aiResponse payload keyed by clientMessageId so a
+    // duplicate resubmission of the same id replays the exact same response
+    // instead of reprocessing. If no payload was produced, release the claim.
+    if (result && result.aiPayload) {
+      try {
+        await chatMessageDedup.markCompleted(userId, sessionId, clientMessageId, result.aiPayload);
+      } catch (_storeErr) {
+        // a dedup-store failure must not turn a successful generation into an error
+      }
+    } else {
+      try {
+        await chatMessageDedup.release(userId, sessionId, clientMessageId);
+      } catch (_storeErr) {
+        // same: ignore store failure after a successful response
+      }
+    }
 
-    socket.emit('error', {
+    // NO second ack here: the 'accepted' ack was already delivered and the final
+    // success is signaled via aiResponse + messageProcessing 'completed'.
+
+  } catch (error) {
+    logger.error({ err: error, sessionId }, 'Error processing message');
+
+    // One failed generation -> exactly one correlated terminal error event, and
+    // the claim is released so a legitimate retry can reprocess later.
+    const chatMessageDedup = require('../services/chatMessageDedupService');
+    if (userId && sessionId && clientMessageId) {
+      try {
+        await chatMessageDedup.release(userId, sessionId, clientMessageId);
+      } catch (_err) {
+        // releasing a claim must never mask the original failure
+      }
+    }
+
+    const errorPayload = {
       type: 'PROCESSING_ERROR',
       message: 'Lỗi khi xử lý tin nhắn. Vui lòng thử lại sau.',
       timestamp: new Date().toISOString(),
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    };
+    if (clientMessageId) {
+      errorPayload.clientMessageId = clientMessageId;
+    }
+    // The 'accepted' ack was already delivered — do NOT ack again. Terminal
+    // failure is signaled by exactly one correlated error event plus a
+    // messageProcessing 'error' progress signal.
+    socket.emit('error', errorPayload);
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      status: 'error',
+      timestamp: new Date().toISOString()
     });
   }
 };
