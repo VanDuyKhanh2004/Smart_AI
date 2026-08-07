@@ -25,6 +25,8 @@ interface ChatWindowProps {
   onSendMessage: (message: string) => boolean;
   onStopGeneration: () => void;
   onReset: () => void;
+  onRetryMessage?: (message: ChatMessageType) => void;
+  onRegenerateMessage?: (message: ChatMessageType) => void;
 }
 
 const ChatWindow: React.FC<ChatWindowProps> = ({ 
@@ -38,7 +40,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   error, 
   onSendMessage, 
   onStopGeneration,
-  onReset 
+  onReset,
+  onRetryMessage,
+  onRegenerateMessage,
 }) => {
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -108,7 +112,36 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           )}
           
           {messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
+            <ChatMessage
+              key={message.id}
+              message={message}
+              onRetry={onRetryMessage}
+              onRegenerate={onRegenerateMessage}
+              canRetry={
+                ((
+                  // Partial assistant that was cancelled/failed keeps its partial
+                  // content and hosts Retry.
+                  message.role === 'assistant' &&
+                  !message.isLoading &&
+                  (message.failed === true || message.cancelled === true) &&
+                  !!message.clientMessageId
+                ) || (
+                  // An early-cancelled/failed logical turn (no assistant
+                  // placeholder was ever created) hosts Retry on the USER bubble.
+                  message.role === 'user' &&
+                  message.retryable === true &&
+                  !!message.clientMessageId
+                )) && !message.regenerating
+              }
+              canRegenerate={
+                message.role === 'assistant' &&
+                !message.isLoading &&
+                message.failed !== true &&
+                message.cancelled !== true &&
+                !!message.clientMessageId
+              }
+              disabled={isProcessing}
+            />
           ))}
           
           <div ref={messagesEndRef} />

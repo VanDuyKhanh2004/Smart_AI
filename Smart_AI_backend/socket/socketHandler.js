@@ -48,6 +48,14 @@ const initializeSocketHandlers = (io) => {
       await handleSendMessage(socket, data, ack);
     });
 
+    socket.on('retryMessage', async (data, ack) => {
+      await handleRetryMessage(socket, data, ack);
+    });
+
+    socket.on('regenerateMessage', async (data, ack) => {
+      await handleRegenerateMessage(socket, data, ack);
+    });
+
     socket.on('stopGeneration', (data, ack) => {
       handleStopGeneration(socket, data, ack);
     });
@@ -351,6 +359,360 @@ const handleSendMessage = async (socket, data, ack) => {
       clientMessageId,
       status: 'error',
       timestamp: new Date().toISOString()
+    });
+  }
+};
+
+/**
+ * Retry a logical turn whose user message is persisted but whose assistant
+ * reply was never persisted (cancelled or failed generation). Never hangs a
+ * generic error event: terminal is `messageProcessing 'cancelled'|'error'`.
+ *
+ * Ack contract (at most one ack):
+ *   { accepted: true,  duplicate: false, status: 'accepted', clientMessageId, generationId }
+ *   { accepted: false, status: 'already_processing' } — another attempt of this turn is live
+ *   { accepted: false, status: 'already_completed' }  — an assistant reply already exists
+ *   { accepted: false, status: 'not_found' }          — conversation/user turn missing (generic)
+ *   { accepted: false, status: 'invalid' }            — bad sessionId/clientMessageId
+ *
+ * Identity: trusted userId (socket.data.user.id, never client payload) +
+ * sessionId + logical clientMessageId. The generation identity defaults to the
+ * logical id (its previous dedup claim was released on cancel/error).
+ */
+const handleRetryMessage = async (socket, data, ack) => {
+  let userId = null;
+  let sessionId = null;
+  let clientMessageId = null;
+  let generationId = null;
+
+  const emitAck = (payload) => {
+    if (typeof ack === 'function') ack(payload);
+  };
+
+  try {
+    if (!requireSocketAuth(socket)) return;
+
+    userId = socket.data.user.id;
+    sessionId = data?.sessionId;
+    const rawClientMessageId = data?.clientMessageId;
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (typeof sessionId !== 'string' || !uuidRegex.test(sessionId) ||
+        typeof rawClientMessageId !== 'string' || !uuidRegex.test(rawClientMessageId)) {
+      emitAck({
+        accepted: false,
+        duplicate: false,
+        status: 'invalid',
+        clientMessageId: typeof rawClientMessageId === 'string' ? rawClientMessageId : null
+      });
+      return;
+    }
+    clientMessageId = rawClientMessageId;
+
+    const chatController = require('../controllers/chatController');
+    const chatActiveStreams = require('../services/chatActiveStreams');
+
+    // Can't retry a turn whose attempt is already running.
+    if (chatActiveStreams.isLogicalActive({ userId, sessionId, clientMessageId })) {
+      emitAck({ accepted: false, duplicate: false, status: 'already_processing', clientMessageId });
+      return;
+    }
+
+    // Verify the owned target before claiming anything.
+    const verify = await chatController.verifyRetryTarget(sessionId, userId, clientMessageId);
+    if (verify.status !== 'ready') {
+      emitAck({ accepted: false, duplicate: false, status: verify.status, clientMessageId });
+      return;
+    }
+
+    // Claim the generation identity (== logical id for retry). A released
+    // previous claim lets a legit Retry reprocess; a still-live claim is a race.
+    const chatMessageDedup = require('../services/chatMessageDedupService');
+    generationId = clientMessageId;
+    const claim = await chatMessageDedup.claim(userId, sessionId, generationId);
+    if (claim && claim.claimed === false) {
+      const isCompleted = claim.duplicate && claim.state === 'completed';
+      emitAck({
+        accepted: false,
+        duplicate: true,
+        status: isCompleted ? 'already_completed' : 'already_processing',
+        clientMessageId,
+        generationId
+      });
+      if (isCompleted && claim.payload) {
+        const aiPayload = chatMessageDedup.revivePayload(claim.payload);
+        if (aiPayload) socket.emit('aiResponse', aiPayload);
+      }
+      return;
+    }
+
+    // Logical-turn guard (dedup keyed by generation==logical already sees a
+    // processing collision, but regenerate also relies on this guard).
+    if (!chatActiveStreams.claimLogical({ userId, sessionId, clientMessageId, generationId })) {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
+      emitAck({ accepted: false, duplicate: false, status: 'already_processing', clientMessageId, generationId });
+      return;
+    }
+
+    // Boundary: one AbortController + registry registration.
+    const controller = new AbortController();
+    chatActiveStreams.register({
+      userId,
+      sessionId,
+      clientMessageId,
+      generationId,
+      controller,
+      socketId: socket.id,
+    });
+
+    emitAck({ accepted: true, duplicate: false, status: 'accepted', clientMessageId, generationId });
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      generationId,
+      status: 'started',
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await chatController.retryMessage(socket, sessionId, userId, clientMessageId, controller.signal);
+
+    const { throwIfCancelled } = require('../utils/chatCancellation');
+    throwIfCancelled(controller.signal);
+
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      generationId,
+      status: 'completed',
+      processingTime: result.result.processingTime,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (result.result && result.result.aiPayload) {
+      try { await chatMessageDedup.markCompleted(userId, sessionId, generationId, result.result.aiPayload); }
+      catch (_storeErr) { /* ignore */ }
+    } else {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); }
+      catch (_storeErr) { /* ignore */ }
+    }
+    chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+  } catch (error) {
+    const { throwIfCancelled, isCancellationError } = require('../utils/chatCancellation');
+    const isCancellation = isCancellationError(error);
+    if (!isCancellation) {
+      logger.error({ err: error, sessionId, clientMessageId }, 'Error retrying message');
+    }
+
+    const chatMessageDedup = require('../services/chatMessageDedupService');
+    if (userId && sessionId && clientMessageId) {
+      try { await chatMessageDedup.release(userId, sessionId, clientMessageId); } catch (_e) { /* ignore */ }
+      try {
+        const chatActiveStreams = require('../services/chatActiveStreams');
+        chatActiveStreams.remove({ userId, sessionId, clientMessageId });
+        chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId: clientMessageId });
+      } catch (_e) { /* ignore */ }
+    }
+
+    if (isCancellation) {
+      socket.emit('messageProcessing', {
+        sessionId,
+        clientMessageId,
+        generationId: clientMessageId,
+        status: 'cancelled',
+        reason: 'user_cancelled',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const errorPayload = {
+      type: 'PROCESSING_ERROR',
+      message: 'Lỗi khi xử lý tin nhắn. Vui lòng thử lại sau.',
+      timestamp: new Date().toISOString(),
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    };
+    if (clientMessageId) errorPayload.clientMessageId = clientMessageId;
+    socket.emit('error', errorPayload);
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      status: 'error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+};
+
+/**
+ * Regenerate a completed logical turn. The logical clientMessageId stays stable;
+ * a FRESH generationId is minted for this attempt. The old assistant reply
+ * remains persisted until the new generation actually succeeds (generate-then-
+ * replace); a failed/cancelled regenerate leaves it untouched.
+ *
+ * Ack contract (at most one ack):
+ *   { accepted: true,  status: 'accepted', clientMessageId, generationId }
+ *   { accepted: false, status: 'already_processing' }
+ *   { accepted: false, status: 'not_completed' } — no completed assistant reply
+ *   { accepted: false, status: 'not_found' }         — generic ownership miss
+ *   { accepted: false, status: 'invalid' }
+ */
+const handleRegenerateMessage = async (socket, data, ack) => {
+  let userId = null;
+  let sessionId = null;
+  let clientMessageId = null;
+  let generationId = null;
+
+  const emitAck = (payload) => {
+    if (typeof ack === 'function') ack(payload);
+  };
+
+  try {
+    if (!requireSocketAuth(socket)) return;
+
+    userId = socket.data.user.id;
+    sessionId = data?.sessionId;
+    const rawClientMessageId = data?.clientMessageId;
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (typeof sessionId !== 'string' || !uuidRegex.test(sessionId) ||
+        typeof rawClientMessageId !== 'string' || !uuidRegex.test(rawClientMessageId)) {
+      emitAck({
+        accepted: false,
+        status: 'invalid',
+        clientMessageId: typeof rawClientMessageId === 'string' ? rawClientMessageId : null
+      });
+      return;
+    }
+    clientMessageId = rawClientMessageId;
+
+    const chatController = require('../controllers/chatController');
+    const chatActiveStreams = require('../services/chatActiveStreams');
+
+    // Regenerate is for a LOGICAL turn; a fresh generationId is minted per
+    // attempt, so the logical-turn guard is what stops a second pipeline for
+    // the same turn (double-click, etc.).
+    if (chatActiveStreams.isLogicalActive({ userId, sessionId, clientMessageId })) {
+      emitAck({ accepted: false, status: 'already_processing', clientMessageId });
+      return;
+    }
+
+    const verify = await chatController.verifyRegenerateTarget(sessionId, userId, clientMessageId);
+    if (verify.status !== 'ready') {
+      emitAck({ accepted: false, status: verify.status, clientMessageId });
+      return;
+    }
+
+    // Fresh generation identity.
+    generationId = crypto.randomUUID();
+
+    const chatMessageDedup = require('../services/chatMessageDedupService');
+    const claim = await chatMessageDedup.claim(userId, sessionId, generationId);
+    if (claim && claim.claimed === false) {
+      const isCompleted = claim.duplicate && claim.state === 'completed';
+      emitAck({
+        accepted: false,
+        status: isCompleted ? 'already_completed' : 'already_processing',
+        clientMessageId,
+        generationId
+      });
+      return;
+    }
+
+    if (!chatActiveStreams.claimLogical({ userId, sessionId, clientMessageId, generationId })) {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
+      emitAck({ accepted: false, status: 'already_processing', clientMessageId, generationId });
+      return;
+    }
+
+    const controller = new AbortController();
+    chatActiveStreams.register({
+      userId,
+      sessionId,
+      clientMessageId,
+      generationId,
+      controller,
+      socketId: socket.id,
+    });
+
+    emitAck({ accepted: true, status: 'accepted', clientMessageId, generationId });
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      generationId,
+      status: 'started',
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await chatController.regenerateMessage(socket, sessionId, userId, clientMessageId, generationId, controller.signal);
+
+    const { throwIfCancelled } = require('../utils/chatCancellation');
+    throwIfCancelled(controller.signal);
+
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      generationId,
+      status: 'completed',
+      processingTime: result.result.processingTime,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (result.result && result.result.aiPayload) {
+      try { await chatMessageDedup.markCompleted(userId, sessionId, generationId, result.result.aiPayload); }
+      catch (_storeErr) { /* ignore */ }
+    } else {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); }
+      catch (_storeErr) { /* ignore */ }
+    }
+    chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+  } catch (error) {
+    const { isCancellationError } = require('../utils/chatCancellation');
+    const isCancellation = isCancellationError(error);
+    if (!isCancellation) {
+      logger.error({ err: error, sessionId, clientMessageId }, 'Error regenerating message');
+    }
+
+    const chatMessageDedup = require('../services/chatMessageDedupService');
+    const chatActiveStreams = require('../services/chatActiveStreams');
+
+    if (userId && sessionId && clientMessageId) {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
+      try {
+        chatActiveStreams.remove({
+          userId,
+          sessionId,
+          clientMessageId,
+          generationId,
+        });
+        chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+      } catch (_e) { /* ignore */ }
+    }
+
+    if (isCancellation) {
+      socket.emit('messageProcessing', {
+        sessionId,
+        clientMessageId,
+        status: 'cancelled',
+        reason: 'user_cancelled',
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const errorPayload = {
+      type: 'PROCESSING_ERROR',
+      message: 'Lỗi khi xử lý tin nhắn. Vui lòng thử lại sau.',
+      timestamp: new Date().toISOString(),
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    };
+    if (clientMessageId) errorPayload.clientMessageId = clientMessageId;
+    if (generationId) errorPayload.generationId = generationId;
+    socket.emit('error', errorPayload);
+    socket.emit('messageProcessing', {
+      sessionId,
+      clientMessageId,
+      generationId,
+      status: 'error',
+      timestamp: new Date().toISOString(),
     });
   }
 };

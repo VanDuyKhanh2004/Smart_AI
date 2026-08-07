@@ -370,7 +370,133 @@ service's Redis-unavailable fallback — and no rate limiting on `stopGeneration
   message persists but assistant never saved; normal run completes + saves).
 - Frontend: `src/tests/ChatServiceStop.test.ts` (stop from `started` before
   `aiResponseStart`, Stop through start/chunks, complete/cancelled/error/
-  disconnect/compat `aiResponse` retire the generation, two concurrent ids
+  disconnect/compat `aiResponse` complete the generation, two concurrent ids
   isolated, late complete ignored, early-cancel finalizes the thinking bubble,
   partial text preserved on cancel, fresh-id resubmit, no stale Stop after a
   deterministic finish).
+
+## 11. Retry and Regenerate AI response
+
+This section documents the Retry / Regenerate features. It distinguishes two,
+related but distinct identities that run throughout the chat:
+
+- **`clientMessageId`** = the **logical turn** identity. Innamed the durable
+  correlation id on the user message, echoed on lifecycle events, and used for
+  conversation lookup / persistence. It identifies **one logical turn**, not one
+  attempt.
+- **`generationId`** = the **attempt** identity. One logical turn may be
+  generated once (ordinary send), re-generated (Retry), or re-generated again
+  (Regenerate). Each generation attempt carries an explicit `generationId`.
+
+Rules:
+- Ordinary `sendMessage`: `generationId` defaults to `clientMessageId`.
+- Retry: re-uses the same `clientMessageId` **and** re-uses the same
+  `generationId` (== `clientMessageId`) as its attempt identity. The server
+  loads the original user content from the owned conversation; **no text is sent**
+  in the `retryMessage` payload.
+- Regenerate: keeps the logical `clientMessageId` on the user turn but mints a
+  **fresh `generationId`** (a new UUID) at the socket boundary, returned to the
+  client in the accepted ack and stamped on the replaced assistant row.
+
+### Why two identities
+
+Stop, dedup, and stream correlation are **attempt-scoped**; persistence,
+ownership, and history are **logical-turn-scoped**. Because Regenerate must be
+able to restart an *already-completed* turn (which a same-id dedup claim would
+treat as "completed duplicate"), the fresh `generationId` gives the regenerate
+attempt its own dedup slot (`userId + sessionId + generationId`) and its own
+cancellable stream identity — while the logical `clientMessageId` keeps the
+replacement attached to the original turn so history records **one** logical turn.
+
+### Event/ack contracts
+
+| Event                | Payload fields (client → server) |
+| -------------------- | -------------------------------- |
+| `retryMessage`       | `{ sessionId, clientMessageId }` |
+| `regenerateMessage`  | `{ sessionId, clientMessageId }` |
+
+| Ack        | Payload / status values |
+| ---------- | ----------------------- |
+| `retryMessage` ack | `{ accepted, duplicate, status, clientMessageId, generationId }`, status ∈ `accepted \| already_processing \| already_completed \| not_found \| invalid \| error` |
+| `regenerateMessage` ack | `{ accepted, status, clientMessageId, generationId }`, status ∈ `accepted \| already_processing \| not_completed \| not_found \| invalid \| error` |
+
+Retry statuses:
+- `accepted` — a new generation for the logical turn was claimed (releases the
+  previous dedup claim) and the pipeline re-runs.
+- `already_processing` — the logical turn already has an active generation.
+- `already_completed` — the turn already has a persisted assistant answer; use
+  Regenerate instead (Retry is only for failed/cancelled turns).
+- `not_found` — no such owned logical turn (cross-user / cross-session are
+  `not_found`).
+- `invalid` — malformed `sessionId` / `clientMessageId` (UUID required).
+- `error` — a validation/ownership failure before an accept.
+
+Regenerate statuses:
+- `accepted` — includes the fresh `generationId`.
+- `already_processing` — the logical turn already has an active generation /
+  a regenerate is already running (the logical-turn guard closes the double-click
+  window despite each click minting a fresh attempt id).
+- `not_completed` — the logical turn exists but has **no completed** assistant
+  answer to replace (there is nothing to regenerate).
+- `not_found`, `invalid`, `error` — as above.
+
+### Logical-turn guard
+
+`regenerateMessage` keeps a per-logical-`clientMessageId` "logical active" guard
+in the active-streams registry (`claimLogical`, `releaseLogical`,
+`isLogicalActive`). Because each regenerate mints a fresh `generationId`, two
+near-simultaneous clicks would otherwise look like two **independent** attempts in
+the generation-keyed dedup/registry. The logical guard makes the second click a
+`already_processing` rather than a second accepted generation.
+
+### Replacement persistence (generate-then-atomic-replace)
+
+- Regenerate persists the assistant answer **in place** (replacing the existing
+  assistant row for the logical turn) **only after** the new generation succeeds —
+  it is **generate-then-atomic-replace**, never delete-old-first.
+- If the regenerate fails or is cancelled, the **old completed answer remains
+  stored untouched**; the partial text is never persisted and the client restores
+  the previous content.
+- Regenerate never appends a second assistant row, and Retry never appends a
+  second user row. The Conversation therefore records exactly **one** logical
+  user turn and **one** assistant answer after any sequence of Retry/Regenerate.
+
+### Stop + Retry + Regenerate interactions
+
+- Stop still works during Retry / Regenerate: the Stop control targets the
+  **active attempt identity** (`generationId`). For regenerate the fresh
+  `generationId` is passed as the stop target, so stopping a regenerate never
+  touches another logical turn, attempt, user, or session.
+- An accepted Retry reuses the logical id as its attempt identity (backward
+  compatible); an accepted Regenerate uses its fresh attempt id.
+- The **only** terminal signal on user-cancel of Retry/Regenerate is the
+  correlated `messageProcessing` `{ status: 'cancelled', generationId, ... }`.
+
+### Context / history semantics
+
+- Retry and Regenerate re-run intent/RAG/provider but do **not** double-advance
+  the logical context or `turnCount`: only a genuinely new logical turn
+  (`sendMessage`) calls `contextService.saveContext`. This is the smallest
+  explicit context guard (no Redis redesign).
+- History still contains **one** logical turn; there is **no multi-version
+  response history** in this feature.
+
+### Schema
+
+- `Conversation` messages carry an **optional** `generationId` (String, trimmed,
+  **no index**) alongside `clientMessageId`. The change is additive — legacy docs
+  without `generationId` remain valid; **no migration is required**.
+
+### Non-goals (out of scope)
+
+No automatic retry/backoff, no multi-version/undo response history UI, no
+distributed (cross-instance) retry/regenerate guard (the logical guard and
+active-stream registry are process-local, like the dedup fallback), no change to
+product APIs, no `clientMessageId`/`generationId` unique multikey index, and no
+change to the `{ userId, sessionId }` ownership isolation.
+
+### Test coverage
+
+- Backend controller: `tests/chatRetryRegenerate.test.js`.
+- Backend socket: `tests/chatRetryRegenerateSocket.test.js`.
+- Frontend service: `src/tests/ChatServiceRetryRegenerate.test.ts`.

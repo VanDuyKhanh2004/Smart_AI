@@ -24,13 +24,16 @@ class ChatController {
    * Builds the aiResponse payload shared by every branch. The same object is
    * emitted to the client and cached for duplicate-id replay.
    */
-  buildAiPayload(sessionId, clientMessageId, message, metadata) {
+  buildAiPayload(sessionId, clientMessageId, message, metadata, generationId = null) {
     const payload = {
       sessionId,
       clientMessageId,
       message,
       timestamp: new Date().toISOString(),
     };
+    if (generationId && generationId !== clientMessageId) {
+      payload.generationId = generationId;
+    }
     if (metadata && typeof metadata === "object") {
       payload.metadata = metadata;
     }
@@ -198,10 +201,20 @@ class ChatController {
     userQuery,
     relatedProducts,
     clientMessageId,
-    signal
+    signal,
+    generationId = null
   ) {
     let batching = null;
     let startEmitted = false;
+    // Registry (and streaming) identity: the generation attempt. For an ordinary
+    // send / retry this defaults to clientMessageId (backward compatible). For
+    // regenerate a fresh generationId is passed so Stop + streaming correlate to
+    // the attempt while the persisted turn keeps the logical clientMessageId.
+    const attemptId = generationId || clientMessageId;
+    // Emit generationId on streaming events only when it differs from the
+    // logical id (regenerate); ordinary sends keep the exact legacy payload.
+    const emitGeneration = generationId && generationId !== clientMessageId;
+
     // Trusted identity for the completion/tombstone registry key; the abort
     // path is keyed at the socket boundary and must never use a client value.
     const userId = socket && socket.data && socket.data.user
@@ -225,11 +238,13 @@ class ChatController {
       // socket boundary's `messageProcessing started`.
       const ensureStart = () => {
         if (startEmitted) return;
-        socket.emit("aiResponseStart", {
+        const start = {
           sessionId,
           clientMessageId,
           timestamp: new Date().toISOString(),
-        });
+        };
+        if (emitGeneration) start.generationId = attemptId;
+        socket.emit("aiResponseStart", start);
         startEmitted = true;
       };
 
@@ -241,13 +256,15 @@ class ChatController {
           onChunk: (text, chunkIndex) => {
             ensureStart();
             // text is a DELTA chunk; never an accumulator.
-            socket.emit("aiResponseChunk", {
+            const chunk = {
               sessionId,
               clientMessageId,
               chunk: text,
               chunkIndex,
               timestamp: new Date().toISOString(),
-            });
+            };
+            if (emitGeneration) chunk.generationId = attemptId;
+            socket.emit("aiResponseChunk", chunk);
           },
         });
       } catch (_err) {
@@ -296,14 +313,14 @@ class ChatController {
           // Finished normally (live or buffered fallback): drop the active entry
           // so a late stopGeneration acks 'already_completed' not 'not_found'.
           if (userId) {
-            chatActiveStreams.markCompleted({ userId, sessionId, clientMessageId });
+            chatActiveStreams.markCompleted({ userId, sessionId, clientMessageId, generationId: attemptId });
           }
         } catch (_streamErr) {
           // Cancelled or failed: the entry was already removed by abort() on a
           // user cancel; remove defensively on any other failure too. Re-throw
-          // so the socket boundary emits the single terminal signal.
+          // so the socket handler emits the single terminal signal.
           if (userId) {
-            chatActiveStreams.remove({ userId, sessionId, clientMessageId });
+            chatActiveStreams.remove({ userId, sessionId, clientMessageId, generationId: attemptId });
           }
           throw _streamErr;
         }
@@ -328,7 +345,7 @@ class ChatController {
 
       if (streamed) {
         // LIVE success: terminal event is aiResponseComplete, never aiResponse.
-        socket.emit("aiResponseComplete", {
+        const completeEvent = {
           sessionId,
           clientMessageId,
           content: text,
@@ -336,10 +353,14 @@ class ChatController {
           totalChunks,
           timestamp: new Date().toISOString(),
           metadata: { provider, streamed: true },
-        });
+        };
+        if (emitGeneration) completeEvent.generationId = attemptId;
+        socket.emit("aiResponseComplete", completeEvent);
       } else {
         // Buffered/deterministic fallback branch — one compatibility aiResponse.
-        socket.emit("aiResponse", payload);
+        const compat = { ...payload };
+        if (emitGeneration) compat.generationId = attemptId;
+        socket.emit("aiResponse", compat);
       }
 
       return {
@@ -364,12 +385,12 @@ class ChatController {
   /**
    * Handle Small Talk - Xử lý trò chuyện phiếm (early return optimization)
    */
-  async handleSmallTalk(socket, sessionId, directResponse, clientMessageId) {
+  async handleSmallTalk(socket, sessionId, directResponse, clientMessageId, generationId = null) {
     try {
       const payload = this.buildAiPayload(sessionId, clientMessageId, directResponse, {
         responseType: "small_talk",
         skipRAG: true,
-      });
+      }, generationId);
       socket.emit("aiResponse", payload);
 
       return {
@@ -385,7 +406,7 @@ class ChatController {
         responseType: "small_talk",
         skipRAG: true,
         fallback: true,
-      });
+      }, generationId);
       socket.emit("aiResponse", payload);
 
       return {
@@ -401,7 +422,7 @@ class ChatController {
    * Handle Complaint - Xử lý khiếu nại khách hàng
    * Sử dụng specialized complaint agent và multi-turn conversation
    */
-  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage, clientMessageId) {
+  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage, clientMessageId, generationId = null) {
     try {
       logger.info({ sessionId }, 'Handling complaint for session');
 
@@ -440,7 +461,8 @@ class ChatController {
           responseType: "complaint",
           isComplete: complaintResponse.isComplete,
           priority: complaintResponse.complaintData.priority,
-        }
+        },
+        generationId
       );
       socket.emit("aiResponse", complaintPayload);
 
@@ -518,7 +540,8 @@ class ChatController {
           responseType: "complaint",
           error: true,
           fallback: true,
-        }
+        },
+        generationId
       );
       socket.emit("aiResponse", fallbackPayload);
 
@@ -567,6 +590,13 @@ class ChatController {
         if (clientMessageId) {
           aiMessageObj.clientMessageId = clientMessageId;
         }
+        // Stamp the generation attempt identity (defaults to the logical id for
+        // ordinary send/retry). Additive and backward compatible.
+        if (metadata.generationId) {
+          aiMessageObj.generationId = metadata.generationId;
+        } else if (clientMessageId) {
+          aiMessageObj.generationId = clientMessageId;
+        }
 
         if (!alreadyStored) {
           conversation.messages.push(aiMessageObj);
@@ -605,12 +635,64 @@ class ChatController {
       clientMessageId
     );
 
-    // Checkpoint: after session management, before intent classification.
+    // For an ordinary send the generation identity defaults to the logical
+    // clientMessageId (backward compatible): one logical turn == one attempt.
+    const generationId = clientMessageId;
+
+    const responseResult = await this.renderResponse({
+      socket,
+      sessionId,
+      userId,
+      chatHistory,
+      userQuery: message,
+      clientMessageId,
+      generationId,
+      signal,
+      persistContext: true,
+    });
+
+    const processingTime = Date.now() - startTime;
+    // Checkpoint before assistant persistence: a cancelled generation is never
+    // persisted as an assistant reply (the user message may remain).
+    throwIfCancelled(signal);
+    await this.saveAIResponse(sessionId, userId, responseResult.fullResponse, {
+      processingTime,
+      retrievedProducts: responseResult.relatedProducts || [],
+      responseType: responseResult.responseType || "product_query",
+      skipRAG: responseResult.responseType === "small_talk",
+      modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
+      clientMessageId,
+      generationId,
+    });
+
+    return {
+      success: true,
+      processingTime,
+      responseType: responseResult.responseType || "product_query",
+      ragSkipped: responseResult.responseType === "small_talk",
+      ...responseResult,
+    };
+  }
+
+  /**
+   * Shared generation pipeline used by sendMessage, Retry and Regenerate.
+   * Runs intent classification and the small-talk / complaint / product-query
+   * branches, emitting streaming (aiResponseStart/Chunk/Complete) or buffered
+   * (aiResponse) events. Does NOT touch conversation persistence — callers own
+   * that (append for send/retry, atomic replace for regenerate).
+   *
+   * `persistContext` is the smallest Retry/Regenerate context guard: only an
+   * ordinary new turn advances the Redis conversation context (turnCount). A
+   * retried or regenerated logical turn must NOT advance logical context a
+   * second time, so those callers pass persistContext: false. The generation
+   * itself still re-runs intent/RAG/provider (correctness over stale reuse).
+   */
+  async renderResponse({ socket, sessionId, userId, chatHistory, userQuery, clientMessageId, generationId, signal, persistContext = true }) {
     throwIfCancelled(signal);
 
     const intentResult = await this.classifyAndProcessIntent(
       chatHistory,
-      message,
+      userQuery,
       signal
     );
     logger.info({ intentResult }, 'Intent result');
@@ -623,7 +705,8 @@ class ChatController {
         socket,
         sessionId,
         intentResult.directResponse,
-        clientMessageId
+        clientMessageId,
+        generationId
       );
     } else if (intentResult.intent === "complaint") {
       responseResult = await this.handleComplaint(
@@ -631,8 +714,9 @@ class ChatController {
         sessionId,
         userId,
         chatHistory,
-        message,
-        clientMessageId
+        userQuery,
+        clientMessageId,
+        generationId
       );
     } else {
       // ================================================================
@@ -689,14 +773,17 @@ class ChatController {
         socket,
         sessionId,
         chatHistory,
-        message,
+        userQuery,
         relatedProducts,
         clientMessageId,
-        signal
+        signal,
+        generationId
       );
 
       // ================================================================
-      // Phase D: Save normalized context only on valid response.
+      // Phase D: Save normalized context only on valid response, and only for
+      // a genuinely NEW logical turn (persistContext === true). Retry/Regenerate
+      // must not double-advance the logical context.
       // A valid response has a non-empty fullResponse string.
       // Save preserves merged filters even for no-result searches so the
       // user can relax constraints in a follow-up.
@@ -707,7 +794,7 @@ class ChatController {
       //
       // Save failure must not fail the chat response.
       // ================================================================
-      if (responseResult && typeof responseResult.fullResponse === 'string' && responseResult.fullResponse.trim().length > 0) {
+      if (persistContext && responseResult && typeof responseResult.fullResponse === 'string' && responseResult.fullResponse.trim().length > 0) {
         try {
           const productIds = Array.isArray(responseResult.relatedProducts)
             ? responseResult.relatedProducts.map(p => p.id).filter(Boolean).slice(0, 5)
@@ -727,9 +814,94 @@ class ChatController {
       }
     }
 
+    return responseResult;
+  }
+
+  /**
+   * Verify a Retry target without running any pipeline. Ownership is checked by
+   * { userId, sessionId }; a miss returns the generic 'not_found' (never reveals
+   * whether another user owns a matching id).
+   *
+   * Returns { status } where status is 'ready', 'not_found' (conversation or
+   * user turn missing) or 'already_completed' (an assistant reply exists — that
+   * is Regenerate territory, never a Retry).
+   */
+  async verifyRetryTarget(sessionId, userId, clientMessageId) {
+    const conversation = await Conversation.findOne({ sessionId, userId });
+    if (!conversation) return { status: 'not_found' };
+
+    const userMessage = conversation.getUserMessageByClientMessageId(clientMessageId);
+    if (!userMessage) return { status: 'not_found' };
+
+    const assistantMessage = conversation.getAssistantMessageByClientMessageId(clientMessageId);
+    if (assistantMessage) return { status: 'already_completed' };
+
+    return { status: 'ready' };
+  }
+
+  /**
+   * Verify a Regenerate target before calling any pipeline.
+   * Returns { status } where status is 'ready', 'not_found' (conversation or
+   * user turn missing) or 'not_completed' (no completed assistant reply).
+   */
+  async verifyRegenerateTarget(sessionId, userId, clientMessageId) {
+    const conversation = await Conversation.findOne({ sessionId, userId });
+    if (!conversation) return { status: 'not_found' };
+
+    const userMessage = conversation.getUserMessageByClientMessageId(clientMessageId);
+    if (!userMessage) return { status: 'not_found' };
+
+    const assistantMessage = conversation.getAssistantMessageByClientMessageId(clientMessageId);
+    if (!assistantMessage) return { status: 'not_completed' };
+
+    return { status: 'ready' };
+  }
+
+  /**
+   * Retry a logical turn whose user message is persisted but whose assistant
+   * reply was never persisted (cancelled or failed generation).
+   *
+   * Returns one of:
+   *   { status: 'not_found' }        — conversation or user turn missing
+   *   { status: 'already_completed' }— an assistant reply already exists (that
+   *                                    is Regenerate territory, never treated as
+   *                                    a Retry)
+   *   { status: 'accepted', result } — assistant reply persisted once
+   *
+   * The user message is NEVER re-appended. The generation identity reuses the
+   * logical clientMessageId (its previous dedup claim was released on
+   * cancel/error, so a legit Retry can reprocess).
+   */
+  async retryMessage(socket, sessionId, userId, clientMessageId, signal) {
+    const startTime = Date.now();
+    const conversation = await Conversation.findOne({ sessionId, userId });
+
+    if (!conversation) return { status: 'not_found' };
+
+    const userMessage = conversation.getUserMessageByClientMessageId(clientMessageId);
+    if (!userMessage) return { status: 'not_found' };
+
+    // Retry is only valid when no assistant reply was ever persisted for this
+    // logical turn. A completed turn must go through Regenerate.
+    const assistantMessage = conversation.getAssistantMessageByClientMessageId(clientMessageId);
+    if (assistantMessage) return { status: 'already_completed' };
+
+    const chatHistory = conversation.messages.slice(-6);
+    const generationId = clientMessageId; // retry reuses the logical identity
+
+    const responseResult = await this.renderResponse({
+      socket,
+      sessionId,
+      userId,
+      chatHistory,
+      userQuery: userMessage.content,
+      clientMessageId,
+      generationId,
+      signal,
+      persistContext: false, // do NOT advance logical context a second time
+    });
+
     const processingTime = Date.now() - startTime;
-    // Checkpoint before assistant persistence: a cancelled generation is never
-    // persisted as an assistant reply (the user message may remain).
     throwIfCancelled(signal);
     await this.saveAIResponse(sessionId, userId, responseResult.fullResponse, {
       processingTime,
@@ -738,15 +910,127 @@ class ChatController {
       skipRAG: responseResult.responseType === "small_talk",
       modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
       clientMessageId,
+      generationId,
     });
 
     return {
-      success: true,
-      processingTime,
-      responseType: responseResult.responseType || "product_query",
-      ragSkipped: responseResult.responseType === "small_talk",
-      ...responseResult,
+      status: 'accepted',
+      result: {
+        success: true,
+        processingTime,
+        responseType: responseResult.responseType || "product_query",
+        ragSkipped: responseResult.responseType === "small_talk",
+        ...responseResult,
+      },
     };
+  }
+
+  /**
+   * Regenerate a completed logical turn. The logical clientMessageId stays
+   * stable; a FRESH generationId identifies this attempt. After a successful
+   * generation the existing assistant row is REPLACED atomically (generate-then-
+   * replace): the old response stays intact until the new one actually succeeds,
+   * and a failed/cancelled regenerate never deletes or partially overwrites it.
+   *
+   * Returns one of:
+   *   { status: 'not_found' }     — conversation or user turn missing
+   *   { status: 'not_completed' } — no completed assistant reply to replace
+   *   { status: 'accepted', result, generationId }
+   */
+  async regenerateMessage(socket, sessionId, userId, clientMessageId, generationId, signal) {
+    const startTime = Date.now();
+    const conversation = await Conversation.findOne({ sessionId, userId });
+
+    if (!conversation) return { status: 'not_found' };
+
+    const userMessage = conversation.getUserMessageByClientMessageId(clientMessageId);
+    if (!userMessage) return { status: 'not_found' };
+
+    const assistantMessage = conversation.getAssistantMessageByClientMessageId(clientMessageId);
+    if (!assistantMessage) return { status: 'not_completed' };
+
+    const chatHistory = conversation.messages.slice(-6);
+
+    const responseResult = await this.renderResponse({
+      socket,
+      sessionId,
+      userId,
+      chatHistory,
+      userQuery: userMessage.content,
+      clientMessageId,
+      generationId,
+      signal,
+      persistContext: false, // replace, do not treat as a brand-new turn
+    });
+
+    const processingTime = Date.now() - startTime;
+    throwIfCancelled(signal);
+
+    await this.replaceAIResponse(sessionId, userId, clientMessageId, responseResult.fullResponse, generationId, {
+      processingTime,
+      retrievedProducts: responseResult.relatedProducts || [],
+      responseType: responseResult.responseType || "product_query",
+      skipRAG: responseResult.responseType === "small_talk",
+      modelUsed: responseResult.modelUsed || process.env.OPENAI_MODEL || "gpt-4o",
+    });
+
+    return {
+      status: 'accepted',
+      generationId,
+      result: {
+        success: true,
+        processingTime,
+        responseType: responseResult.responseType || "product_query",
+        ragSkipped: responseResult.responseType === "small_talk",
+        ...responseResult,
+      },
+    };
+  }
+
+  /**
+   * Atomically replace the assistant reply of an existing logical turn. Loads
+   * the owned conversation, finds the assistant message with the given logical
+   * clientMessageId, and overwrites content/timestamp/metadata/generationId in
+   * place. Never appends a second assistant row and never deletes the old row
+   * before the new generation has succeeded. If the conversation is gone the
+   * operation is a safe no-op (never throws to the caller).
+   */
+  async replaceAIResponse(sessionId, userId, clientMessageId, aiResponse, generationId, metadata = {}) {
+    try {
+      const conversation = await Conversation.findOne({ sessionId, userId });
+      if (!conversation) return false;
+
+      const index = conversation.messages.findIndex(
+        (m) => m.role === "assistant" && m.clientMessageId === clientMessageId
+      );
+      if (index === -1) return false;
+
+      conversation.messages[index].content = aiResponse;
+      conversation.messages[index].timestamp = new Date();
+      conversation.messages[index].generationId = generationId;
+      if (!conversation.messages[index].metadata) {
+        conversation.messages[index].metadata = {};
+      }
+      conversation.messages[index].metadata.modelUsed = metadata.modelUsed || process.env.OPENAI_MODEL || "gpt-4o";
+      if (typeof metadata.processingTime === 'number') {
+        conversation.messages[index].metadata.processingTime = metadata.processingTime;
+      }
+      if (Array.isArray(metadata.retrievedProducts)) {
+        conversation.messages[index].metadata.retrievedProducts = metadata.retrievedProducts;
+      }
+      if (metadata.responseType) {
+        conversation.messages[index].metadata.responseType = metadata.responseType;
+      }
+      if (metadata.skipRAG) {
+        conversation.messages[index].metadata.skipRAG = metadata.skipRAG;
+      }
+
+      await conversation.save();
+      return true;
+    } catch (error) {
+      logger.error({ err: error }, 'Error replacing AI response');
+      return false;
+    }
   }
 }
 
