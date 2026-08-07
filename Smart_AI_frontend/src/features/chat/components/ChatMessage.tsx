@@ -1,6 +1,6 @@
 import React from "react";
 import { Badge } from "@/components/ui/badge";
-import { User } from "lucide-react";
+import { User, RotateCw, RefreshCw } from "lucide-react";
 import type { ChatMessage } from "@/services/chat.service";
 import {
   Message,
@@ -9,12 +9,25 @@ import {
 } from "@/components/ui/shadcn-io/ai";
 import { Response } from "@/components/ui/shadcn-io/ai/response";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader";
+import { Button } from "@/components/ui/button";
 
 interface ChatMessageProps {
   message: ChatMessage;
+  onRetry?: (message: ChatMessage) => void;
+  onRegenerate?: (message: ChatMessage) => void;
+  canRetry?: boolean;
+  canRegenerate?: boolean;
+  disabled?: boolean;
 }
 
-const ChatMessageComponent: React.FC<ChatMessageProps> = ({ message }) => {
+const ChatMessageComponent: React.FC<ChatMessageProps> = ({
+  message,
+  onRetry,
+  onRegenerate,
+  canRetry,
+  canRegenerate,
+  disabled,
+}) => {
   const isUser = message.role === "user";
   const isLoading = message.isLoading;
 
@@ -59,15 +72,51 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({ message }) => {
               Bạn
             </Badge>
           )}
+          {isUser && canRetry && (
+            <Badge variant="secondary" className="text-xs">
+              {message.generationStatus === 'cancelled' ? 'Đã dừng' : 'Thất bại'}
+            </Badge>
+          )}
           {!isUser && !isLoading && message.cancelled && (
             <Badge variant="secondary" className="text-xs">
               Đã dừng
             </Badge>
           )}
-          {!isUser && !isLoading && !message.cancelled && (
+          {!isUser && !isLoading && message.regenerating && (
+            <Badge variant="secondary" className="text-xs">
+              Đang tạo lại...
+            </Badge>
+          )}
+          {!isUser && !isLoading && !message.cancelled && !message.regenerating && (
             <Badge variant="outline" className="text-xs">
               Quỳnh Như
             </Badge>
+          )}
+          {!isLoading && canRetry && onRetry && !message.regenerating && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onRetry(message)}
+              disabled={disabled}
+              title="Thử lại"
+              className="h-6 px-2 text-xs"
+            >
+              <RotateCw className="w-3 h-3 mr-1" />
+              Thử lại
+            </Button>
+          )}
+          {!isUser && !isLoading && canRegenerate && onRegenerate && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onRegenerate(message)}
+              disabled={disabled}
+              title="Tạo lại câu trả lời"
+              className="h-6 px-2 text-xs"
+            >
+              <RefreshCw className="w-3 h-3 mr-1" />
+              Tạo lại
+            </Button>
           )}
         </div>
       </div>

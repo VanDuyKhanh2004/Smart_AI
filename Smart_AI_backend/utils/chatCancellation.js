@@ -40,6 +40,14 @@ function throwIfCancelled(signal) {
   }
 }
 
+/** True if the error is the canonical user-cancellation identity. */
+function isCancellationError(error) {
+  return Boolean(
+    error &&
+    (error.cancelled === true || error.code === STREAM_CANCELLED || error.aborted === true)
+  );
+}
+
 /**
  * DEV/TEST-ONLY delay hook (CHAT_STREAM_TEST_DELAY_MS). Disabled by default.
  * When set, artificially slows a phase so a human can verify the Stop control
@@ -70,4 +78,4 @@ function maybeTestDelay(signal) {
   });
 }
 
-module.exports = { STREAM_CANCELLED, cancelledError, throwIfCancelled, maybeTestDelay };
+module.exports = { STREAM_CANCELLED, cancelledError, throwIfCancelled, isCancellationError, maybeTestDelay };

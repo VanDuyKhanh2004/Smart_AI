@@ -13,6 +13,9 @@ const FloatingChat: React.FC = () => {
   const [activeGenerationId, setActiveGenerationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isInitialized = useRef(false);
+  // The previous completed assistant content per logical clientMessageId, so a
+  // failed/cancelled regenerate can restore it.
+  const previousContentRef = useRef<Record<string, string>>({});
 
   // The Stop control shows for the whole processing window of an accepted
   // generation (messageProcessing 'started' -> terminal event), NOT just after
@@ -83,6 +86,105 @@ const FloatingChat: React.FC = () => {
         setMessages(prev =>
           prev.map(msg =>
             msg.id === `stream:${clientMessageId}` ? { ...msg, cancelled: true, isLoading: false } : msg
+          )
+        );
+      },
+      // Retry: no new bubble — reuse an existing loading placeholder or the
+      // stream placeholder so exactly one assistant response is rendered.
+      onRetryStarted: (clientMessageId) => {
+        setMessages(prev => {
+          const withoutLoading = prev.filter(msg => !msg.isLoading && msg.id !== 'loading');
+          const alreadyHasStream = withoutLoading.some(msg => msg.id === `stream:${clientMessageId}`);
+          if (alreadyHasStream) return withoutLoading;
+          const loadingMessage: ChatMessageType = {
+            id: `stream:${clientMessageId}`,
+            clientMessageId,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date(),
+            isLoading: true,
+          };
+          return [...withoutLoading, loadingMessage];
+        });
+      },
+      // A logical turn ended terminally BEFORE any assistant placeholder was
+      // created (early cancel/failure). Mark the USER bubble retryable so the
+      // feature is reachable for exactly the early-cancelled/failed case it is
+      // meant to serve. No empty assistant bubble is created.
+      onTurnRetryable: (clientMessageId, status) => {
+        setActiveGenerationId(null);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientMessageId === clientMessageId && msg.role === 'user'
+              ? {
+                  ...msg,
+                  retryable: true,
+                  generationStatus: status,
+                  cancelled: status === 'cancelled' ? true : msg.cancelled,
+                  failed: status === 'failed' ? true : msg.failed,
+                  isLoading: false,
+                }
+              : msg
+          )
+        );
+      },
+      // Regenerate accepted: nothing visibly changes yet — the old completed
+      // response stays until the new attempt actually begins (onRegenerateStarted).
+      onRegenerateAccepted: () => {},
+      // Regenerate stream begins: mark the logical bubble as regenerating. The
+      // old content remains visible until the first chunk arrives.
+      onRegenerateStarted: (clientMessageId) => {
+        setActiveGenerationId(null);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientMessageId === clientMessageId && msg.role === 'assistant'
+              ? { ...msg, regenerating: true, isLoading: false }
+              : msg
+          )
+        );
+      },
+      // Regenerate stream deltas: replace content in the SAME logical bubble.
+      onRegenerateUpdate: (clientMessageId, _generationId, content) => {
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientMessageId === clientMessageId && msg.role === 'assistant'
+              ? { ...msg, content }
+              : msg
+          )
+        );
+      },
+      // Regenerate success: replace the same logical bubble with the new content.
+      onRegenerateComplete: (clientMessageId, _generationId, content, timestamp) => {
+        setActiveGenerationId(null);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientMessageId === clientMessageId && msg.role === 'assistant'
+              ? { ...msg, content, timestamp, regenerating: false, isLoading: false, failed: false, cancelled: false }
+              : msg
+          )
+        );
+        setError(null);
+        delete previousContentRef.current[clientMessageId];
+      },
+      // Regenerate failed/cancelled: preserve (restore) the old completed
+      // response captured when the regenerate was clicked.
+      onRegenerateFailed: (clientMessageId) => {
+        setActiveGenerationId(null);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientMessageId === clientMessageId && msg.role === 'assistant'
+              ? { ...msg, regenerating: false, isLoading: false, content: previousContentRef.current[clientMessageId] ?? msg.content }
+              : msg
+          )
+        );
+      },
+      onRegenerateCancelled: (clientMessageId) => {
+        setActiveGenerationId(null);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.clientMessageId === clientMessageId && msg.role === 'assistant'
+              ? { ...msg, regenerating: false, isLoading: false, content: previousContentRef.current[clientMessageId] ?? msg.content }
+              : msg
           )
         );
       },
@@ -206,7 +308,30 @@ const FloatingChat: React.FC = () => {
 
   const handleStopGeneration = () => {
     if (!activeGenerationId) return;
-    chatService.stopGeneration(activeGenerationId);
+    // The active generation identity: for ordinary send/retry it is the logical
+    // clientMessageId; for a regenerate attempt it is the fresh generationId.
+    chatService.stopGenerationAttempt(activeGenerationId);
+  };
+
+  const handleRetryMessage = (message: ChatMessageType) => {
+    if (!message.clientMessageId) return;
+    // Spec G: remove/disable the Retry affordance immediately and mark the
+    // logical turn processing. The user bubble is NOT re-appended (the server
+    // loads the original content and re-runs generation).
+    setMessages(prev =>
+      prev.map(msg =>
+        msg.clientMessageId === message.clientMessageId
+          ? { ...msg, retryable: false, generationStatus: undefined, failed: false, cancelled: false, isLoading: false }
+          : msg
+      )
+    );
+    chatService.retryMessage(message.clientMessageId);
+  };
+
+  const handleRegenerateMessage = (message: ChatMessageType) => {
+    if (!message.clientMessageId) return;
+    previousContentRef.current[message.clientMessageId] = message.content;
+    chatService.regenerateMessage(message.clientMessageId, message.content);
   };
 
   return (
@@ -266,6 +391,8 @@ const FloatingChat: React.FC = () => {
         onSendMessage={handleSendMessage}
         onStopGeneration={handleStopGeneration}
         onReset={handleReset}
+        onRetryMessage={handleRetryMessage}
+        onRegenerateMessage={handleRegenerateMessage}
       />
     </>
   );
