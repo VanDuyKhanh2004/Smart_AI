@@ -40,7 +40,6 @@ export interface Store {
   images?: string[];
   description?: string;
   isActive: boolean;
-  isOpen?: boolean; // Virtual field from backend
   createdAt: string;
   updatedAt: string;
 }
