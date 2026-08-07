@@ -11,6 +11,8 @@ const {
 } = require("../utils/gemini");
 
 const { createChatStreamBatching } = require("../services/chatStreamBatching");
+const chatActiveStreams = require("../services/chatActiveStreams");
+const { throwIfCancelled, maybeTestDelay } = require("../utils/chatCancellation");
 const { parseProductConstraints } = require("../utils/productConstraintParser");
 const { matchesProductConstraints } = require("../utils/productValidator");
 const { rankProducts } = require("../utils/productRanking");
@@ -107,8 +109,9 @@ class ChatController {
    * Phase 2: Intent Classification & Query Processing
    * Phân loại ý định và xử lý thông minh (RAG optimization)
    */
-  async classifyAndProcessIntent(chatHistory, userQuery) {
+  async classifyAndProcessIntent(chatHistory, userQuery, signal) {
     try {
+      void signal; // cancellation is asserted by the processMessage checkpoint
       const intentResult = await classifyIntentAndRespond(
         chatHistory,
         userQuery
@@ -149,7 +152,8 @@ class ChatController {
    * Phase 3: Vector Search
    * Tìm kiếm sản phẩm liên quan bằng vector similarity
    */
-  async searchRelevantProducts(clarifiedQuery, limit = 5, mergedFilters = null, mergedPreferences = null) {
+  async searchRelevantProducts(clarifiedQuery, limit = 5, mergedFilters = null, mergedPreferences = null, signal = null) {
+    throwIfCancelled(signal);
     const { cleanedQuery, filters: parsedFilters, preferences: parsedPreferences } = parseProductConstraints(clarifiedQuery);
     const searchQuery = cleanedQuery || clarifiedQuery;
 
@@ -193,10 +197,16 @@ class ChatController {
     chatHistory,
     userQuery,
     relatedProducts,
-    clientMessageId
+    clientMessageId,
+    signal
   ) {
     let batching = null;
     let startEmitted = false;
+    // Trusted identity for the completion/tombstone registry key; the abort
+    // path is keyed at the socket boundary and must never use a client value.
+    const userId = socket && socket.data && socket.data.user
+      ? socket.data.user.id
+      : null;
     try {
       const validatedProducts = Array.isArray(relatedProducts)
         ? relatedProducts
@@ -252,21 +262,51 @@ class ChatController {
       let totalChunks = 0;
 
       if (streamFn && batching) {
-        const streamResult = await streamFn({
-          userMessage: userQuery,
-          chatHistory: validatedHistory,
-          productContext: validatedProducts,
-          onDelta: (delta) => batching.push(delta),
-        });
-        batching.flush(); // flush any residual buffered text before completion
-        totalChunks = batching.chunkCount();
-        batching.dispose();
-        batching = null;
+        // The ONE AbortController for this request was created at the socket
+        // boundary (after auth/validation/dedup-claim, before messageProcessing
+        // 'started' and before any pipeline work) and is threaded here as
+        // `signal`. generateResponse never creates or registers its own
+        // controller: there is exactly one registration per accepted request,
+        // owned by the socket boundary, and `stopGeneration` aborts exactly it.
+        throwIfCancelled(signal);
 
-        text = streamResult.fullResponse;
-        provider = streamResult.provider;
-        finishReason = streamResult.finishReason;
-        streamed = streamResult.streamed === true;
+        try {
+          const streamResult = await streamFn({
+            userMessage: userQuery,
+            chatHistory: validatedHistory,
+            productContext: validatedProducts,
+            signal,
+            onDelta: (delta) => batching.push(delta),
+          });
+
+          // Guard the rare race where the abort lands exactly as the provider
+          // resolves: the user asked to stop, so never emit a completion.
+          throwIfCancelled(signal);
+
+          batching.flush(); // flush any residual buffered text before completion
+          totalChunks = batching.chunkCount();
+          batching.dispose();
+          batching = null;
+
+          text = streamResult.fullResponse;
+          provider = streamResult.provider;
+          finishReason = streamResult.finishReason;
+          streamed = streamResult.streamed === true;
+
+          // Finished normally (live or buffered fallback): drop the active entry
+          // so a late stopGeneration acks 'already_completed' not 'not_found'.
+          if (userId) {
+            chatActiveStreams.markCompleted({ userId, sessionId, clientMessageId });
+          }
+        } catch (_streamErr) {
+          // Cancelled or failed: the entry was already removed by abort() on a
+          // user cancel; remove defensively on any other failure too. Re-throw
+          // so the socket boundary emits the single terminal signal.
+          if (userId) {
+            chatActiveStreams.remove({ userId, sessionId, clientMessageId });
+          }
+          throw _streamErr;
+        }
       } else {
         const res = await generateChatResponse(validatedHistory, userQuery, validatedProducts);
         text = res.text;
@@ -281,6 +321,10 @@ class ChatController {
         finishReason,
         streamed,
       });
+
+      // Checkpoint before emitting any completion event: a cancelled generation
+      // never emits aiResponseComplete nor aiResponse.
+      throwIfCancelled(signal);
 
       if (streamed) {
         // LIVE success: terminal event is aiResponseComplete, never aiResponse.
@@ -534,7 +578,7 @@ class ChatController {
     }
   }
 
-  async processMessage(socket, data) {
+  async processMessage(socket, data, signal) {
     const startTime = Date.now();
     const { sessionId, message, clientMessageId } = data;
 
@@ -544,6 +588,9 @@ class ChatController {
     if (!userId) {
       throw new Error("Missing authenticated user");
     }
+
+    // Checkpoint: no pipeline work begins once the user has already stopped.
+    throwIfCancelled(signal);
 
     const metadata = {
       userAgent: socket.handshake.headers["user-agent"],
@@ -558,11 +605,17 @@ class ChatController {
       clientMessageId
     );
 
+    // Checkpoint: after session management, before intent classification.
+    throwIfCancelled(signal);
+
     const intentResult = await this.classifyAndProcessIntent(
       chatHistory,
-      message
+      message,
+      signal
     );
     logger.info({ intentResult }, 'Intent result');
+    // Checkpoint: after intent classification, before any RAG work.
+    throwIfCancelled(signal);
     let responseResult;
 
     if (intentResult.intent === "small_talk") {
@@ -588,6 +641,8 @@ class ChatController {
       const clarifiedQuery = intentResult.clarifiedQuery;
       const parsed = parseProductConstraints(clarifiedQuery);
       const queryType = classifyQuery(clarifiedQuery, parsed);
+      // Checkpoint: before context load.
+      throwIfCancelled(signal);
       const previousContext = await contextService.loadContext(userId, sessionId);
       let mergedFilters = parsed.filters;
       let mergedPreferences = parsed.preferences;
@@ -603,6 +658,9 @@ class ChatController {
       }
       // independent: use parsed values as-is (no merge)
 
+      // Checkpoint: after context, before RAG search.
+      throwIfCancelled(signal);
+
       // ================================================================
       // Phase B: Search, filter, rank
       // ================================================================
@@ -610,19 +668,31 @@ class ChatController {
         clarifiedQuery,
         5,
         mergedFilters,
-        mergedPreferences
+        mergedPreferences,
+        signal
       );
+
+      // Checkpoint: after RAG search, before response generation.
+      throwIfCancelled(signal);
 
       // ================================================================
       // Phase C: Generate response (Gemini/OpenAI or deterministic fallback)
       // ================================================================
+      // Dev/test-only hook (CHAT_STREAM_TEST_DELAY_MS): holds the phase briefly
+      // so a manual local run can verify Stop across the whole processing
+      // window. Cancellation aborts the sleep and surfaces STREAM_CANCELLED.
+      if (typeof maybeTestDelay === 'function') {
+        await maybeTestDelay(signal);
+      }
+      throwIfCancelled(signal);
       responseResult = await this.generateResponse(
         socket,
         sessionId,
         chatHistory,
         message,
         relatedProducts,
-        clientMessageId
+        clientMessageId,
+        signal
       );
 
       // ================================================================
@@ -658,6 +728,9 @@ class ChatController {
     }
 
     const processingTime = Date.now() - startTime;
+    // Checkpoint before assistant persistence: a cancelled generation is never
+    // persisted as an assistant reply (the user message may remain).
+    throwIfCancelled(signal);
     await this.saveAIResponse(sessionId, userId, responseResult.fullResponse, {
       processingTime,
       retrievedProducts: responseResult.relatedProducts || [],

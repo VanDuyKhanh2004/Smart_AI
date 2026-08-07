@@ -48,6 +48,10 @@ const initializeSocketHandlers = (io) => {
       await handleSendMessage(socket, data, ack);
     });
 
+    socket.on('stopGeneration', (data, ack) => {
+      handleStopGeneration(socket, data, ack);
+    });
+
     socket.on('ping', () => {
       socket.emit('pong', { timestamp: new Date().toISOString() });
     });
@@ -219,6 +223,22 @@ const handleSendMessage = async (socket, data, ack) => {
     // waits for generation and never follows the started event.
     emitAck({ accepted: true, duplicate: false, status: 'accepted', clientMessageId });
 
+    // The ONE AbortController for this accepted request. Created at the request
+    // boundary AFTER auth/validation/dedup-claim and BEFORE messageProcessing
+    // 'started' and any pipeline work, so the generation is cancellable from
+    // the very first processing instant (not gated on aiResponseStart). It is
+    // registered into chatActiveStreams under the trusted user+session+id
+    // identity; `stopGeneration` aborts exactly this controller.
+    const controller = new AbortController();
+    const chatActiveStreams = require('../services/chatActiveStreams');
+    chatActiveStreams.register({
+      userId,
+      sessionId,
+      clientMessageId,
+      controller,
+      socketId: socket.id,
+    });
+
     socket.emit('messageProcessing', {
       sessionId,
       clientMessageId,
@@ -233,7 +253,13 @@ const handleSendMessage = async (socket, data, ack) => {
     const result = await chatController.processMessage(socket, {
       ...data,
       clientMessageId
-    });
+    }, controller.signal);
+
+    // Checkpoint before completion: if the stop landed right as processMessage
+    // resolved, treat it as cancelled (release the claim) rather than emitting
+    // 'completed' and marking the id done.
+    const { throwIfCancelled } = require('../utils/chatCancellation');
+    throwIfCancelled(controller.signal);
 
     // Emit processing completed
     socket.emit('messageProcessing', {
@@ -265,10 +291,18 @@ const handleSendMessage = async (socket, data, ack) => {
     // success is signaled via aiResponse + messageProcessing 'completed'.
 
   } catch (error) {
-    logger.error({ err: error, sessionId }, 'Error processing message');
+    // User cancellation is a terminal, expected condition — never logged as a
+    // server error (avoids noise and false alerting). Only genuine failures log.
+    const isCancellation =
+      error && (error.cancelled === true || error.code === 'STREAM_CANCELLED');
+    if (!isCancellation) {
+      logger.error({ err: error, sessionId }, 'Error processing message');
+    }
 
-    // One failed generation -> exactly one correlated terminal error event, and
-    // the claim is released so a legitimate retry can reprocess later.
+    // One failed generation -> exactly one correlated terminal event, and
+    // the claim is released so a legitimate retry can reprocess later. A real
+    // failure also removes the boundary-registered generation (a cancel already
+    // removed it via abort; remove is idempotent and never aborts).
     const chatMessageDedup = require('../services/chatMessageDedupService');
     if (userId && sessionId && clientMessageId) {
       try {
@@ -276,6 +310,27 @@ const handleSendMessage = async (socket, data, ack) => {
       } catch (_err) {
         // releasing a claim must never mask the original failure
       }
+      try {
+        const chatActiveStreams = require('../services/chatActiveStreams');
+        chatActiveStreams.remove({ userId, sessionId, clientMessageId });
+      } catch (_err) {
+        // registry cleanup must never mask the original failure
+      }
+    }
+
+    // User-cancelled generation: the terminal signal is `messageProcessing
+    // 'cancelled'` (reason user_cancelled) and NOTHING else — no generic error
+    // event, no aiResponseComplete, no aiResponse. Partial content was never
+    // persisted.
+    if (isCancellation) {
+      socket.emit('messageProcessing', {
+        sessionId,
+        clientMessageId,
+        status: 'cancelled',
+        reason: 'user_cancelled',
+        timestamp: new Date().toISOString()
+      });
+      return;
     }
 
     const errorPayload = {
@@ -297,6 +352,82 @@ const handleSendMessage = async (socket, data, ack) => {
       status: 'error',
       timestamp: new Date().toISOString()
     });
+  }
+};
+
+/**
+ * Stop a live AI generation. Ack contract (at most one ack):
+ *   { stopped: true,  status: 'stopped' }           -> an active stream was aborted
+ *   { stopped: false, status: 'already_completed' } -> the id already finished
+ *   { stopped: false, status: 'not_found' }         -> no live stream for the id
+ *   { stopped: false, status: 'invalid' }           -> bad sessionId/clientMessageId
+ *
+ * Identity is the trusted socket user + sessionId + clientMessageId. Aborting
+ * makes the running pipeline surface STREAM_CANCELLED; the sendMessage boundary
+ * then emits the single terminal `messageProcessing 'cancelled'` signal (never
+ * the generic error event, never an aiResponseComplete).
+ */
+const handleStopGeneration = (socket, data, ack) => {
+  let clientMessageId = null;
+
+  const emitAck = (payload) => {
+    if (typeof ack === 'function') {
+      ack(payload);
+    }
+  };
+
+  try {
+    if (!requireSocketAuth(socket)) {
+      emitAck({ stopped: false, status: 'not_found', clientMessageId: null });
+      return;
+    }
+
+    // Trusted identity only — never a client-supplied userId.
+    const userId = socket.data.user.id;
+    const sessionId = data?.sessionId;
+    const rawClientMessageId = data?.clientMessageId;
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (typeof sessionId !== 'string' || !uuidRegex.test(sessionId)) {
+      emitAck({
+        stopped: false,
+        status: 'invalid',
+        clientMessageId: typeof rawClientMessageId === 'string' ? rawClientMessageId : null
+      });
+      return;
+    }
+
+    if (typeof rawClientMessageId !== 'string' || !uuidRegex.test(rawClientMessageId)) {
+      emitAck({
+        stopped: false,
+        status: 'invalid',
+        clientMessageId: typeof rawClientMessageId === 'string' ? rawClientMessageId : null
+      });
+      return;
+    }
+
+    clientMessageId = rawClientMessageId;
+
+    const chatActiveStreams = require('../services/chatActiveStreams');
+
+    // A live stream found -> abort it exactly once and ack 'stopped'.
+    const aborted = chatActiveStreams.abort({ userId, sessionId, clientMessageId });
+    if (aborted.found) {
+      emitAck({ stopped: true, status: 'stopped', clientMessageId });
+      return;
+    }
+
+    // Already finished -> acknowledge without touching the completed state.
+    if (chatActiveStreams.isCompleted({ userId, sessionId, clientMessageId })) {
+      emitAck({ stopped: false, status: 'already_completed', clientMessageId });
+      return;
+    }
+
+    emitAck({ stopped: false, status: 'not_found', clientMessageId });
+  } catch (error) {
+    logger.error({ err: error }, 'Error stopping generation');
+    emitAck({ stopped: false, status: 'not_found', clientMessageId });
   }
 };
 
@@ -399,6 +530,12 @@ const handleDisconnect = (socket, reason) => {
 
   const clientCount = socket.server.sockets.sockets.size;
   socket.broadcast.emit('userCount', { count: clientCount });
+
+  // Abort + remove every live stream this socket was running. The client is
+  // gone, so continuing to stream would waste provider tokens; the pipeline's
+  // catch then surfaces STREAM_CANCELLED and its claim is released.
+  const chatActiveStreams = require('../services/chatActiveStreams');
+  chatActiveStreams.removeForSocket(socket.id);
 };
 
 

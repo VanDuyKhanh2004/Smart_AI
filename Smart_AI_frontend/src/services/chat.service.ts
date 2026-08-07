@@ -11,6 +11,9 @@ export interface ChatMessage {
   timestamp: Date;
   isLoading?: boolean;
   failed?: boolean;
+  // A live stream was stopped by the user; the bubble keeps whatever partial
+  // content arrived before the stop.
+  cancelled?: boolean;
 }
 
 export type StreamFinishReason = 'stop' | 'max_tokens';
@@ -19,6 +22,12 @@ export interface SendAck {
   accepted: boolean;
   duplicate: boolean;
   status: 'accepted' | 'processing' | 'completed' | 'invalid' | 'error';
+  clientMessageId: string | null;
+}
+
+export interface StopGenerationAck {
+  stopped: boolean;
+  status: 'stopped' | 'already_completed' | 'not_found' | 'invalid';
   clientMessageId: string | null;
 }
 
@@ -35,6 +44,9 @@ export interface ChatServiceConfig {
   onStreamComplete?: (message: ChatMessage) => void;
   // A correlated terminal failure for a streaming id.
   onStreamError?: (clientMessageId: string) => void;
+  // The user stopped a live stream (messageProcessing 'cancelled'). The bubble
+  // keeps the partial content and is no longer loading.
+  onStreamCancelled?: (clientMessageId: string) => void;
   onError: (error: string) => void;
   onConnected: () => void;
   onDisconnected: () => void;
@@ -86,6 +98,16 @@ class ChatService {
     message: ChatMessage;
     nextChunkIndex: number;
   }>();
+
+  // clientMessageIds whose GENERATION is active and cancellable. Every ACCEPTED
+  // request becomes cancellable at `messageProcessing started` (the socket
+  // boundary creates + registers one AbortController BEFORE any pipeline work),
+  // so the Stop control must be available from that instant — NOT gated on
+  // aiResponseStart. The set is cleared by the terminal events: completed,
+  // cancelled, error, or the compatibility aiResponse.
+  private cancellableGenerationIds = new Set<string>();
+  // The most recent cancellable id (drives the single Stop control).
+  private lastCancellableId: string | null = null;
 
   private streamMessageId(clientMessageId: string) {
     return `stream:${clientMessageId}`;
@@ -227,6 +249,11 @@ class ChatService {
         // id so a later submission is not blocked.
         if (clientMessageId) {
           this.pendingByClientMessageId.delete(clientMessageId);
+          // Buffered/completed final also retires the cancellable generation.
+          this.cancellableGenerationIds.delete(clientMessageId);
+          if (this.lastCancellableId === clientMessageId) {
+            this.lastCancellableId = null;
+          }
         }
 
         const chatMessage: ChatMessage = {
@@ -280,6 +307,11 @@ class ChatService {
       this.deliveredStreamIds.add(clientMessageId);
       this.streamByClientMessageId.delete(clientMessageId);
       this.pendingByClientMessageId.delete(clientMessageId);
+      // Live success retires the cancellable generation (Stop disappears).
+      this.cancellableGenerationIds.delete(clientMessageId);
+      if (this.lastCancellableId === clientMessageId) {
+        this.lastCancellableId = null;
+      }
 
       // Authoritative content replaces whatever was locally accumulated.
       const finalMessage: ChatMessage = {
@@ -301,6 +333,10 @@ class ChatService {
       if (error?.clientMessageId) {
         // A streamed placeholder for this id is marked failed and removed.
         const live = this.streamByClientMessageId.get(error.clientMessageId);
+        this.cancellableGenerationIds.delete(error.clientMessageId);
+        if (this.lastCancellableId === error.clientMessageId) {
+          this.lastCancellableId = null;
+        }
         if (live) {
           live.message = { ...live.message, failed: true, isLoading: false };
           this.config?.onStreamError?.(error.clientMessageId);
@@ -320,6 +356,46 @@ class ChatService {
     socket.on('messageProcessing', (data) => {
       if (this.socket !== socket) return;
       if (data.sessionId === this.sessionId) {
+        // User stopped a live generation: finalize the placeholder as cancelled
+        // (keeps partial content, not loading) and clear its bookkeeping.
+        if (data.status === 'cancelled' && data.clientMessageId) {
+          const clientMessageId = data.clientMessageId;
+          this.cancellableGenerationIds.delete(clientMessageId);
+          if (this.lastCancellableId === clientMessageId) {
+            this.lastCancellableId = null;
+          }
+          const live = this.streamByClientMessageId.get(clientMessageId);
+          if (live) {
+            live.message = { ...live.message, isLoading: false };
+            this.streamByClientMessageId.delete(clientMessageId);
+            this.pendingByClientMessageId.delete(clientMessageId);
+            this.config?.onStreamCancelled?.(clientMessageId);
+          }
+          this.config?.onProcessingStatus(false);
+          return;
+        }
+
+        // Terminal completion/error also retire the cancellable generation.
+        if (data.status === 'completed' && data.clientMessageId) {
+          this.cancellableGenerationIds.delete(data.clientMessageId);
+          if (this.lastCancellableId === data.clientMessageId) {
+            this.lastCancellableId = null;
+          }
+        }
+        if (data.status === 'error' && data.clientMessageId) {
+          this.cancellableGenerationIds.delete(data.clientMessageId);
+          if (this.lastCancellableId === data.clientMessageId) {
+            this.lastCancellableId = null;
+          }
+        }
+        // 'started' makes the request cancellable from its very first instant,
+        // well before aiResponseStart (intent/RAG run first). The Stop control
+        // is therefore available during thinking, not just while streaming.
+        if (data.status === 'started' && data.clientMessageId) {
+          this.cancellableGenerationIds.add(data.clientMessageId);
+          this.lastCancellableId = data.clientMessageId;
+        }
+
         const isProcessing = data.status === 'started';
         this.config?.onProcessingStatus(isProcessing);
       }
@@ -420,6 +496,45 @@ class ChatService {
     }
   }
 
+  // Stop a live AI generation. Any ACCEPTED generation is cancellable from
+  // `messageProcessing started` (before aiResponseStart — thinking phase) until
+  // its terminal event. The ack is informational — the terminal outcome arrives
+  // via messageProcessing 'cancelled' (keeps partial content) or the normal
+  // completion if the server had already finished.
+  stopGeneration(clientMessageId: string): boolean {
+    const live = this.streamByClientMessageId.get(clientMessageId);
+    const cancellable = this.cancellableGenerationIds.has(clientMessageId);
+    if (!live && !cancellable) return false;
+
+    this.socket?.emit('stopGeneration', {
+      sessionId: this.sessionId,
+      clientMessageId,
+    });
+
+    return true;
+  }
+
+  // True while at least one ACCEPTED generation is cancellable — from
+  // messageProcessing 'started' through to its terminal event. Used by the UI
+  // to show the Stop control for the whole processing window (including the
+  // thinking/intent/RAG phase, since the client cannot know the provider type
+  // in advance and buffered/deterministic paths never emit aiResponseStart).
+  isActiveGeneration(): boolean {
+    return this.cancellableGenerationIds.size > 0;
+  }
+
+  // The most recent cancellable generation id, or null when none is active.
+  getActiveGenerationId(): string | null {
+    return this.lastCancellableId;
+  }
+
+  // True while at least one live stream placeholder exists. Retained for
+  // backward compatibility / fine-grained control; the Stop button should use
+  // isActiveGeneration() so it appears before aiResponseStart.
+  isLiveStreaming(): boolean {
+    return this.streamByClientMessageId.size > 0;
+  }
+
   // Reconnect with a fresh access token (call after login or token refresh).
   reconnectWithToken(token?: string | null): void {
     if (this.socket) {
@@ -442,6 +557,8 @@ class ChatService {
     this.pendingByClientMessageId.clear();
     this.streamByClientMessageId.clear();
     this.deliveredStreamIds.clear();
+    this.cancellableGenerationIds.clear();
+    this.lastCancellableId = null;
   }
 
   // Keep the socket in sync with the current auth token.
@@ -481,6 +598,8 @@ class ChatService {
     this.streamByClientMessageId.clear();
     this.deliveredStreamIds.clear();
     this.renderedResponseIds.clear();
+    this.cancellableGenerationIds.clear();
+    this.lastCancellableId = null;
   }
 }
 

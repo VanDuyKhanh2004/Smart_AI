@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Minimize2, RotateCcw } from 'lucide-react';
+import { X, Minimize2, RotateCcw, Square } from 'lucide-react';
 import type { ChatMessage as ChatMessageType } from '@/services/chat.service';
 import ChatMessage from './ChatMessage';
 import {
@@ -20,8 +20,10 @@ interface ChatWindowProps {
   messages: ChatMessageType[];
   isConnected: boolean;
   isProcessing: boolean;
+  isActiveGeneration: boolean;
   error: string | null;
   onSendMessage: (message: string) => boolean;
+  onStopGeneration: () => void;
   onReset: () => void;
 }
 
@@ -32,8 +34,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   messages, 
   isConnected, 
   isProcessing, 
+  isActiveGeneration,
   error, 
   onSendMessage, 
+  onStopGeneration,
   onReset 
 }) => {
   const [inputMessage, setInputMessage] = useState('');
@@ -121,11 +125,25 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             />
             <PromptInputToolbar>
               <PromptInputTools />
-              <PromptInputSubmit
-                disabled={!inputMessage.trim() || !isConnected || isProcessing}
-                status={isProcessing ? 'streaming' : undefined}
-                className="rounded-full"
-              />
+              {isActiveGeneration ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  onClick={onStopGeneration}
+                  disabled={!isConnected}
+                  title="Dừng trả lời"
+                  className="rounded-full shrink-0"
+                >
+                  <Square className="size-4" />
+                </Button>
+              ) : (
+                <PromptInputSubmit
+                  disabled={!inputMessage.trim() || !isConnected || isProcessing}
+                  status={isProcessing ? 'streaming' : undefined}
+                  className="rounded-full"
+                />
+              )}
             </PromptInputToolbar>
           </PromptInput>
         </CardFooter>
