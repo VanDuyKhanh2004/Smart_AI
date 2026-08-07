@@ -8,6 +8,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatDistance } from '../utils/distance';
+import { getStoreOpenStatus } from '../utils/openingHours';
 import type { StoreWithDistance, BusinessHours } from '../types';
 
 interface StoreDetailModalProps {
@@ -37,19 +38,6 @@ const DAY_ORDER: (keyof BusinessHours)[] = [
   'sunday',
 ];
 
-function getCurrentDayKey(): keyof BusinessHours {
-  const days: (keyof BusinessHours)[] = [
-    'sunday',
-    'monday',
-    'tuesday',
-    'wednesday',
-    'thursday',
-    'friday',
-    'saturday',
-  ];
-  return days[new Date().getDay()];
-}
-
 export function StoreDetailModal({
   store,
   isOpen,
@@ -58,7 +46,7 @@ export function StoreDetailModal({
 }: StoreDetailModalProps) {
   if (!store) return null;
 
-  const currentDay = getCurrentDayKey();
+  const { isOpen: isCurrentlyOpen, today } = getStoreOpenStatus(store.businessHours);
 
   // Generate Google Maps directions URL
   const getDirectionsUrl = () => {
@@ -77,11 +65,11 @@ export function StoreDetailModal({
           {/* Status and Distance */}
           <div className="flex items-center gap-3 flex-wrap">
             <Badge
-              variant={store.isOpen ? 'default' : 'destructive'}
-              className={store.isOpen ? 'bg-green-600 hover:bg-green-600' : ''}
+              variant={isCurrentlyOpen ? 'default' : 'destructive'}
+              className={isCurrentlyOpen ? 'bg-green-600 hover:bg-green-600' : ''}
             >
               <Clock className="h-3 w-3 mr-1" />
-              {store.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
+              {isCurrentlyOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
             </Badge>
             {store.distance !== undefined && (
               <Badge variant="secondary">
@@ -141,7 +129,7 @@ export function StoreDetailModal({
                 <tbody>
                   {DAY_ORDER.map((day) => {
                     const hours = store.businessHours[day];
-                    const isToday = day === currentDay;
+                    const isToday = day === today;
                     return (
                       <tr
                         key={day}

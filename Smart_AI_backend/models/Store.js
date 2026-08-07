@@ -135,50 +135,6 @@ storeSchema.index({ location: '2dsphere' });
 storeSchema.index({ isActive: 1 });
 storeSchema.index({ name: 'text', 'address.fullAddress': 'text' });
 
-
-// Virtual to check if store is currently open
-storeSchema.virtual('isOpen').get(function() {
-  const now = new Date();
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const currentDay = days[now.getDay()];
-  const hours = this.businessHours[currentDay];
-  
-  if (!hours || hours.isClosed) {
-    return false;
-  }
-  
-  const currentTime = now.getHours() * 60 + now.getMinutes();
-  
-  const [openHour, openMin] = hours.open.split(':').map(Number);
-  const [closeHour, closeMin] = hours.close.split(':').map(Number);
-  
-  const openTime = openHour * 60 + openMin;
-  const closeTime = closeHour * 60 + closeMin;
-  
-  return currentTime >= openTime && currentTime < closeTime;
-});
-
-// Static method to check if a store is open at a specific time
-storeSchema.statics.isOpenAt = function(businessHours, date) {
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const currentDay = days[date.getDay()];
-  const hours = businessHours[currentDay];
-  
-  if (!hours || hours.isClosed) {
-    return false;
-  }
-  
-  const currentTime = date.getHours() * 60 + date.getMinutes();
-  
-  const [openHour, openMin] = hours.open.split(':').map(Number);
-  const [closeHour, closeMin] = hours.close.split(':').map(Number);
-  
-  const openTime = openHour * 60 + openMin;
-  const closeTime = closeHour * 60 + closeMin;
-  
-  return currentTime >= openTime && currentTime < closeTime;
-};
-
 // Static method to find stores near a location
 storeSchema.statics.findNear = function(longitude, latitude, maxDistanceKm = 50) {
   return this.find({

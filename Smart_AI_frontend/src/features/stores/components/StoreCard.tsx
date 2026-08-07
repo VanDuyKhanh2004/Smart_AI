@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatDistance } from '../utils/distance';
+import { getStoreOpenStatus } from '../utils/openingHours';
 import type { StoreWithDistance } from '../types';
 
 interface StoreCardProps {
@@ -18,6 +19,8 @@ export function StoreCard({
   onSelect,
   onViewDetails,
 }: StoreCardProps) {
+  const { isOpen } = getStoreOpenStatus(store.businessHours);
+
   return (
     <Card
       className={`cursor-pointer transition-all hover:shadow-md ${
@@ -57,10 +60,10 @@ export function StoreCard({
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />
             <Badge
-              variant={store.isOpen ? 'default' : 'destructive'}
-              className={store.isOpen ? 'bg-green-600 hover:bg-green-600' : ''}
+              variant={isOpen ? 'default' : 'destructive'}
+              className={isOpen ? 'bg-green-600 hover:bg-green-600' : ''}
             >
-              {store.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
+              {isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
             </Badge>
           </div>
           

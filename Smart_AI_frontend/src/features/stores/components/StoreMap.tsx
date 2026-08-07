@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { MapPin, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getStoreOpenStatus } from '../utils/openingHours';
 import type { StoreWithDistance, Coordinates } from '../types';
 
 // Fix for default marker icons in Leaflet with Vite
@@ -161,7 +162,9 @@ export function StoreMap({
         )}
 
         {/* Store markers */}
-        {stores.map((store) => (
+        {stores.map((store) => {
+          const { isOpen } = getStoreOpenStatus(store.businessHours);
+          return (
           <Marker
             key={store.id}
             position={[
@@ -196,12 +199,12 @@ export function StoreMap({
                 <div className="flex items-center gap-2">
                   <span
                     className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      store.isOpen
+                      isOpen
                         ? 'bg-green-100 text-green-800'
                         : 'bg-red-100 text-red-800'
                     }`}
                   >
-                    {store.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
+                    {isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
                   </span>
                 </div>
                 
@@ -218,7 +221,8 @@ export function StoreMap({
               </div>
             </Popup>
           </Marker>
-        ))}
+          );
+        })}
       </MapContainer>
     </div>
   );

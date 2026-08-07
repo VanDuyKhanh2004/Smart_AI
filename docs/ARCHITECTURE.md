@@ -281,6 +281,17 @@ Note: File names are inverted relative to provider — `utils/gemini.js` uses Op
   - Embeddings: `gemini-embedding-001` (1536 dimensions) via `utils/openai.js`
   - Chat fallback: `gemini-2.0-flash` when OpenAI is unavailable
 
+## Store Opening Hours
+
+Stores operate in Vietnam local time (`Asia/Ho_Chi_Minh`, UTC+7, no DST). Open/closed status is computed **on the frontend** by a single pure helper, `getStoreOpenStatus(businessHours, now?, timeZone?)` in `Smart_AI_frontend/src/features/stores/utils/openingHours.ts` — there is no backend derivation (the previous server-timezone `isOpen` virtual was removed).
+
+Semantics:
+- The current weekday and minutes-of-day are derived with `Intl.DateTimeFormat` using the target timezone, so results are identical regardless of host timezone (Vietnam machine, UTC CI, Docker, US server).
+- Interval is half-open `[open, close)`: open at `08:00`, closed at `21:00`.
+- A day marked `isClosed`, a missing day entry, or a malformed time is deterministically closed and never throws.
+- Overnight schedules (`close < open`, e.g. `22:00 - 02:00`) are **not supported** by the single same-day interval data model (the Mongoose `HH:MM` regex allows such values, but there is no cross-midnight semantics); they resolve to closed rather than inventing behavior. Store schedules spanning midnight are not representable.
+- Consumers: `StoreCard`, `StoreMap`, and `StoreDetailModal` (status badge and the `(Hôm nay)` weekday marker) all read from the same helper, so card, map, and modal can never disagree.
+
 ## Cloudinary
 
 - **Library**: `cloudinary` v2
