@@ -13,12 +13,14 @@ id is echoed back on the correlated server events:
 | -------------------- | --------------------------------------------------------------------- |
 | `sendMessage`        | `{ sessionId, message, clientMessageId }` (client → server)           |
 | ack (sendMessage)    | `{ accepted, duplicate, status, clientMessageId }` (server → client)  |
-| `messageProcessing`  | `{ sessionId, clientMessageId, status: 'started'\|'completed'\|'error' }` |
-| `aiResponseStart`    | `{ sessionId, clientMessageId, timestamp, metadata? }` (exactly once, §9) |
-| `aiResponseChunk`    | `{ sessionId, clientMessageId, chunk, chunkIndex, timestamp }` (DELTA only, §9) |
-| `aiResponseComplete` | `{ sessionId, clientMessageId, content, finishReason, totalChunks, timestamp, metadata? }` (§9) |
-| `aiResponse`         | `{ sessionId, clientMessageId, message, timestamp, metadata? }` (compat only, §9) |
+| `messageProcessing`  | `{ sessionId, clientMessageId, status: 'started'\|'completed'\|'cancelled'\|'error', reason?, processingTime? }` |
+| `aiResponseStart`    | `{ sessionId, clientMessageId, timestamp, metadata? }` (exactly once, A9) |
+| `aiResponseChunk`    | `{ sessionId, clientMessageId, chunk, chunkIndex, timestamp }` (DELTA only, A9) |
+| `aiResponseComplete` | `{ sessionId, clientMessageId, content, finishReason, totalChunks, timestamp, metadata? }` (A9) |
+| `aiResponse`         | `{ sessionId, clientMessageId, message, timestamp, metadata? }` (compat only, A9) |
 | `error`              | `{ type, message, timestamp, clientMessageId? }` (`clientMessageId` optional) |
+| `stopGeneration`     | `{ sessionId, clientMessageId }` (client → server) |
+| ack (stopGeneration) | `{ stopped, status: 'stopped'\|'already_completed'\|'not_found'\|'invalid', clientMessageId }` (server → client, at most once) |
 
 Rules:
 - Never include **message content** in a correlation id, Redis key, or log line.
@@ -150,17 +152,20 @@ are **per-process only**; cross-instance guarantees require Redis.
   `resetSession`.
 - The ack is a receipt and never frees the pending slot on `accepted` /
   `processing` / `completed`; the slot is freed by the correlated
-  `aiResponseComplete`/`aiResponse` (success), by a `status: 'invalid'` ack, or
-  by the socket `error` event (failure), so a user can legitimately send again.
-  **Reconnection does not auto-resend** in this change.
+  `aiResponseComplete`/`aiResponse` (success), by a `status: 'invalid'` ack, by
+  the socket `error` event (failure), or by `messageProcessing 'cancelled'`
+  (user-stopped stream). **Reconnection does not auto-resend** in this change.
+- A live stream the user stopped is finalized via `onStreamCancelled` (keeps the
+  partial content, no longer loading) — see §10.
 
 ## 8. Deliberate non-goals (out of scope)
 
 No sequence numbers, no per-session queue, no automatic reconnect resend, no
-retry UI, no cancel-generation, no TTFT metrics, no chat rate limiting, no broad
-Conversation persistence refactor, no product API changes, no `clientMessageId`
-unique multikey index, and no change to the `{ userId, sessionId }` ownership
-isolation.
+retry UI, no TTFT metrics, no chat rate limiting, no broad Conversation
+persistence refactor, no product API changes, no `clientMessageId` unique
+multikey index, and no change to the `{ userId, sessionId }` ownership
+isolation. (Cancel-generation was previously listed here and is now implemented
+— see §10; its own non-goals are listed at the end of that section.)
 
 ## 9. Streaming (`aiResponseStart` / `aiResponseChunk` / `aiResponseComplete`)
 
@@ -227,3 +232,145 @@ stale/out-of-order `chunkIndex` rejected, complete finalizes with authoritative
 content, stray `aiResponse` for a delivered id ignored, buffered `aiResponse`
 still rendered, concurrent streams isolated, correlated-error cleanup, and
 reset/disconnect clearing).
+
+## 10. Stop AI generation
+
+A user can stop an **accepted** generation with the `stopGeneration` event. A
+generation is cancellable from its very first processing instant
+(`messageProcessing 'started'`) through its terminal event — **not** only while
+a stream placeholder exists, because the client cannot know the provider type in
+advance (intent classification / RAG run first, and buffered/deterministic
+branches never emit `aiResponseStart`). Stopping is per-generation, process-local,
+and never persists partial assistant content.
+
+### Contract
+
+```
+client:  stopGeneration { sessionId, clientMessageId }
+server:  ack { stopped, status, clientMessageId }      (at most once; delivery receipt)
+terminal: messageProcessing { status: 'cancelled', reason: 'user_cancelled' }  (exactly once, when the abort actually stops the run)
+```
+
+- The **only** terminal signal for a stopped generation is `messageProcessing`
+  with `status: 'cancelled'` and `reason: 'user_cancelled'`. **There is no
+  `aiResponseCancelled` event, no `error` event, no `aiResponseComplete`, and no
+  `aiResponse` for a cancelled generation.** A cancellation is an expected,
+  terminal condition and is never logged with `logger.error`.
+- The `stopGeneration` ack is a **delivery receipt** that an abort was accepted
+  (or that there was nothing to abort) — it does **not** carry a second terminal
+  status. Ack `status` values:
+  - `'stopped'` — an active generation was found and its controller aborted.
+  - `'already_completed'` — the id already finished (late request, a no-op that
+    does not mutate the completed state).
+  - `'not_found'` — no active generation and no completed mark for the id.
+  - `'invalid'` — malformed `sessionId` / `clientMessageId` (UUID required).
+- Identity is the **trusted** `socket.data.user.id + sessionId + clientMessageId`
+  (same scope as the dedup guard); a client-supplied `userId` is ignored. A stop
+  for a live generation on a *different* session (or user) is `'not_found'`.
+
+### Cancellation architecture (one AbortController per accepted request)
+
+The socket boundary owns **exactly one `AbortController`** per accepted request:
+
+1. `handleSendMessage` creates the controller **after auth/validation/dedup-claim
+   and before `messageProcessing 'started'` / `processMessage`**, and registers it
+   into `chatActiveStreams` (`register({ userId, sessionId, clientMessageId,
+   controller, socketId })`). This is the **only** registration —
+   `generateResponse` no longer creates or registers a controller.
+2. The controller's `{ signal }` is threaded through
+   `processMessage → intent → context → RAG → generateResponse →
+   generateChatResponseStream → `streamOpenAICompatible` / `streamGeminiChat``
+   (OpenAI passes `signal` to `create({ stream: true, signal })`; Gemini checks
+   `throwIfCancelled(signal)` between yields).
+3. `processMessage` and `socketHandler` assert a shared `throwIfCancelled(signal)`
+   at checkpoints: before any work, after `manageSession`, after intent,
+   before/after context, before/after RAG, before the provider call, during
+   streaming, before `aiResponseComplete`, before assistant persistence, and
+   before the dedup completion mark. Aborting surfaces the shared cancellation
+   identity `{ aborted: true, cancelled: true, code: 'STREAM_CANCELLED' }`
+   (defined once in `utils/chatCancellation.js`), which the socket boundary maps
+   to the single terminal `messageProcessing 'cancelled'`.
+4. Registry lifecycle (`services/chatActiveStreams.js`): `register` at the
+   boundary → success `markCompleted` (bounded completed set ⇒ late stop acks
+   `'already_completed'`) / cancel `abort` + remove / genuine error `remove` /
+   disconnect `removeForSocket` (aborts + removes every entry owned by the socket,
+   so a dropped client stops burning provider tokens). Active entries and
+   completed marks are TTL-swept (`CHAT_STREAM_TTL_MS` / `CHAT_COMPLETED_TTL_MS`,
+   completed capped by `CHAT_COMPLETED_MAX`); importantly an **expired active**
+   entry **aborts its controller before being deleted** so an orphaned in-flight
+   call cannot run to completion.
+
+### Races and guarantees
+
+- Cancellation is pre-emptive: aborting the controller prevents every **later**
+  phase — no RAG step, no provider call begins after an abort, no fallback
+  (OpenAI → Gemini → deterministic) begins after an abort, and no chunk is
+  flushed after a cancel.
+- A stop that lands **right as** `processMessage` resolves is treated as
+  cancelled (a checkpoint before the `completed` emit), never a completion.
+- Duplicate-stop is idempotent (`not_found` on the second stop after the entry is
+  removed). Stale-TTL expiry, disconnect at any phase, and two concurrent
+  `clientMessageId`s are isolated: stopping generation A never aborts generation
+  B.
+
+### Persistence, dedup, and the same-id retry
+
+- **No partial assistant content is ever persisted** for a cancelled run
+  (`saveAIResponse` is not reached and has its own pre-save checkpoint); the user
+  message may remain stored.
+- The **dedup claim is released** on cancellation, so the same `clientMessageId`
+  can be submitted again and is treated as a fresh submission (`accepted`), never
+  a duplicate, and the generation is never marked completed in the dedup store.
+- Retry after a stop should use a fresh `clientMessageId` (recommended, since the
+  partially-streamed bubble belongs to the old id).
+
+### Frontend
+
+- The Stop control is visible for the **whole processing window** of an accepted
+  generation: `chat.service.ts` tracks a `cancellableGenerationIds` set, populated
+  from `messageProcessing 'started'` and cleared by the terminal events
+  (`completed`, `cancelled`, `error`, or the compatibility `aiResponse`) and by
+  `disconnect`. `isActiveGeneration()` / `getActiveGenerationId()` drive the UI;
+  `stopGeneration(clientMessageId)` returns `true` for any cancellable id (even
+  one with no stream placeholder yet).
+- A buffered/deterministic **instant** finish (e.g. `started` → `completed`) clears
+  the Stop control immediately — there is no artificial slowdown; a generation
+  that completes before the user clicks is simply gone. The optional dev/test
+  env `CHAT_STREAM_TEST_DELAY_MS` (default 0/disabled; dev-only) can hold a phase
+  for manual verification to observe the Stop control across the whole window.
+- `FloatingChat` tracks the active generation id (set from `messageProcessing
+  'started'` via `getActiveGenerationId()`, kept through `aiResponseStart`, cleared
+  on `onStreamComplete` / `onStreamError` / `onStreamCancelled` / `completed` /
+  `error` / `disconnect`); `ChatWindow` replaces Send with a Stop button while
+  `isActiveGeneration` is true; `ChatMessage` shows a "Đã dừng" badge on a
+  cancelled bubble (partial text preserved, no error styling).
+
+### Non-goals (out of scope)
+
+No `aiResponseCancelled` event, no retry UI, no automatic resend on reconnect,
+no partial assistant persistence, no per-session queue, no **distributed**
+(cross-instance) stop — the registry is process-local, exactly like the dedup
+service's Redis-unavailable fallback — and no rate limiting on `stopGeneration`
+(the handler is cheap and idempotent). No product/API changes.
+
+### Test coverage
+
+- Backend: `tests/chatActiveStreams.test.js` (registry: register units/get/abort-
+  once/remove/markCompleted/removeForSocket/clear, user+session+id isolation, TTL
+  sweeps), `tests/chatStopGeneration.test.js` (real Socket.IO: single controller
+  at boundary, `started`→signal threading, two concurrent ids isolated, genuine
+  error cleanup, stopped ack → exactly one `messageProcessing 'cancelled'`, no
+  error/no completion, ack once, claim released → same-id reprocess,
+  already_completed, not_found, cross-session miss, invalid ids, no-ack emit,
+  disconnect sweep), `tests/chatGenerationCancel.test.js` (the caller-provided
+  signal is threaded; pre-aborted signal rejects before any emit; abort mid-
+  stream rejects; completion-race abort; buffered success marks completed),
+  `tests/chatCancellationCheckpoints.test.js` (controller-level: pre-aborted
+  cancels before any work; cancel during intent prevents RAG/provider/save; user
+  message persists but assistant never saved; normal run completes + saves).
+- Frontend: `src/tests/ChatServiceStop.test.ts` (stop from `started` before
+  `aiResponseStart`, Stop through start/chunks, complete/cancelled/error/
+  disconnect/compat `aiResponse` retire the generation, two concurrent ids
+  isolated, late complete ignored, early-cancel finalizes the thinking bubble,
+  partial text preserved on cancel, fresh-id resubmit, no stale Stop after a
+  deterministic finish).

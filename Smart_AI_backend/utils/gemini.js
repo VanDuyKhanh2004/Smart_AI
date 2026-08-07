@@ -475,13 +475,9 @@ ${historyText ? `LỊCH SỬ CHAT GẦN ĐÂY:\n${historyText}` : ""}
 Không cần chào lại nếu đã chào trước đó. Trả lời bằng tiếng Việt thân thiện.`;
 };
 
-const throwIfAborted = (signal) => {
-  if (signal && signal.aborted) {
-    const error = new Error("Stream aborted");
-    error.aborted = true;
-    throw error;
-  }
-};
+const { STREAM_CANCELLED, cancelledError, throwIfCancelled } = require("./chatCancellation");
+// Longhand alias kept for readability inside the provider wrappers.
+const throwIfAborted = throwIfCancelled;
 
 /**
  * Streams a chat completion from OpenAI-compatible providers.
@@ -646,6 +642,10 @@ const generateChatResponseStream = async ({ userMessage, chatHistory = [], produ
     const text = buildDeterministicResponse(productContext, userMessage);
     return { fullResponse: text, provider: "deterministic", finishReason: "stop", streamed: false };
   } catch (error) {
+    // Whatever the SDK threw, an aborted signal is always surfaced as the same
+    // STREAM_CANCELLED error so callers can distinguish user cancellation from a
+    // genuine provider failure.
+    throwIfCancelled(signal);
     throw partialError(error);
   }
 };
@@ -805,6 +805,7 @@ module.exports = {
   createSystemPrompt,
   generateComplaintResponse,
   testGeminiConnection,
+  STREAM_CANCELLED,
 };
 
 

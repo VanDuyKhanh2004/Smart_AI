@@ -59,7 +59,12 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({ message }) => {
               Bạn
             </Badge>
           )}
-          {!isUser && !isLoading && (
+          {!isUser && !isLoading && message.cancelled && (
+            <Badge variant="secondary" className="text-xs">
+              Đã dừng
+            </Badge>
+          )}
+          {!isUser && !isLoading && !message.cancelled && (
             <Badge variant="outline" className="text-xs">
               Quỳnh Như
             </Badge>

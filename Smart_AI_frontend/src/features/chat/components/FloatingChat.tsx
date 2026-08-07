@@ -10,8 +10,16 @@ const FloatingChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [activeGenerationId, setActiveGenerationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isInitialized = useRef(false);
+
+  // The Stop control shows for the whole processing window of an accepted
+  // generation (messageProcessing 'started' -> terminal event), NOT just after
+  // aiResponseStart. The client cannot know the provider type in advance
+  // (intent/RAG run first, and buffered/deterministic never emit aiResponseStart),
+  // so the Stop button is available from the very first processing instant.
+  const isActiveGeneration = activeGenerationId !== null;
 
   const initializeChatService = useCallback(() => {
     if (isInitialized.current) return;
@@ -29,6 +37,10 @@ const FloatingChat: React.FC = () => {
       // Live stream: create the ONE assistant placeholder for this id and drop
       // the generic loading bubble.
       onStreamStart: (message) => {
+        // Fallback: the cancellable id is normally set from messageProcessing
+        // 'started' via onProcessingStatus; here we keep the SAME id through the
+        // transition to the streaming placeholder so Stop stays available.
+        setActiveGenerationId(message.clientMessageId ?? chatService.getActiveGenerationId() ?? null);
         setMessages(prev => {
           const withoutLoading = prev.filter(msg => !msg.isLoading);
           if (withoutLoading.some(m => m.id === message.id)) return withoutLoading;
@@ -47,6 +59,7 @@ const FloatingChat: React.FC = () => {
       },
       // Live stream: finalize the SAME placeholder with authoritative content.
       onStreamComplete: (message) => {
+        setActiveGenerationId(null);
         setMessages(prev =>
           prev.map(msg =>
             msg.id === `stream:${message.clientMessageId}` ? { ...msg, content: message.content, isLoading: false } : msg
@@ -57,9 +70,19 @@ const FloatingChat: React.FC = () => {
       // Correlated terminal failure for a streamed id: mark that placeholder
       // failed and stop showing its loading state.
       onStreamError: (clientMessageId) => {
+        setActiveGenerationId(null);
         setMessages(prev =>
           prev.map(msg =>
             msg.id === `stream:${clientMessageId}` ? { ...msg, failed: true, isLoading: false } : msg
+          )
+        );
+      },
+      // User stopped the live stream: keep the partial content, drop loading.
+      onStreamCancelled: (clientMessageId) => {
+        setActiveGenerationId(null);
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === `stream:${clientMessageId}` ? { ...msg, cancelled: true, isLoading: false } : msg
           )
         );
       },
@@ -88,6 +111,11 @@ const FloatingChat: React.FC = () => {
       onProcessingStatus: (processing) => {
         setIsProcessing(processing);
         if (processing) {
+          // An accepted generation started: make it cancellable. The id comes
+          // from chatService (messageProcessing 'started' already recorded it).
+          // Without a stream placeholder yet (thinking/intent/RAG phase) the
+          // Stop control is still shown via isActiveGeneration.
+          setActiveGenerationId(chatService.getActiveGenerationId());
           // Add a generic loading bubble ONLY while waiting for aiResponseStart.
           // Once a stream placeholder exists, this generic bubble is removed.
           setMessages(prev => {
@@ -105,6 +133,9 @@ const FloatingChat: React.FC = () => {
             return prev;
           });
         } else {
+          // Terminal for the current generation (completed/cancelled/error/
+          // compatibility response): the Stop control disappears.
+          setActiveGenerationId(null);
           // Remove only the generic 'loading' bubble, keep finalized streams.
           setMessages(prev => prev.filter(msg => msg.id !== 'loading'));
         }
@@ -137,6 +168,7 @@ const FloatingChat: React.FC = () => {
     setMessages([]);
     setIsConnected(false);
     setIsProcessing(false);
+    setActiveGenerationId(null);
     setError(null);
     isInitialized.current = false;
   };
@@ -151,6 +183,7 @@ const FloatingChat: React.FC = () => {
     setMessages([]);
     setError(null);
     setIsProcessing(false);
+    setActiveGenerationId(null);
     
     // Reconnect with new session
     chatService.disconnect();
@@ -169,6 +202,11 @@ const FloatingChat: React.FC = () => {
       return true;
     }
     return false;
+  };
+
+  const handleStopGeneration = () => {
+    if (!activeGenerationId) return;
+    chatService.stopGeneration(activeGenerationId);
   };
 
   return (
@@ -223,8 +261,10 @@ const FloatingChat: React.FC = () => {
         messages={messages}
         isConnected={isConnected}
         isProcessing={isProcessing}
+        isActiveGeneration={isActiveGeneration}
         error={error}
         onSendMessage={handleSendMessage}
+        onStopGeneration={handleStopGeneration}
         onReset={handleReset}
       />
     </>
