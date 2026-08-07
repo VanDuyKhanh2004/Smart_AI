@@ -1,7 +1,17 @@
 import { io, Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  getSelectedSession,
+  getRestoreMode,
+  setSelectedSession,
+  clearSelectedSession,
+  setRestoreMode,
+  type ChatRestoreMode,
+} from './chatPersistence';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface ChatMessage {
   id: string;
@@ -214,7 +224,7 @@ class ChatService {
   }
 
   constructor() {
-    this.sessionId = uuidv4();
+    this.sessionId = this.resolveInitialSessionId();
   }
 
   initialize(config: ChatServiceConfig) {
@@ -679,6 +689,12 @@ class ChatService {
       message: content,
       clientMessageId,
     }, (ack: SendAck) => {
+      // First successful send: persist this session as the selected one so a
+      // reload after the first interaction resumes it. Only the first accepted
+      // send switches the restore mode from 'new' -> 'selected'.
+      if (ack.status === 'accepted' || ack.status === 'processing') {
+        this.persistCurrentSession();
+      }
       this.handleSendAck(clientMessageId, ack);
     });
 
@@ -903,9 +919,54 @@ class ChatService {
     return this.sessionId;
   }
 
+  // Decide the session identity the service starts with. When the last user
+  // left the app in a conversation (restore mode === 'selected'), keep that
+  // sessionId so a reload can hydrate it. When a NEW chat was requested (mode
+  // === 'new'), or no hint exists, mint a fresh uuid — the previous session is
+  // NOT restored.
+  private resolveInitialSessionId(): string {
+    if (getRestoreMode() === 'selected') {
+      const selected = getSelectedSession();
+      if (selected && UUID_RE.test(selected)) return selected;
+    }
+    // Fresh session: a reload before the first send must NOT restore the old one.
+    setRestoreMode('new');
+    clearSelectedSession();
+    return uuidv4();
+  }
+
+  // Restore an owned session into this service (called after history hydration
+  // when reloading). Marks the app back to 'selected' so future reloads resume
+  // it rather than minting a new one.
+  restoreSession(sessionId: string): void {
+    if (!sessionId || !UUID_RE.test(sessionId)) return;
+    this.sessionId = sessionId;
+    setSelectedSession(sessionId);
+    setRestoreMode('selected');
+  }
+
+  // Persist the current session as the selected one. Called on the first send
+  // so a reload after the first interaction resumes this conversation instead
+  // of dumping to a fresh one.
+  persistCurrentSession(): void {
+    if (!this.sessionId || !UUID_RE.test(this.sessionId)) return;
+    setSelectedSession(this.sessionId);
+    setRestoreMode('selected');
+  }
+
+  // The current broadcast restore mode ('selected' | 'new').
+  getSessionRestoreMode(): ChatRestoreMode {
+    return getRestoreMode();
+  }
+
   // Reset session (tạo sessionId mới)
   resetSession() {
+    // A "New Chat" request: never resume the previous session — even if the
+    // user reloads before sending anything. The persistence hint is switched
+    // to 'new' and any selected-session hint is cleared.
     this.sessionId = uuidv4();
+    setRestoreMode('new');
+    clearSelectedSession();
     this.pendingByClientMessageId.clear();
     this.streamByClientMessageId.clear();
     this.deliveredStreamIds.clear();

@@ -21,6 +21,7 @@ interface ChatWindowProps {
   isConnected: boolean;
   isProcessing: boolean;
   isActiveGeneration: boolean;
+  isHydrating?: boolean;
   error: string | null;
   onSendMessage: (message: string) => boolean;
   onStopGeneration: () => void;
@@ -37,6 +38,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   isConnected, 
   isProcessing, 
   isActiveGeneration,
+  isHydrating = false,
   error, 
   onSendMessage, 
   onStopGeneration,
@@ -65,6 +67,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isHydrating) return;
     if (!inputMessage.trim() || isProcessing || !isConnected) return;
 
     const success = onSendMessage(inputMessage);
@@ -111,6 +114,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           )}
           
+          {isHydrating && messages.length === 0 && (
+            <div className="flex items-center justify-center text-sm text-muted-foreground py-4">
+              Đang tải cuộc trò chuyện trước đó...
+            </div>
+          )}
+
           {messages.map((message) => (
             <ChatMessage
               key={message.id}
@@ -152,8 +161,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             <PromptInputTextarea
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              placeholder={isConnected ? "Nhập tin nhắn..." : "Đang kết nối..."}
-              disabled={!isConnected || isProcessing}
+              placeholder={
+                isHydrating
+                  ? "Đang tải cuộc trò chuyện..."
+                  : isConnected
+                    ? "Nhập tin nhắn..."
+                    : "Đang kết nối..."
+              }
+              disabled={!isConnected || isProcessing || isHydrating}
               className="min-h-[40px] max-h-[120px]"
             />
             <PromptInputToolbar>
@@ -172,7 +187,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 </Button>
               ) : (
                 <PromptInputSubmit
-                  disabled={!inputMessage.trim() || !isConnected || isProcessing}
+                  disabled={!inputMessage.trim() || !isConnected || isProcessing || isHydrating}
                   status={isProcessing ? 'streaming' : undefined}
                   className="rounded-full"
                 />
