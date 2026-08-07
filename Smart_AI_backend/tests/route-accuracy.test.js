@@ -147,6 +147,10 @@ const routeMap = {
   'GET /api/appointments/admin/store/{storeId}': { auth: true },
   'PATCH /api/appointments/admin/{id}/status': { auth: true },
 
+  // Chat History (REST, read-only)
+  'GET /api/chat/conversations': { auth: true },
+  'GET /api/chat/conversations/{sessionId}': { auth: true },
+
   // Health
   'GET /health':          { auth: false },
   'GET /api/health':      { auth: false },
@@ -196,6 +200,16 @@ describe('Route Accuracy — Swagger ↔ Actual Routes', () => {
   describe('Endpoints that do not exist as Express routes are NOT in swagger', () => {
     it('POST /api/chat is NOT in swagger (chat is Socket.IO only)', () => {
       expect(swaggerSpec.paths['/api/chat']?.post).toBeUndefined();
+    });
+
+    it('chat history GET routes are documented while POST /api/chat stays absent', () => {
+      // The read-only history routes exist and are authenticated.
+      expect(swaggerSpec.paths['/api/chat/conversations']?.get).toBeDefined();
+      expect(swaggerSpec.paths['/api/chat/conversations/{sessionId}']?.get).toBeDefined();
+      // Live chat write is NOT exposed over REST.
+      expect(swaggerSpec.paths['/api/chat']?.get).toBeUndefined();
+      expect(swaggerSpec.paths['/api/chat']?.post).toBeUndefined();
+      expect(swaggerSpec.paths['/api/chat/conversations']?.post).toBeUndefined();
     });
   });
 });

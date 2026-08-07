@@ -4,10 +4,13 @@ import chatService from '@/services/chat.service';
 import type { ChatServiceConfig } from '@/services/chat.service';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/auth.service';
+import { getSelectedSession, getRestoreMode } from '@/services/chatPersistence';
 import type { User } from '@/types/auth.type';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
+const SELECTED_SESSION_KEY = 'SMART_AI_SELECTED_CHAT_SESSION';
+const RESTORE_MODE_KEY = 'SMART_AI_CHAT_RESTORE_MODE';
 
 type EventHandler = (...args: unknown[]) => void;
 
@@ -288,5 +291,71 @@ describe('authStore.logout disconnects the chat socket', () => {
     expect(ioMock).toHaveBeenCalledTimes(1);
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+  });
+
+  it('logout clears all chat persistence hints so a different user cannot resume it', async () => {
+    localStorage.setItem(SELECTED_SESSION_KEY, '550e8400-e29b-41d4-a716-446655440000');
+    localStorage.setItem(RESTORE_MODE_KEY, 'selected');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tok');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rtok');
+    chatService.initialize(makeConfig());
+    expect(ioMock).toHaveBeenCalledTimes(1);
+
+    await useAuthStore.getState().logout();
+
+    expect(localStorage.getItem(SELECTED_SESSION_KEY)).toBeNull();
+    // The mode is forced to 'new' so a reload after logout never hydrates.
+    expect(localStorage.getItem(RESTORE_MODE_KEY)).toBe('new');
+    expect(getSelectedSession()).toBeNull();
+    expect(getRestoreMode()).not.toBe('selected');
+  });
+
+  it('logout clears chat hints even when the server logout throws', async () => {
+    localStorage.setItem(SELECTED_SESSION_KEY, '550e8400-e29b-41d4-a716-446655440000');
+    localStorage.setItem(RESTORE_MODE_KEY, 'selected');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tok');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rtok');
+    vi.mocked(authService.logout).mockRejectedValue(new Error('server down'));
+
+    await useAuthStore.getState().logout();
+
+    expect(getSelectedSession()).toBeNull();
+    expect(getRestoreMode()).not.toBe('selected');
+  });
+});
+
+describe('chat persistence survives token refresh (same user, same browser)', () => {
+  it('successful refresh keeps the selected session hints intact', async () => {
+    localStorage.setItem(SELECTED_SESSION_KEY, '550e8400-e29b-41d4-a716-446655440000');
+    localStorage.setItem(RESTORE_MODE_KEY, 'selected');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'old-token');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rtok');
+    chatService.initialize(makeConfig());
+    vi.mocked(authService.refreshToken).mockResolvedValue({
+      success: true,
+      data: { accessToken: 'new-token' },
+    });
+
+    const result = await useAuthStore.getState().refreshToken();
+
+    expect(result).toBe(true);
+    // A refresh is the SAME user on the SAME browser — the chat session hint
+    // must be preserved so the conversation is still resumed after reload.
+    expect(getSelectedSession()).toBe('550e8400-e29b-41d4-a716-446655440000');
+    expect(getRestoreMode()).toBe('selected');
+  });
+
+  it('failed refresh clears chat hints (treated as logged out)', async () => {
+    localStorage.setItem(SELECTED_SESSION_KEY, '550e8400-e29b-41d4-a716-446655440000');
+    localStorage.setItem(RESTORE_MODE_KEY, 'selected');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'old-token');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rt');
+    chatService.initialize(makeConfig());
+    vi.mocked(authService.refreshToken).mockRejectedValue(new Error('no'));
+
+    const result = await useAuthStore.getState().refreshToken();
+    expect(result).toBe(false);
+    expect(getSelectedSession()).toBeNull();
+    expect(getRestoreMode()).not.toBe('selected');
   });
 });

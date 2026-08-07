@@ -34,6 +34,7 @@ const profileRoutes = require("./routes/profileRoutes");
 const promotionRoutes = require("./routes/promotionRoutes");
 const storeRoutes = require("./routes/storeRoutes");
 const appointmentRoutes = require("./routes/appointmentRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 const path = require("path");
 
 const { startBullMQ, stopBullMQ } = require("./bullmq/bootstrap");
@@ -176,6 +177,7 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/promotions", promotionRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/appointments", appointmentRoutes);
+app.use("/api/chat", chatRoutes);
 
 // Static Files
 app.use(

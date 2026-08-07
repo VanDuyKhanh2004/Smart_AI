@@ -500,3 +500,72 @@ change to the `{ userId, sessionId }` ownership isolation.
 - Backend controller: `tests/chatRetryRegenerate.test.js`.
 - Backend socket: `tests/chatRetryRegenerateSocket.test.js`.
 - Frontend service: `src/tests/ChatServiceRetryRegenerate.test.ts`.
+
+## 12. Conversation history (REST) & reload restoration
+
+Live chat remains Socket.IO-only; history is served read-only over REST so it can
+reuse the existing `protect` + axios Bearer/refresh flow. The REST layer never
+writes — it only reads the same owned conversations the socket boundary persists.
+
+### REST endpoints (`controllers/conversationController.js`, `routes/chatRoutes.js`)
+
+| Endpoint | Auth | Contract |
+| --- | --- | --- |
+| `GET /api/chat/conversations` | `protect` | Owned, `status:'active'`, `messageCount>0`; summaries only (never `messages[]`); sorted `lastMessageAt desc, _id desc`; `limit` default 20 max 50; opaque base64url cursor `{ lastMessageAt, _id }` returned as `nextCursor` |
+| `GET /api/chat/conversations/:sessionId` | `protect` | UUID-validated id (else `BadRequestError('INVALID_SESSION')`); generic `NotFoundError('CONVERSATION_NOT_FOUND')` for missing **and** foreign sessions (no enumeration); explicit DTO whitelist of UI-needed assistant metadata; `ipAddress`/`userAgent`/debug never returned |
+
+### Identity & ownership
+
+- Both endpoints filter on `req.user.id` from the JWT (`protect`); a client-supplied
+  `userId` is ignored. This matches the socket side, which writes `userId` from
+  `socket.data.user.id` (an ObjectId string = `req.user.id`), so both transports
+  address the same owned pair `{ userId, sessionId }`.
+- Legacy documents (no `userId`) are invisible to the list/detail REST reads and
+  are never touched.
+
+### Frontend persistence hints (`src/services/chatPersistence.ts`)
+
+Two `localStorage` keys, treated strictly as **hints, never the source of truth**:
+
+- `SMART_AI_SELECTED_CHAT_SESSION` — the session to resume on reload.
+- `SMART_AI_CHAT_RESTORE_MODE` — `'selected'` | `'new'`.
+
+`clearChatPersistence()` clears the selected session **and explicitly writes the
+mode `'new'`** (a merely-removed key would default back to `'selected'` via the
+getter). It is called on logout, failed refresh, and failed `initialize()` in
+`authStore`, but **not** on a successful refresh — so on one browser, user B can
+never hydrate user A's session.
+
+### Hydration flow (`FloatingChat.handleConnected`, once per mount)
+
+1. Restore mode `'new'` or no selected session → welcome only; the prior session
+   is never restored. After a New Chat a reload **before** the next send does not
+   resurrect the old conversation.
+2. Mode `'selected'` + selected session → `getConversation` (REST) → `hydrateMessages`
+   maps rows to `ChatMessage` → `chatService.restoreSession(id)` adopts the id →
+   content rendered. No welcome over hydrated content.
+3. Hydration failure (404/foreign/network) → `resetSession()` clears the
+   irrecoverable hint, welcome shown, and a `historyError` notice displays above
+   the composer; sending is blocked while hydration is in flight.
+4. The first `accepted`/`processing` send ack persists the current session
+   (`persistCurrentSession()`), so a reload after the first interaction resumes
+   the same conversation. New Chat (`resetSession()`) sets mode `'new'` + clears
+   the selected session.
+
+### Hydrated message rules
+
+`hydrateMessages()` (`src/services/chatHistory.service.ts`) renders rows defensively:
+
+- Never retryable/failed/cancelled/loading; completed hydrated assistant rows keep
+  Regenerate, but a user-only turn never becomes Retry.
+- Non-user/assistant rows and blank content are dropped.
+- UI-only fallback ids: `clientMessageId ?? generationId ?? :hydrated:<uuid>`.
+- Live send/stream/stop/retry/regenerate behavior is unchanged and still covered by
+  the existing socket-facing tests.
+
+### Test coverage
+
+- Backend: `tests/chatHistory.test.js` (28 scenarios) and `tests/route-accuracy.test.js`
+  (chat GET routes documented, `POST /api/chat` absent).
+- Frontend: `src/tests/chatPersistence.test.ts`, `src/tests/ChatServicePersistence.test.ts`,
+  `src/tests/FloatingChatHydration.test.tsx`, `src/tests/AuthSocketSync.test.ts`.

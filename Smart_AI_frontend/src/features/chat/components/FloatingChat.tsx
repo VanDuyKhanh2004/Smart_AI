@@ -1,8 +1,10 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { MessageCircle, X, Minimize2 } from 'lucide-react';
 import ChatWindow from './ChatWindow';
 import chatService, { type ChatMessage as ChatMessageType, type ChatServiceConfig } from '@/services/chat.service';
+import { getSelectedSession, getRestoreMode } from '@/services/chatPersistence';
+import { getConversation, hydrateMessages } from '@/services/chatHistory.service';
 
 const FloatingChat: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -10,12 +12,23 @@ const FloatingChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeGenerationId, setActiveGenerationId] = useState<string | null>(null);
+  const [isHydrating, setIsHydrating] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeGenerationId, setActiveGenerationId] = useState<string | null>(null);
   const isInitialized = useRef(false);
   // The previous completed assistant content per logical clientMessageId, so a
   // failed/cancelled regenerate can restore it.
   const previousContentRef = useRef<Record<string, string>>({});
+  // Mirror of `messages` for callback use (setMessages is async). Used by the
+  // connected handler so the welcome message is only ever added when the chat is
+  // otherwise empty (hydration content, if any, is never overwritten).
+  const messagesRef = useRef<ChatMessageType[]>([]);
+  const hydrationStartedRef = useRef(false);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // The Stop control shows for the whole processing window of an accepted
   // generation (messageProcessing 'started' -> terminal event), NOT just after
@@ -23,6 +36,66 @@ const FloatingChat: React.FC = () => {
   // (intent/RAG run first, and buffered/deterministic never emit aiResponseStart),
   // so the Stop button is available from the very first processing instant.
   const isActiveGeneration = activeGenerationId !== null;
+
+  const addWelcomeMessage = useCallback(() => {
+    // A welcome greeting is added only when the chat is otherwise empty — never
+    // over content that was already rendered (hydrated history or prior turns).
+    if (messagesRef.current.length > 0) return;
+    const welcomeMessage: ChatMessageType = {
+      id: 'welcome',
+      role: 'assistant',
+      content: 'Dạ điện thoại giá kho xin chào! Em là Quỳnh Như nhân viên chăm sóc khách hàng của Điện thoại giá kho. Em có thể giúp gì cho mình ạ?',
+      timestamp: new Date(),
+    };
+    setMessages([welcomeMessage]);
+  }, []);
+
+  // Trigger history hydration exactly once per mount when there is a selected
+  // session to resume. Guard against user A / user B cross-contamination: the
+  // selected-session hint is only honored while the current restore mode is
+  // 'selected'; after logout or a New Chat the mode is 'new' and hydration is
+  // skipped (and the same browser can never hydrate a previous user's chat).
+  const handleConnected = useCallback(() => {
+    if (hydrationStartedRef.current) return;
+    if (getRestoreMode() !== 'selected') {
+      addWelcomeMessage();
+      return;
+    }
+    const selected = getSelectedSession();
+    if (!selected) {
+      addWelcomeMessage();
+      return;
+    }
+
+    hydrationStartedRef.current = true;
+    setIsHydrating(true);
+    setHistoryError(null);
+
+    getConversation(selected)
+      .then((detail) => {
+        const hydrated = hydrateMessages(detail?.messages);
+        // Adopt the restored session into the socket service so subsequent
+        // sends/turns continue the resumed conversation.
+        chatService.restoreSession(detail.sessionId);
+        if (hydrated.length > 0) {
+          setMessages(hydrated);
+        } else {
+          addWelcomeMessage();
+        }
+      })
+      .catch(() => {
+        // Hydration failed (e.g. foreign/404, network). Fall back to a fresh
+        // session rather than blocking the chat; the session is never pushed
+        // as selected (the previous session hint is cleared so future reloads
+        // do not retry the unresolvable session).
+        chatService.resetSession();
+        addWelcomeMessage();
+        setHistoryError('Không thể tải lại cuộc trò chuyện trước đó.');
+      })
+      .finally(() => {
+        setIsHydrating(false);
+      });
+  }, [addWelcomeMessage]);
 
   const initializeChatService = useCallback(() => {
     if (isInitialized.current) return;
@@ -197,14 +270,10 @@ const FloatingChat: React.FC = () => {
       onConnected: () => {
         setIsConnected(true);
         setError(null);
-        // Add welcome message
-        const welcomeMessage: ChatMessageType = {
-          id: 'welcome',
-          role: 'assistant',
-          content: 'Dạ điện thoại giá kho xin chào! Em là Quỳnh Như nhân viên chăm sóc khách hàng của Điện thoại giá kho. Em có thể giúp gì cho mình ạ?',
-          timestamp: new Date(),
-        };
-        setMessages([welcomeMessage]);
+        // On load, if this is a NEW chat (no selected session to resume), show
+        // the welcome greeting. Otherwise the very first connected handler
+        // triggers history hydration, which loads real content instead.
+        handleConnected();
       },
       onDisconnected: () => {
         setIsConnected(false);
@@ -246,7 +315,7 @@ const FloatingChat: React.FC = () => {
 
     chatService.initialize(config);
     isInitialized.current = true;
-  }, []);
+  }, [handleConnected]);
 
   const handleToggle = () => {
     if (isMinimized) {
@@ -272,6 +341,7 @@ const FloatingChat: React.FC = () => {
     setIsProcessing(false);
     setActiveGenerationId(null);
     setError(null);
+    setHistoryError(null);
     isInitialized.current = false;
   };
 
@@ -280,13 +350,19 @@ const FloatingChat: React.FC = () => {
     setIsOpen(false);
   };
 
+  // "New Chat": fresh session, never resumed on reload until the next send.
+  // resetSession() switches the persistence hint to 'new' and clears any
+  // selected session, so hydration is skipped on the reconnect below.
   const handleReset = () => {
     chatService.resetSession();
     setMessages([]);
     setError(null);
+    setHistoryError(null);
     setIsProcessing(false);
     setActiveGenerationId(null);
-    
+    hydrationStartedRef.current = false;
+    addWelcomeMessage();
+
     // Reconnect with new session
     chatService.disconnect();
     isInitialized.current = false;
@@ -296,6 +372,9 @@ const FloatingChat: React.FC = () => {
   };
 
   const handleSendMessage = (message: string) => {
+    // Block sending while history hydration is in flight so a premature send in
+    // the restored session is never raced against the content that is loading.
+    if (isHydrating) return false;
     if (!message.trim() || isProcessing || !isConnected) return false;
 
     const userMessage = chatService.sendMessage(message);
@@ -387,7 +466,8 @@ const FloatingChat: React.FC = () => {
         isConnected={isConnected}
         isProcessing={isProcessing}
         isActiveGeneration={isActiveGeneration}
-        error={error}
+        error={error || historyError}
+        isHydrating={isHydrating}
         onSendMessage={handleSendMessage}
         onStopGeneration={handleStopGeneration}
         onReset={handleReset}

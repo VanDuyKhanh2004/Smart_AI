@@ -36,6 +36,7 @@ Navigate to `/api-docs` on a running instance to browse, test, and explore all e
 | Profile | `/api/profile` | Authenticated | User profile and avatar |
 | Appointments | `/api/appointments` | Mixed | Store appointment booking |
 | Dashboard | `/api/dashboard` | Admin | Admin analytics and statistics |
+| Chat | `/api/chat` | Authenticated | Conversation history list + detail (live chat is Socket.IO-only) |
 | Health | `/api/health` | Public | Health check endpoints |
 
 ## Authentication
@@ -51,6 +52,77 @@ Access tokens are short-lived (default 15 minutes). Use the `/api/auth/refresh` 
 ## Rate Limiting
 
 Rate limiting is enforced on the login endpoint (`/api/auth/login`) via Redis-backed token bucket (20 attempts per 15-minute window per IP).
+
+## Chat History (REST)
+
+Live chat messaging itself remains Socket.IO-only — **there is no `POST /api/chat`**. History is served over REST so it can reuse the existing `protect` + axios Bearer/refresh flow.
+
+Both endpoints require a Bearer JWT and always operate on the authenticated user's own conversations (`req.user.id` from the token); any client-supplied `userId` is ignored.
+
+### `GET /api/chat/conversations`
+
+List the authenticated user's active conversations (owned, `status: 'active'`, `messageCount > 0`). Summaries only — `messages[]` is never included. Sorted `lastMessageAt` desc (tie-break `_id` desc).
+
+Query params:
+- `limit` — page size, default `20`, max `50`
+- `cursor` — opaque base64url token returned as `nextCursor`; pass it to fetch the next page
+
+```json
+{
+  "success": true,
+  "data": {
+    "conversations": [
+      {
+        "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+        "messageCount": 4,
+        "lastMessageAt": "2026-08-07T12:00:00.000Z",
+        "preview": "Em ơi chiếc iPhone 15 đang giá bao nhiêu ạ?",
+        "createdAt": "2026-08-07T10:00:00.000Z",
+        "updatedAt": "2026-08-07T12:00:00.000Z"
+      }
+    ],
+    "nextCursor": null
+  }
+}
+```
+
+### `GET /api/chat/conversations/:sessionId`
+
+Fetch one owned conversation's full message history. `sessionId` must be a valid UUID (else `400` `INVALID_SESSION`). A missing **or** foreign session returns the same generic `404` `CONVERSATION_NOT_FOUND` so conversation ids cannot be enumerated. Only UI-needed metadata is returned — `ipAddress`/`userAgent`/debug fields are never exposed.
+
+```json
+{
+  "success": true,
+  "data": {
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "active",
+    "messageCount": 4,
+    "lastMessageAt": "2026-08-07T12:00:00.000Z",
+    "createdAt": "2026-08-07T10:00:00.000Z",
+    "updatedAt": "2026-08-07T12:00:00.000Z",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Em ơi chiếc iPhone 15 đang giá bao nhiêu ạ?",
+        "timestamp": "2026-08-07T11:59:00.000Z",
+        "clientMessageId": "c1"
+      },
+      {
+        "role": "assistant",
+        "content": "Dạ, iPhone 15 đang là 19.990.000đ ...",
+        "timestamp": "2026-08-07T12:00:00.000Z",
+        "clientMessageId": "a1",
+        "generationId": "a1",
+        "metadata": { "modelUsed": "openai" }
+      }
+    ]
+  }
+}
+```
+
+### Frontend persistence hints
+
+The browser uses two `localStorage` keys — **hints only, never the source of truth**: `SMART_AI_SELECTED_CHAT_SESSION` (the session to resume) and `SMART_AI_CHAT_RESTORE_MODE` (`'selected'` | `'new'`). After logout the mode is forced to `'new'` and the selected session cleared, so one browser can never hydrate a previous user's chat. See [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Common Error Responses
 

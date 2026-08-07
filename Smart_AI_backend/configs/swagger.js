@@ -330,6 +330,63 @@ const options = {
             updatedAt: { type: 'string', format: 'date-time' },
           },
         },
+        ConversationSummary: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            sessionId: { type: 'string', format: 'uuid' },
+            status: { type: 'string', enum: ['active', 'ended', 'archived'] },
+            messageCount: { type: 'integer' },
+            lastMessageAt: { type: 'string', format: 'date-time' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+            preview: { type: 'string', description: 'Truncated latest user message (optional)' },
+          },
+        },
+        ConversationSummaryList: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: true },
+            data: {
+              type: 'object',
+              properties: {
+                items: { type: 'array', items: { $ref: '#/components/schemas/ConversationSummary' } },
+                nextCursor: { type: 'string', nullable: true },
+              },
+            },
+          },
+        },
+        ConversationDetail: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: true },
+            data: {
+              type: 'object',
+              properties: {
+                sessionId: { type: 'string', format: 'uuid' },
+                status: { type: 'string', enum: ['active', 'ended', 'archived'] },
+                messageCount: { type: 'integer' },
+                lastMessageAt: { type: 'string', format: 'date-time' },
+                createdAt: { type: 'string', format: 'date-time' },
+                updatedAt: { type: 'string', format: 'date-time' },
+                messages: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      role: { type: 'string', enum: ['user', 'assistant', 'system'] },
+                      content: { type: 'string' },
+                      clientMessageId: { type: 'string', format: 'uuid' },
+                      generationId: { type: 'string', format: 'uuid' },
+                      timestamp: { type: 'string', format: 'date-time' },
+                      metadata: { type: 'object', additionalProperties: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     },
     paths: {
@@ -2288,6 +2345,63 @@ const options = {
           responses: {
             200: { description: 'Server is ready to accept requests' },
             503: { description: 'Server not ready' },
+          },
+        },
+      },
+
+      // ============================================================
+      // Chat History (REST, read-only)
+      // ============================================================
+      // Live chat messaging stays Socket.IO-only; there is deliberately no
+      // POST /api/chat. These routes restore owned conversation history.
+      '/api/chat/conversations': {
+        get: {
+          tags: ['Chat'],
+          summary: 'List owned active conversation summaries',
+          description:
+            'Returns only conversations owned by the authenticated user, ' +
+            'status=active and with at least one message, sorted by ' +
+            'lastMessageAt descending (ties broken by _id descending). ' +
+            'Summaries contain no message bodies.',
+          security: [{ BearerAuth: [] }],
+          parameters: [
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50 }, description: 'Max items (default 20, max 50)' },
+            { name: 'cursor', in: 'query', schema: { type: 'string' }, description: 'Opaque base64url cursor for the next page' },
+          ],
+          responses: {
+            200: {
+              description: 'Owned conversation summaries (no messages)',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ConversationSummaryList' },
+                },
+              },
+            },
+            401: { description: 'Not authenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          },
+        },
+      },
+      '/api/chat/conversations/{sessionId}': {
+        get: {
+          tags: ['Chat'],
+          summary: 'Get one owned conversation detail',
+          description:
+            'Returns the full owned conversation. A missing or foreign ' +
+            'session returns the same generic 404 and never reveals ownership.',
+          security: [{ BearerAuth: [] }],
+          parameters: [{ name: 'sessionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+          responses: {
+            200: {
+              description: 'Owned conversation detail',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ConversationDetail' },
+                },
+              },
+            },
+            400: { description: 'Malformed sessionId (UUID required)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+            401: { description: 'Not authenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+            404: { description: 'Missing or foreign session (generic)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           },
         },
       },

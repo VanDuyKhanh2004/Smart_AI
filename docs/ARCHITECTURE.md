@@ -176,10 +176,40 @@ Chat multi-turn context is Redis-backed (`services/contextService.js`) and scope
 
 Authenticated flows never read the legacy anonymous keys, so two users sharing a `sessionId` cannot share Redis context. TTL (default 30 min, `CHAT_CONTEXT_TTL_SECONDS`) and the "Redis-unavailable is non-fatal" behavior are unchanged.
 
+### Conversation History (REST) & Reload Restoration
+
+Live chat stays Socket.IO-only — there is **no `POST /api/chat`**. History is exposed over REST so it reuses the existing `protect` + axios Bearer/refresh flow. The REST layer is thin and read-only; it never bypasses the ownership written by the socket boundary.
+
+- **Endpoints** — `GET /api/chat/conversations` (list) and `GET /api/chat/conversations/:sessionId` (detail), mounted in `routes/chatRoutes.js` at `/api/chat` before the 404 handler; handled by `controllers/conversationController.js`.
+- **Identity** — both use `protect` and always filter by `req.user.id` from the JWT; a client-supplied `userId` is ignored. This matches the socket side, which writes `userId` from `socket.data.user.id` (an ObjectId string = `req.user.id`), so both transports address the same owned conversations.
+- **List contract** — owned + `status:'active'` + `messageCount > 0`; legacy documents without a `userId` are invisible. `$sort` `lastMessageAt desc, _id desc`; `$limit: limit+1` (default 20, max 50) to compute a `nextCursor`; cursor is opaque base64url JSON `{ lastMessageAt, _id }`. Summaries only — `messages[]`, `ipAddress`, `userAgent` never projected; `preview` truncated from the latest USER message (120 chars).
+- **Detail contract** — UUID-validated `sessionId` (else `BadRequestError('INVALID_SESSION')`); a missing **or** foreign session returns the same generic `NotFoundError('CONVERSATION_NOT_FOUND')` so ids cannot be enumerated; explicit DTO mapper whitelists only UI-needed assistant metadata (`modelUsed, responseType, skipRAG, processingTime, tokensUsed, clarifiedQuery, originalQuery`); user metadata and `ipAddress`/`userAgent`/debug fields are never returned.
+- **Error shape** — centralized `{ success:false, error:{ code, message } }` via the existing `AppError` hierarchy.
+
+#### Frontend persistence hints (localStorage)
+
+The browser records two `localStorage` keys that are **hints only**, never the source of truth:
+- `SMART_AI_SELECTED_CHAT_SESSION` — the session to resume.
+- `SMART_AI_CHAT_RESTORE_MODE` — `'selected'` | `'new'`.
+
+`src/services/chatPersistence.ts` exposes get/set/clear helpers plus `clearChatPersistence()`, which clears the selected session **and explicitly writes mode `'new'`** — so after logout an unset key never falls back to `'selected'`. `clearChatPersistence()` is invoked on logout, failed refresh, and failed `initialize()` in `authStore`; a successful refresh does **not** clear it. Result: on the same browser, user B can never hydrate user A's session.
+
+#### Hydration flow (`FloatingChat.handleConnected`)
+
+On mount/connect, exactly once per mount, the component consults the hints:
+1. If restore mode is `'new'` (or no selected session), it only adds the welcome greeting — the previous session is never restored, and a reload **before** the first send after a New Chat does not resurrect the old chat.
+2. If mode is `'selected'` and a selected session exists, `getConversation` (REST) is fetched, rows are mapped by `hydrateMessages()` (`chatHistory.service.ts`) into `ChatMessage`s, `chatService.restoreSession()` adopts the id, and content is rendered — the welcome is **not** shown over hydrated content.
+3. Hydration failure (404/foreign/network) → `resetSession()` (clears the irrecoverable hint), welcome shown, and a `historyError` notice renders above the composer; sending is blocked while hydration is in flight.
+4. The first `accepted`/`processing` send ack persists the current session (`persistCurrentSession()`), so a reload after the first interaction resumes the same conversation. New Chat (`resetSession()`) sets mode `'new'` and clears selected so the next reload starts fresh.
+
+Hydrated messages are rendered defensively: never retryable/failed/cancelled/loading, content-only, with UI-only fallback ids (`clientMessageId || generationId || :hydrated:<uuid>`), and non-user/assistant + blank content dropped.
+
 ### Tests
 - `tests/socketAuth.test.js` — real in-memory HTTP + Socket.IO server with `socket.io-client` (13 scenarios).
 - `frontend/src/tests/ChatServiceAuth.test.ts` — mocked `socket.io-client` (7 scenarios).
 - `tests/chatConversationOwnership.test.js` — 18 ownership/isolation scenarios (no real MongoDB/Redis/LLM).
+- `tests/chatHistory.test.js` — 28 REST history scenarios (cursor/limit parsing, pipeline filters, DTO mapping, metadata whitelist, ownership, generic 404, no `messages`/`ipAddress`/`userAgent` leak).
+- `frontend/src/tests/chatPersistence.test.ts`, `src/tests/ChatServicePersistence.test.ts`, `src/tests/FloatingChatHydration.test.tsx`, `src/tests/AuthSocketSync.test.ts` — persistence hints, session restore/reset, hydration flow, and logout/refresh isolation.
 
 ## Database
 

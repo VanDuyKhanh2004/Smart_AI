@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { authService } from '@/services/auth.service';
 import { useCartStore } from '@/stores/cartStore';
 import { useWishlistStore } from '@/stores/wishlistStore';
+import { clearChatPersistence } from '@/services/chatPersistence';
 import type { User } from '@/types/auth.type';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
@@ -125,6 +126,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
 
+      // Clear chat session persistence so a different user on this browser can
+      // never hydrate the previous user's conversation after logout.
+      clearChatPersistence();
+
       // Disconnect any live chat socket so it cannot keep using the cleared token.
       try {
         const { default: chatService } = await import('@/services/chat.service');
@@ -172,6 +177,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       // Refresh failed, clear auth state
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
+
+      // A failed refresh is effectively a logged-out state: the access token is
+      // gone and the user must sign in again, so clear any owned chat hints.
+      clearChatPersistence();
 
       // Disconnect the chat socket so it cannot keep using the cleared token.
       try {
@@ -285,6 +294,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       // If we reach here, the interceptor's refresh failed and
       // localStorage tokens have been cleared by the interceptor.
       // No need to retry refresh — just set unauthenticated state.
+      // Clear owned chat persistence so this browser never resumes a stale
+      // selected conversation for an unauthenticated state.
+      clearChatPersistence();
       // Disconnect the chat socket so it cannot keep using the cleared token.
       try {
         const { default: chatService } = await import('@/services/chat.service');
