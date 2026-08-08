@@ -1,4 +1,6 @@
 const request = require('supertest');
+const { hashToken } = require('../utils/tokenHash');
+const enqueueVerificationEmail = require('../services/emailQueueService').enqueueVerificationEmail;
 
 process.env.JWT_SECRET = 'test-auth-secret';
 process.env.JWT_REFRESH_SECRET = 'test-auth-refresh-secret';
@@ -862,6 +864,7 @@ describe('Auth Controller — centralized error handling', () => {
    * ================================ */
   describe('GET /api/auth/verify-email', () => {
     it('should verify email successfully (JSON)', async () => {
+      mockUserUnverified.emailVerificationExpires = new Date(Date.now() + 60 * 60 * 1000);
       mockFindOne(mockUserUnverified);
 
       const res = await request(app)
@@ -896,6 +899,270 @@ describe('Auth Controller — centralized error handling', () => {
 
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('verify-email?status=error');
+    });
+  });
+
+  /* =====================================================
+   * Email verification token lifecycle
+   * ===================================================== */
+  describe('Email verification token lifecycle', () => {
+    const HOUR = 60 * 60 * 1000;
+    const extractToken = (url) => {
+      const m = url.match(/[?&]token=([0-9a-f]{64})/);
+      return m ? m[1] : null;
+    };
+    const safeToJSON = jest.fn().mockReturnValue({
+      id: USER_ID,
+      name: 'Lifecycle',
+      email: 'lifecycle@test.com',
+      emailVerified: false,
+      loginMethod: 'password',
+    });
+
+    beforeEach(() => {
+      enqueueVerificationEmail.mockClear();
+    });
+
+    it('registration stores the SHA-256 of the emailed raw token with a future expiry', async () => {
+      const newUser = {
+        ...mockUser,
+        email: 'lifecycle@test.com',
+        emailVerified: false,
+        emailVerificationToken: null,
+        emailVerificationExpires: null,
+        toJSON: safeToJSON,
+      };
+      mockFindOne(null);
+      User.create.mockResolvedValue(newUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'lifecycle@test.com', password: 'password123' });
+
+      expect(res.status).toBe(201);
+      expect(enqueueVerificationEmail).toHaveBeenCalledTimes(1);
+      const [sentUser, verifyUrl] = enqueueVerificationEmail.mock.calls[0];
+      const raw = extractToken(verifyUrl);
+      expect(raw).toMatch(/^[0-9a-f]{64}$/);
+      expect(sentUser.emailVerificationToken).toBe(hashToken(raw));
+      expect(sentUser.emailVerificationToken).not.toBe(raw);
+      const ttlMs = new Date(sentUser.emailVerificationExpires).getTime() - Date.now();
+      expect(ttlMs).toBeGreaterThan(0);
+      expect(ttlMs).toBeLessThanOrEqual(24 * HOUR);
+    });
+
+    it('registration response does not expose token, hash or expiry', async () => {
+      const newUser = {
+        ...mockUser,
+        email: 'lifecycle@test.com',
+        emailVerified: false,
+        emailVerificationToken: 'secret-stored-hash',
+        emailVerificationExpires: new Date(Date.now() + HOUR),
+        toJSON: safeToJSON,
+      };
+      mockFindOne(null);
+      User.create.mockResolvedValue(newUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'lifecycle@test.com', password: 'password123' });
+
+      expect(res.status).toBe(201);
+      const payload = JSON.stringify(res.body);
+      expect(payload).not.toContain('emailVerificationToken');
+      expect(payload).not.toContain('emailVerificationExpires');
+      expect(payload).not.toContain('deadbeef-stored-hash');
+    });
+
+    it('expired token returns VERIFICATION_TOKEN_EXPIRED and does not verify', async () => {
+      const expired = {
+        ...mockUserUnverified,
+        emailVerified: false,
+        emailVerificationToken: 'some-hash',
+        emailVerificationExpires: new Date(Date.now() - 1000),
+      };
+      mockFindOne(expired);
+
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'some-token', email: 'user@test.com' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VERIFICATION_TOKEN_EXPIRED');
+      expect(expired.emailVerified).toBe(false);
+    });
+
+    it('a token expiring exactly at now fails as expired', async () => {
+      const exact = {
+        ...mockUserUnverified,
+        emailVerified: false,
+        emailVerificationToken: 'some-hash',
+        emailVerificationExpires: new Date(Date.now()),
+      };
+      mockFindOne(exact);
+
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'some-token', email: 'user@test.com' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VERIFICATION_TOKEN_EXPIRED');
+    });
+
+    it('verification succeeds within TTL and immediately clears the credential (one-time use)', async () => {
+      const doc = {
+        ...mockUserUnverified,
+        emailVerified: false,
+        emailVerificationToken: 'some-hash',
+        emailVerificationExpires: new Date(Date.now() + HOUR),
+        save: jest.fn().mockResolvedValue(),
+      };
+      mockFindOne(doc);
+
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'some-token', email: 'user@test.com' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(doc.emailVerified).toBe(true);
+      expect(doc.emailVerificationToken).toBeUndefined();
+      expect(doc.emailVerificationExpires).toBeUndefined();
+      expect(doc.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('replaying a consumed link returns ALREADY_VERIFIED (200) instead of re-verifying', async () => {
+      mockFindOne(null, { ...mockUser, emailVerified: true });
+
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'old-consumed-token', email: 'user@test.com' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe('ALREADY_VERIFIED');
+    });
+
+    it('resend issues a new raw token and overwrites the stored credential', async () => {
+      const user = { ...mockUserUnverified, emailVerified: false, email: 'resend@test.com' };
+
+      mockFindOne(user);
+      await request(app).post('/api/auth/resend-verification').send({ email: 'resend@test.com' });
+      const tokenA = extractToken(enqueueVerificationEmail.mock.calls[0][1]);
+
+      mockFindOne(user);
+      await request(app).post('/api/auth/resend-verification').send({ email: 'resend@test.com' });
+      const tokenB = extractToken(enqueueVerificationEmail.mock.calls[1][1]);
+
+      expect(tokenA).not.toBe(tokenB);
+      expect(user.emailVerificationToken).toBe(hashToken(tokenB));
+
+      // the superseded A no longer exists in the DB -> invalid/superseded
+      mockFindOne(null, { ...mockUser, emailVerified: false, email: 'resend@test.com' });
+      const resA = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: tokenA, email: 'resend@test.com' });
+      expect(resA.status).toBe(400);
+      expect(resA.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+
+      // the newest B still verifies
+      mockFindOne(user);
+      const resB = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: tokenB, email: 'resend@test.com' });
+      expect(resB.status).toBe(200);
+      expect(resB.body.success).toBe(true);
+    });
+
+    it('only the newest of several resends can verify', async () => {
+      const user = { ...mockUserUnverified, emailVerified: false, email: 'multi@test.com' };
+      const tokens = [];
+      for (let i = 0; i < 3; i += 1) {
+        mockFindOne(user);
+        await request(app).post('/api/auth/resend-verification').send({ email: 'multi@test.com' });
+        tokens.push(extractToken(enqueueVerificationEmail.mock.calls[i][1]));
+      }
+      expect(new Set(tokens).size).toBe(3);
+      expect(user.emailVerificationToken).toBe(hashToken(tokens[2]));
+
+      // an older link is already superseded -> invalid
+      mockFindOne(null, { ...mockUser, emailVerified: false, email: 'multi@test.com' });
+      const resOld = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: tokens[1], email: 'multi@test.com' });
+      expect(resOld.status).toBe(400);
+      expect(resOld.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+
+      // newest link verifies
+      mockFindOne(user);
+      const resNew = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: tokens[2], email: 'multi@test.com' });
+      expect(resNew.status).toBe(200);
+      expect(resNew.body.success).toBe(true);
+    });
+
+    it('random or unknown token returns INVALID_VERIFICATION_TOKEN', async () => {
+      mockFindOne(null);
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'garbage-not-a-token', email: 'user@test.com' });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+    });
+
+    it('an account cannot be verified by another user\u2019s link', async () => {
+      const victim = { ...mockUserUnverified, emailVerified: false, email: 'victim@test.com' };
+      mockFindOne(null);
+
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'someone-elses-token', email: 'victim@test.com' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+      expect(victim.emailVerified).toBe(false);
+    });
+
+    it('verification responses never expose the raw token, hash or expiry', async () => {
+      const doc = {
+        ...mockUserUnverified,
+        emailVerificationToken: 'stored-hash',
+        emailVerificationExpires: new Date(Date.now() + HOUR),
+      };
+      mockFindOne(doc);
+
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'some-token', email: 'user@test.com' });
+
+      const payload = JSON.stringify(res.body);
+      expect(res.status).toBe(200);
+      expect(payload).not.toContain('stored-hash');
+      expect(payload).not.toContain('emailVerificationExpires');
+
+      mockFindOne(null);
+      const bad = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: 'garbage', email: 'user@test.com' });
+      const badPayload = JSON.stringify(bad.body);
+      expect(bad.status).toBe(400);
+      expect(badPayload).not.toContain('emailVerificationToken');
+      expect(badPayload).not.toContain('emailVerificationExpires');
+    });
+
+    it('login succeeds once the account is verified', async () => {
+      const verified = { ...mockUser, emailVerified: true };
+      User.findByEmailWithPassword.mockResolvedValue(verified);
+      verified.comparePassword = jest.fn().mockResolvedValue(true);
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'user@test.com', password: 'pw' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.accessToken).toBeDefined();
+      expect(res.body.success).toBe(true);
     });
   });
 

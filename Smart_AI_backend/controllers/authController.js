@@ -22,6 +22,11 @@ const {
   NotFoundError,
   ConflictError,
 } = require('../utils/errors');
+const { hashToken } = require('../utils/tokenHash');
+const {
+  EMAIL_VERIFICATION_TOKEN_TTL_MS,
+  PASSWORD_RESET_TOKEN_TTL_MS,
+} = require('../configs/tokenConfig');
 
 // Validate required environment variables for Google Login
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -44,10 +49,8 @@ const client = GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID'
 
 const createEmailVerificationToken = (user) => {
   const rawToken = crypto.randomBytes(32).toString('hex');
-  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-  user.emailVerificationToken = hashedToken;
-  user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
+  user.emailVerificationToken = hashToken(rawToken);
+  user.emailVerificationExpires = new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS);
 
   return rawToken;
 };
@@ -60,10 +63,8 @@ const buildVerifyUrl = (token, email) => {
 
 const createPasswordResetToken = (user) => {
   const rawToken = crypto.randomBytes(32).toString('hex');
-  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-  user.passwordResetToken = hashedToken;
-  user.passwordResetExpires = Date.now() + 60 * 60 * 1000;
+  user.passwordResetToken = hashToken(rawToken);
+  user.passwordResetExpires = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS);
 
   return rawToken;
 };
@@ -433,66 +434,75 @@ const verifyEmail = asyncHandler(async (req, res) => {
     return res.redirect(302, redirectUrl);
   };
 
-  try {
-    if (!token) {
-      if (wantsHtml) {
-        return redirectToFrontend('error', 'Khong tim thay token xac nhan');
-      }
-      throw new BadRequestError('Token la bat buoc', 'VALIDATION_ERROR');
-    }
-
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    const user = await User.findOne({
-      emailVerificationToken: hashedToken,
-      emailVerificationExpires: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      if (email) {
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
-        if (existingUser && existingUser.emailVerified) {
-          if (wantsHtml) {
-            return redirectToFrontend('success', 'Email da duoc kich hoat');
-          }
-          return res.status(200).json({
-            success: true,
-            message: 'Email da duoc kich hoat'
-          });
-        }
-      }
-      if (wantsHtml) {
-        return redirectToFrontend('error', 'Token khong hop le hoac da het han');
-      }
-      throw new BadRequestError('Token khong hop le hoac da het han', 'INVALID_TOKEN');
-    }
-
-    user.emailVerified = true;
-    user.emailVerificationToken = undefined;
-    user.emailVerificationExpires = undefined;
-
-    if (!user.welcomeEmailSent) {
-      enqueueWelcomeEmail(user, req.requestId);
-      user.welcomeEmailSent = true;
-      user.firstLoginAt = new Date();
-    }
-
-    await user.save({ validateBeforeSave: false });
-
+  if (!token) {
     if (wantsHtml) {
-      return redirectToFrontend('success', 'Xac nhan email thanh cong');
+      return redirectToFrontend('error', 'Khong tim thay token xac nhan');
     }
-
-    res.status(200).json({
-      success: true,
-      message: 'Xac nhan email thanh cong'
-    });
-  } catch (err) {
-    if (wantsHtml) {
-      return redirectToFrontend('error', err.message || 'Loi xac nhan email');
-    }
-    throw err;
+    throw new BadRequestError('Token la bat buoc', 'VALIDATION_ERROR');
   }
+
+  const hashedToken = hashToken(token);
+
+  // Match on the stored hash alone, then classify expiry separately so that an
+  // expired token and a superseded/invalid token return distinct, stable codes.
+  const user = await User.findOne({ emailVerificationToken: hashedToken })
+    .select('+emailVerificationToken +emailVerificationExpires');
+
+  if (!user) {
+    if (email) {
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
+      if (existingUser && existingUser.emailVerified) {
+        // Replay of a consumed link, or a link for an account already verified
+        // through another route. Cannot be "verified again" — report deterministically.
+        if (wantsHtml) {
+          return redirectToFrontend('success', 'Email da duoc kich hoat');
+        }
+        return res.status(200).json({
+          success: true,
+          message: 'Email da duoc kich hoat',
+          data: { status: 'ALREADY_VERIFIED' },
+        });
+      }
+    }
+    if (wantsHtml) {
+      return redirectToFrontend('invalid', 'Lien ket xac nhan khong con hop le. Vui long su dung email xac nhan moi nhat.');
+    }
+    throw new BadRequestError(
+      'Liên kết xác nhận không còn hợp lệ. Vui lòng sử dụng email xác nhận mới nhất.',
+      'INVALID_VERIFICATION_TOKEN'
+    );
+  }
+
+  if (new Date(user.emailVerificationExpires).getTime() <= Date.now()) {
+    if (wantsHtml) {
+      return redirectToFrontend('expired', 'Lien ket xac nhan da het han. Vui long yeu cau gui lai email xac nhan.');
+    }
+    throw new BadRequestError(
+      'Liên kết xác nhận đã hết hạn. Vui lòng yêu cầu gửi lại email xác nhận.',
+      'VERIFICATION_TOKEN_EXPIRED'
+    );
+  }
+
+  user.emailVerified = true;
+  user.emailVerificationToken = undefined;
+  user.emailVerificationExpires = undefined;
+
+  if (!user.welcomeEmailSent) {
+    enqueueWelcomeEmail(user, req.requestId);
+    user.welcomeEmailSent = true;
+    user.firstLoginAt = new Date();
+  }
+
+  await user.save({ validateBeforeSave: false });
+
+  if (wantsHtml) {
+    return redirectToFrontend('success', 'Xac nhan email thanh cong');
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Xac nhan email thanh cong'
+  });
 });
 
 /**

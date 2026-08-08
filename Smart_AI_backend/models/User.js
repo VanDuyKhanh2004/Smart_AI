@@ -196,13 +196,13 @@ userSchema.methods.resetLoginAttempts = async function() {
 
 // Method to create unlock token
 userSchema.methods.createUnlockToken = function() {
-  const crypto = require('crypto');
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-  
-  this.unlockToken = hashedToken;
-  this.unlockTokenExpires = Date.now() + 60 * 60 * 1000; // 1 hour
-  
+  const { hashToken } = require('../utils/tokenHash');
+  const { UNLOCK_TOKEN_TTL_MS } = require('../configs/tokenConfig');
+  const rawToken = require('crypto').randomBytes(32).toString('hex');
+
+  this.unlockToken = hashToken(rawToken);
+  this.unlockTokenExpires = new Date(Date.now() + UNLOCK_TOKEN_TTL_MS);
+
   return rawToken;
 };
 
@@ -218,11 +218,10 @@ userSchema.statics.findByEmailWithRefreshToken = function(email) {
 
 // Static method to find user by unlock token
 userSchema.statics.findByUnlockToken = function(token) {
-  const crypto = require('crypto');
-  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-  
+  const { hashToken } = require('../utils/tokenHash');
+
   return this.findOne({
-    unlockToken: hashedToken,
+    unlockToken: hashToken(token),
     unlockTokenExpires: { $gt: Date.now() }
   }).select('+unlockToken +unlockTokenExpires +loginAttempts +lockUntil');
 };

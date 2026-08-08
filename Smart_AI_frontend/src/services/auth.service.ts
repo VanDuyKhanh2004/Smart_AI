@@ -38,9 +38,12 @@ export const authService = {
     return response.data.data.user;
   },
 
-  async verifyEmail(token: string, email?: string): Promise<{ success: boolean; message: string }> {
+  async verifyEmail(
+    token: string,
+    email?: string
+  ): Promise<{ success: boolean; message: string; data?: { status?: 'VERIFIED' | 'ALREADY_VERIFIED' } }> {
     const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
-    const response = await apiClient.get<{ success: boolean; message: string }>(
+    const response = await apiClient.get<{ success: boolean; message: string; data?: { status?: 'VERIFIED' | 'ALREADY_VERIFIED' } }>(
       `/auth/verify-email?token=${encodeURIComponent(token)}${emailParam}`
     );
     return response.data;
