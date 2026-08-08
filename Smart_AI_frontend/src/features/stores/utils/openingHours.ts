@@ -68,8 +68,11 @@ export function getStoreOpenStatus(
   now: Date = new Date(),
   timeZone: string = STORE_TIMEZONE
 ): StoreOpenStatus {
-  const safeNow = Number.isNaN(now.getTime()) ? new Date() : now;
-  const { today, minutes: currentMinutes } = getLocalTime(safeNow, timeZone);
+  if (Number.isNaN(now.getTime())) {
+    return { isOpen: false, today: 'monday' };
+  }
+
+  const { today, minutes: currentMinutes } = getLocalTime(now, timeZone);
 
   const hours = businessHours?.[today];
 
