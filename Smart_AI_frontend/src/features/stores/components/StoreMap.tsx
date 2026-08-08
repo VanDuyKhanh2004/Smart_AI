@@ -128,7 +128,7 @@ export function StoreMap({
   };
 
   return (
-    <div className="h-full w-full rounded-lg overflow-hidden border">
+    <div className="relative z-0 h-full w-full rounded-lg overflow-hidden border">
       <MapContainer
         center={getInitialCenter()}
         zoom={13}

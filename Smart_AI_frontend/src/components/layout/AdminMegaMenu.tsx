@@ -116,6 +116,7 @@ const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose }) => {
         absolute top-full left-1/2 -translate-x-1/2 mt-2
         w-[500px] p-4
         bg-popover border border-border rounded-lg shadow-lg
+        z-50
         animate-in fade-in-0 zoom-in-95 duration-200
         origin-top
       "
