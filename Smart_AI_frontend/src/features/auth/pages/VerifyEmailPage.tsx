@@ -9,7 +9,7 @@ import { useAuthStore } from '@/stores/authStore';
 const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'success' | 'already' | 'expired' | 'invalid' | 'error'>('loading');
   const [message, setMessage] = useState('');
   const [countdown, setCountdown] = useState(5);
   const [email, setEmail] = useState('');
@@ -18,8 +18,9 @@ const VerifyEmailPage: React.FC = () => {
   const { resendVerification } = useAuthStore();
 
   const isLoading = status === 'loading';
-  const isSuccess = status === 'success';
-  const isError = status === 'error';
+  const isSuccess = status === 'success' || status === 'already';
+  const isError = status === 'expired' || status === 'invalid' || status === 'error';
+  const needsResend = status === 'expired' || status === 'invalid' || status === 'error';
 
   useEffect(() => {
     const token = searchParams.get('token');
@@ -31,9 +32,27 @@ const VerifyEmailPage: React.FC = () => {
       setEmail(emailParam);
     }
 
-    if (statusParam === 'success' || statusParam === 'error') {
-      setStatus(statusParam);
-      setMessage(messageParam || (statusParam === 'success' ? 'Xac nhan email thanh cong.' : 'Xac nhan email that bai.'));
+    if (statusParam === 'success') {
+      setStatus('success');
+      setMessage(messageParam || 'Xac nhan email thanh cong.');
+      return;
+    }
+
+    if (statusParam === 'expired') {
+      setStatus('expired');
+      setMessage(messageParam || 'Liên kết xác nhận đã hết hạn. Vui lòng yêu cầu gửi lại email xác nhận.');
+      return;
+    }
+
+    if (statusParam === 'invalid') {
+      setStatus('invalid');
+      setMessage(messageParam || 'Liên kết xác nhận không còn hợp lệ. Vui lòng sử dụng email xác nhận mới nhất.');
+      return;
+    }
+
+    if (statusParam === 'error') {
+      setStatus('error');
+      setMessage(messageParam || 'Xac nhan email that bai.');
       return;
     }
 
@@ -46,18 +65,36 @@ const VerifyEmailPage: React.FC = () => {
     authService
       .verifyEmail(token, emailParam || undefined)
       .then((response) => {
+        if (response.data?.status === 'ALREADY_VERIFIED') {
+          setStatus('already');
+          setMessage(response.message || 'Email da duoc kich hoat.');
+          return;
+        }
         setStatus('success');
         setMessage(response.message);
       })
       .catch((error) => {
         const apiMessage = error?.response?.data?.error?.message;
-        setStatus('error');
-        setMessage(apiMessage || 'Xac nhan email that bai.');
+        const errorCode = error?.response?.data?.error?.code;
+        const fallbackMsgs: Record<string, string> = {
+          VERIFICATION_TOKEN_EXPIRED:
+            'Liên kết xác nhận đã hết hạn. Vui lòng yêu cầu gửi lại email xác nhận.',
+          INVALID_VERIFICATION_TOKEN:
+            'Liên kết xác nhận không còn hợp lệ. Vui lòng sử dụng email xác nhận mới nhất.',
+        };
+        if (errorCode === 'VERIFICATION_TOKEN_EXPIRED') {
+          setStatus('expired');
+        } else if (errorCode === 'INVALID_VERIFICATION_TOKEN') {
+          setStatus('invalid');
+        } else {
+          setStatus('error');
+        }
+        setMessage(apiMessage || fallbackMsgs[errorCode] || 'Xac nhan email that bai.');
       });
   }, [searchParams]);
 
   useEffect(() => {
-    if (status !== 'success') {
+    if (status !== 'success' && status !== 'already') {
       return undefined;
     }
 
@@ -170,7 +207,7 @@ const VerifyEmailPage: React.FC = () => {
               </div>
             )}
 
-            {isError && (
+            {needsResend && (
               <div className="space-y-3 rounded-xl border border-rose-200/70 bg-rose-50/60 p-4 text-sm text-rose-700">
                 <p>Co the link da het han hoac khong dung. Ban co the gui lai email xac nhan o ben duoi.</p>
                 <div className="space-y-2">

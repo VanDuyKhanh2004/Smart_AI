@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuthStore, type RegisterResult } from '@/stores/authStore';
 
 interface FormErrors {
   name?: string;
@@ -17,7 +17,7 @@ const RegisterForm: React.FC = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [registeredResult, setRegisteredResult] = useState<RegisterResult | null>(null);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
   
@@ -57,7 +57,7 @@ const RegisterForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
-    setSuccessMessage(null);
+    setRegisteredResult(null);
     setResendMessage(null);
     setResendError(null);
     
@@ -66,8 +66,8 @@ const RegisterForm: React.FC = () => {
     }
     
     try {
-      const message = await register(name, email, password);
-      setSuccessMessage(message);
+      const result = await register(name, email, password);
+      setRegisteredResult(result);
     } catch {
       // Error is handled by the store
     }
@@ -78,7 +78,7 @@ const RegisterForm: React.FC = () => {
     setResendError(null);
 
     if (!email.trim()) {
-      setResendError('Vui long nhap email de gui lai');
+      setResendError('Vui lòng nhập email để gửi lại');
       return;
     }
 
@@ -86,7 +86,7 @@ const RegisterForm: React.FC = () => {
       const message = await resendVerification(email);
       setResendMessage(message);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Gui lai that bai';
+      const message = err instanceof Error ? err.message : 'Gửi lại thất bại';
       setResendError(message);
     }
   };
@@ -197,9 +197,19 @@ const RegisterForm: React.FC = () => {
             </div>
           )}
 
-          {successMessage && (
-            <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
-              {successMessage}
+          {registeredResult && (
+            <div
+              className="space-y-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-700"
+              data-testid="register-success"
+            >
+              <p className="font-semibold">
+                Đăng ký thành công. Vui lòng kiểm tra email và xác nhận tài khoản trước khi đăng nhập.
+              </p>
+              <p>
+                Chúng tôi đã gửi email xác nhận đến{' '}
+                <span className="font-medium">{registeredResult.email}</span>.
+              </p>
+              <p>Bạn cần xác nhận email trước khi có thể đăng nhập và sử dụng tài khoản.</p>
             </div>
           )}
 
@@ -226,7 +236,7 @@ const RegisterForm: React.FC = () => {
             )}
           </Button>
 
-          {successMessage && (
+          {registeredResult && (
             <Button
               type="button"
               variant="outline"
@@ -234,7 +244,7 @@ const RegisterForm: React.FC = () => {
               onClick={handleResend}
               disabled={isLoading}
             >
-              Gui lai email xac nhan
+              Gửi lại email xác nhận
             </Button>
           )}
         </form>
