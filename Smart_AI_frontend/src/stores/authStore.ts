@@ -14,11 +14,18 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  errorCode: string | null;
+}
+
+export interface RegisterResult {
+  message: string;
+  email: string;
+  requiresEmailVerification: boolean;
 }
 
 interface AuthActions {
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<string>;
+  register: (name: string, email: string, password: string) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<boolean>;
   clearError: () => void;
@@ -38,22 +45,24 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   isAuthenticated: false,
   isLoading: false,
   error: null,
+  errorCode: null,
 
   login: async (email: string, password: string) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, errorCode: null });
     try {
       const response = await authService.login({ email, password });
       const { user, accessToken, refreshToken } = response.data;
-      
+
       localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
       localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-      
+
       set({
         user,
         accessToken,
         isAuthenticated: true,
         isLoading: false,
         error: null,
+        errorCode: null,
       });
 
       // Sync the chat socket with the fresh access token so it reconnects with auth.
@@ -74,32 +83,42 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Login failed';
-      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string } } } };
+      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string; code?: string } } } };
+      const errorCode = axiosError.response?.data?.error?.code || null;
+      const errorMessage =
+        errorCode === 'EMAIL_NOT_VERIFIED'
+          ? 'Tài khoản chưa được xác nhận. Vui lòng kiểm tra email để xác nhận tài khoản.'
+          : axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message;
       set({
         isLoading: false,
-        error: axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message,
+        errorCode,
+        error: errorMessage,
       });
       throw error;
     }
   },
 
   register: async (name: string, email: string, password: string) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, errorCode: null });
     try {
       const response = await authService.register({ name, email, password });
       const { message } = response;
+      const registeredEmail = response.data?.email || email;
+      const requiresEmailVerification = response.data?.requiresEmailVerification ?? true;
 
       set({
         isLoading: false,
         error: null,
+        errorCode: null,
       });
 
-      return message;
+      return { message, email: registeredEmail, requiresEmailVerification };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Registration failed';
-      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string } } } };
+      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string; code?: string } } } };
       set({
         isLoading: false,
+        errorCode: axiosError.response?.data?.error?.code || null,
         error: axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message,
       });
       throw error;
@@ -148,6 +167,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         accessToken: null,
         isAuthenticated: false,
         error: null,
+        errorCode: null,
       });
     }
   },
@@ -194,13 +214,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         user: null,
         accessToken: null,
         isAuthenticated: false,
+        errorCode: null,
       });
       return false;
     }
   },
 
   clearError: () => {
-    set({ error: null });
+    set({ error: null, errorCode: null });
   },
 
   setAccessToken: (token: string) => {
@@ -217,6 +238,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       accessToken,
       isAuthenticated: true,
       error: null,
+      errorCode: null,
     });
 
     // Sync the chat socket with the fresh access token (Google login).
@@ -309,6 +331,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         accessToken: null,
         isAuthenticated: false,
         isLoading: false,
+        errorCode: null,
       });
     }
   },

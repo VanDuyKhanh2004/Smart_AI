@@ -216,6 +216,170 @@ describe('Auth Controller — centralized error handling', () => {
         { field: 'email', message: 'Email là bắt buộc' },
       ]);
     });
+
+    it('should create an unverified account and trigger a verification email', async () => {
+      const { enqueueVerificationEmail } = require('../services/emailQueueService');
+      const newUser = {
+        ...mockUser,
+        email: 'new@test.com',
+        emailVerified: false,
+        toJSON: jest.fn().mockReturnValue({
+          id: USER_ID,
+          name: 'Test User',
+          email: 'new@test.com',
+          emailVerified: false,
+          loginMethod: 'password',
+        }),
+      };
+      mockFindOne(null);
+      User.create.mockResolvedValue(newUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'new@test.com', password: 'password123' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.email).toBe('new@test.com');
+      expect(res.body.data.requiresEmailVerification).toBe(true);
+      expect(res.body.data.user.emailVerified).toBe(false);
+      expect(enqueueVerificationEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('verification email URL uses the configured frontend base and /verify-email route', async () => {
+      const { enqueueVerificationEmail } = require('../services/emailQueueService');
+      const prev = process.env.FRONTEND_URL;
+      process.env.FRONTEND_URL = 'https://app.example.com';
+      try {
+        const newUser = {
+          ...mockUser,
+          email: 'verify@test.com',
+          emailVerified: false,
+          toJSON: jest.fn().mockReturnValue({
+            id: USER_ID,
+            name: 'Test User',
+            email: 'verify@test.com',
+            emailVerified: false,
+            loginMethod: 'password',
+          }),
+        };
+        mockFindOne(null);
+        User.create.mockResolvedValue(newUser);
+
+        const res = await request(app)
+          .post('/api/auth/register')
+          .send({ name: 'Test User', email: 'verify@test.com', password: 'password123' });
+
+        expect(res.status).toBe(201);
+        expect(enqueueVerificationEmail).toHaveBeenCalledTimes(1);
+        const [sentUser, verifyUrl] = enqueueVerificationEmail.mock.calls[0];
+        expect(sentUser.email).toBe('verify@test.com');
+        expect(verifyUrl).toMatch(/^https:\/\/app\.example\.com\/verify-email\?token=[0-9a-f]{64}&email=verify%40test\.com$/);
+        expect(verifyUrl).not.toContain('localhost');
+      } finally {
+        if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
+      }
+    });
+
+    it('verification email URL url-encodes the email query param', async () => {
+      const { enqueueVerificationEmail } = require('../services/emailQueueService');
+      const prev = process.env.FRONTEND_URL;
+      process.env.FRONTEND_URL = 'https://prod.shop.example';
+      const email = 'plus+user@test.com';
+      try {
+        const newUser = {
+          ...mockUser,
+          email,
+          emailVerified: false,
+          toJSON: jest.fn().mockReturnValue({
+            id: USER_ID,
+            name: 'Test User',
+            email,
+            emailVerified: false,
+            loginMethod: 'password',
+          }),
+        };
+        mockFindOne(null);
+        User.create.mockResolvedValue(newUser);
+
+        await request(app)
+          .post('/api/auth/register')
+          .send({ name: 'Test User', email, password: 'password123' });
+
+        expect(enqueueVerificationEmail).toHaveBeenCalledTimes(1);
+        const [, verifyUrl] = enqueueVerificationEmail.mock.calls[0];
+        expect(verifyUrl).toMatch(/^https:\/\/prod\.shop\.example\/verify-email\?token=[0-9a-f]{64}&email=plus%2Buser%40test\.com$/);
+        expect(verifyUrl).toContain(`email=${encodeURIComponent(email)}`);
+        expect(verifyUrl).not.toContain('plus+user@test.com');
+      } finally {
+        if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
+      }
+    });
+
+    it('verification URL normalizes a trailing-slash FRONTEND_URL', async () => {
+      const { enqueueVerificationEmail } = require('../services/emailQueueService');
+      const prev = process.env.FRONTEND_URL;
+      process.env.FRONTEND_URL = 'https://app.example.com/';
+      try {
+        const newUser = {
+          ...mockUser,
+          email: 'trail@test.com',
+          emailVerified: false,
+          toJSON: jest.fn().mockReturnValue({
+            id: USER_ID,
+            name: 'Test User',
+            email: 'trail@test.com',
+            emailVerified: false,
+            loginMethod: 'password',
+          }),
+        };
+        mockFindOne(null);
+        User.create.mockResolvedValue(newUser);
+
+        await request(app)
+          .post('/api/auth/register')
+          .send({ name: 'Test User', email: 'trail@test.com', password: 'password123' });
+
+        expect(enqueueVerificationEmail).toHaveBeenCalledTimes(1);
+        const [, verifyUrl] = enqueueVerificationEmail.mock.calls[0];
+        expect(verifyUrl).toMatch(/^https:\/\/app\.example\.com\/verify-email\?token=[0-9a-f]{64}&email=trail%40test\.com$/);
+        expect(verifyUrl).not.toContain('//verify-email');
+      } finally {
+        if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
+      }
+    });
+
+    it('should not leak sensitive auth fields in the register response', async () => {
+      const newUser = {
+        ...mockUser,
+        email: 'new@test.com',
+        emailVerified: false,
+        toJSON: jest.fn().mockReturnValue({
+          id: USER_ID,
+          name: 'Test User',
+          email: 'new@test.com',
+          emailVerified: false,
+          loginMethod: 'password',
+        }),
+      };
+      mockFindOne(null);
+      User.create.mockResolvedValue(newUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'new@test.com', password: 'password123' });
+
+      expect(res.status).toBe(201);
+      const userPayload = res.body.data.user;
+      expect(userPayload.password).toBeUndefined();
+      expect(userPayload.refreshToken).toBeUndefined();
+      expect(userPayload.emailVerificationToken).toBeUndefined();
+      expect(userPayload.emailVerificationExpires).toBeUndefined();
+      expect(userPayload.passwordResetToken).toBeUndefined();
+      expect(userPayload.passwordResetExpires).toBeUndefined();
+      expect(userPayload.loginMethod).toBe('password');
+      expect(Object.keys(userPayload).sort()).toEqual(['email', 'emailVerified', 'id', 'loginMethod', 'name']);
+    });
   });
 
   /* ================================

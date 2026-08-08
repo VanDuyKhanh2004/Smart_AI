@@ -1,5 +1,6 @@
 const { BrevoClient } = require("@getbrevo/brevo");
 const brevoPkg = require("@getbrevo/brevo/package.json");
+const { getFrontendBaseUrl } = require("../configs/frontendConfig");
 
 console.log("Brevo SDK version:", brevoPkg.version);
 
@@ -62,6 +63,7 @@ async function sendMail(options) {
 
 const buildWelcomeEmail = (user) => {
   const displayName = user.name || "bạn";
+  const baseUrl = getFrontendBaseUrl();
   const subject = "🎉 Chào mừng bạn đến với Smart AI";
   const text = [
     `Xin chào ${displayName},`,
@@ -148,7 +150,7 @@ const buildWelcomeEmail = (user) => {
                   <table role="presentation" style="margin: 0 auto;">
                     <tr>
                       <td style="border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                        <a href="${process.env.FRONTEND_URL || "http://localhost:5173"}" 
+                        <a href="${baseUrl}"
                            style="display: inline-block; padding: 14px 40px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px;">
                           Bắt đầu ngay
                         </a>
@@ -588,7 +590,7 @@ const buildOrderConfirmationEmail = (user, order) => {
     user.name || (order.shippingAddress && order.shippingAddress.fullName) || "Quý khách";
   const subject = `✅ Đơn hàng #${order.orderNumber} đã được tiếp nhận`;
   const orderId = order.orderId || order._id || order.id;
-  const baseUrl = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, '');
+  const baseUrl = getFrontendBaseUrl();
   const trackingUrl = orderId ? `${baseUrl}/orders/${encodeURIComponent(orderId)}` : `${baseUrl}/orders`;
 
   // Format currency
@@ -892,5 +894,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendUnlockAccountEmail,
   sendOrderConfirmationEmail,
+  buildWelcomeEmail,
+  buildVerificationEmail,
   buildOrderConfirmationEmail,
 };

@@ -22,22 +22,15 @@ const LoginPage: React.FC = () => {
     }
   }, [isAuthenticated, isLoading, navigate, from]);
 
-  // Show loading while checking auth state
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  // Don't render login form if already authenticated
+  // Don't unmount LoginForm while a request is in flight: keep the form mounted
+  // (disabled by the form itself) and overlay a loader instead, so form state
+  // and error/success UI are never wiped mid-request.
   if (isAuthenticated) {
     return null;
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md space-y-6">
         <LoginForm />
         
@@ -51,6 +44,12 @@ const LoginPage: React.FC = () => {
           </Link>
         </p>
       </div>
+
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/40">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      )}
     </div>
   );
 };

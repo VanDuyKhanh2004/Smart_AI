@@ -176,6 +176,44 @@ describe('Email job processor', () => {
     if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
   });
 
+  it('welcome email CTA uses the configured frontend URL (no localhost)', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const prev = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = 'https://shop.example.com';
+    try {
+      const { html } = realModule.buildWelcomeEmail({ name: 'Test', email: 'a@b.com' });
+      expect(html).toContain('href="https://shop.example.com"');
+      expect(html).not.toContain('localhost');
+    } finally {
+      if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
+    }
+  });
+
+  it('welcome email CTA falls back to the local dev frontend when FRONTEND_URL is unset', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const prev = process.env.FRONTEND_URL;
+    delete process.env.FRONTEND_URL;
+    try {
+      const { html } = realModule.buildWelcomeEmail({ name: 'Test', email: 'a@b.com' });
+      expect(html).toContain('href="http://localhost:5173"');
+    } finally {
+      if (prev !== undefined) process.env.FRONTEND_URL = prev;
+    }
+  });
+
+  it('welcome email CTA normalizes a trailing-slash FRONTEND_URL', async () => {
+    const realModule = jest.requireActual('../services/emailService');
+    const prev = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = 'https://shop.example.com/';
+    try {
+      const { html } = realModule.buildWelcomeEmail({ name: 'Test', email: 'a@b.com' });
+      expect(html).toContain('href="https://shop.example.com"');
+      expect(html).not.toContain('https://shop.example.com//');
+    } finally {
+      if (prev) process.env.FRONTEND_URL = prev; else delete process.env.FRONTEND_URL;
+    }
+  });
+
   it('sendOrderConfirmationEmail rejects missing orderId', async () => {
     const realModule = jest.requireActual('../services/emailService');
     const user = { name: 'Test', email: 'a@b.com' };

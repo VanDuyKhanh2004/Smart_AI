@@ -18,7 +18,7 @@ const LoginForm: React.FC = () => {
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
   
-  const { login, resendVerification, isLoading, error, clearError } = useAuthStore();
+  const { login, resendVerification, isLoading, error, errorCode, clearError } = useAuthStore();
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -61,7 +61,7 @@ const LoginForm: React.FC = () => {
     setResendError(null);
 
     if (!email.trim()) {
-      setResendError('Vui long nhap email de gui lai');
+      setResendError('Vui lòng nhập email để gửi lại');
       return;
     }
 
@@ -69,7 +69,7 @@ const LoginForm: React.FC = () => {
       const message = await resendVerification(email);
       setResendMessage(message);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Gui lai that bai';
+      const message = err instanceof Error ? err.message : 'Gửi lại thất bại';
       setResendError(message);
     }
   };
@@ -167,7 +167,7 @@ const LoginForm: React.FC = () => {
             )}
           </Button>
 
-          {error && error.toLowerCase().includes('xac nhan') && (
+          {errorCode === 'EMAIL_NOT_VERIFIED' && (
             <Button
               type="button"
               variant="outline"
@@ -175,7 +175,7 @@ const LoginForm: React.FC = () => {
               onClick={handleResend}
               disabled={isLoading}
             >
-              Gui lai email xac nhan
+              Gửi lại email xác nhận
             </Button>
           )}
 

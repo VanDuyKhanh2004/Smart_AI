@@ -6,6 +6,8 @@ export interface User {
   avatar?: string;
   role: 'user' | 'admin';
   googleId?: string;
+  emailVerified?: boolean;
+  loginMethod?: 'password' | 'google' | 'both';
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +26,8 @@ export interface RegisterResponse {
   message: string;
   data: {
     user: User;
+    email?: string;
+    requiresEmailVerification?: boolean;
   };
 }
 

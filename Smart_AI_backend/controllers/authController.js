@@ -13,6 +13,7 @@ const {
   enqueueUnlockAccountEmail,
 } = require('../services/emailQueueService');
 const asyncHandler = require('../utils/asyncHandler');
+const { getFrontendBaseUrl } = require('../configs/frontendConfig');
 const {
   AppError,
   BadRequestError,
@@ -52,7 +53,7 @@ const createEmailVerificationToken = (user) => {
 };
 
 const buildVerifyUrl = (token, email) => {
-  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const baseUrl = getFrontendBaseUrl();
   const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
   return `${baseUrl}/verify-email?token=${token}${emailParam}`;
 };
@@ -68,7 +69,7 @@ const createPasswordResetToken = (user) => {
 };
 
 const buildResetPasswordUrl = (token, email) => {
-  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const baseUrl = getFrontendBaseUrl();
   const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
   return `${baseUrl}/reset-password?token=${token}${emailParam}`;
 };
@@ -103,6 +104,8 @@ const register = asyncHandler(async (req, res) => {
     success: true,
     message: 'Vui long xac nhan email de kich hoat tai khoan',
     data: {
+      email: user.email,
+      requiresEmailVerification: true,
       user: user.toJSON()
     }
   });
@@ -424,7 +427,7 @@ const verifyEmail = asyncHandler(async (req, res) => {
   const wantsHtml = acceptHeader.includes('text/html');
 
   const redirectToFrontend = (status, messageText) => {
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const baseUrl = getFrontendBaseUrl();
     const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
     const redirectUrl = `${baseUrl}/verify-email?status=${encodeURIComponent(status)}&message=${encodeURIComponent(messageText)}${emailParam}`;
     return res.redirect(302, redirectUrl);
@@ -516,7 +519,7 @@ const resendVerification = asyncHandler(async (req, res) => {
   const verificationToken = createEmailVerificationToken(user);
   await user.save({ validateBeforeSave: false });
 
-  const verifyUrl = buildVerifyUrl(verificationToken);
+  const verifyUrl = buildVerifyUrl(verificationToken, user.email);
   enqueueVerificationEmail(user, verifyUrl, req.requestId);
 
   res.status(200).json({
@@ -631,7 +634,7 @@ const requestUnlockAccount = asyncHandler(async (req, res) => {
   const unlockToken = user.createUnlockToken();
   await user.save({ validateBeforeSave: false });
 
-  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const baseUrl = getFrontendBaseUrl();
   const unlockUrl = `${baseUrl}/unlock-account?token=${unlockToken}&email=${encodeURIComponent(email)}`;
 
   enqueueUnlockAccountEmail(user, unlockUrl, req.requestId);
