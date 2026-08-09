@@ -70,6 +70,10 @@ const errorHandler = (error, req, res, next) => {
 
   const format = VALID_FORMATS.includes(resolvedFormat) ? resolvedFormat : 'centralized';
 
+  if (Number.isInteger(error.retryAfterSeconds) && error.retryAfterSeconds > 0) {
+    res.setHeader('Retry-After', String(error.retryAfterSeconds));
+  }
+
   let body;
   if (format === 'legacy-top-level-message') {
     if (statusCode >= 500) {
@@ -92,6 +96,9 @@ const errorHandler = (error, req, res, next) => {
     };
     if (details) {
       body.error.details = details;
+    }
+    if (error.data !== undefined) {
+      body.data = error.data;
     }
     if (!isDevelopment) {
       body.error.timestamp = new Date().toISOString();

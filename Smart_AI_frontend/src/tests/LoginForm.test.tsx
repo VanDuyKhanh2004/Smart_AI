@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import LoginForm from '@/features/auth/components/LoginForm';
@@ -77,5 +77,44 @@ describe('LoginForm unverified-account messaging', () => {
     );
 
     expect(screen.getByText('Hoặc đăng nhập với')).toBeInTheDocument();
+  });
+
+  it('enters the 60s cooldown after a successful resend and shows Đang gửi... while in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(authService.login).mockRejectedValue(EMAIL_NOT_VERIFIED_ERROR);
+      let resolveResend: (value: { success: boolean; message: string }) => void;
+      vi.mocked(authService.resendVerification).mockReturnValue(
+        new Promise((resolve) => {
+          resolveResend = resolve;
+        })
+      );
+
+      render(
+        <MemoryRouter>
+          <LoginForm />
+        </MemoryRouter>
+      );
+
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.com' } });
+      fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+      await act(async () => {});
+
+      expect(screen.getByRole('button', { name: 'Đang gửi...' })).toBeInTheDocument();
+
+      act(() => {
+        resolveResend({ success: true, message: 'Đã gửi lại email xác nhận' });
+      });
+      await act(async () => {});
+
+      expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -2,6 +2,7 @@ import apiClient from '@/lib/axios';
 import type {
   AuthResponse,
   RegisterResponse,
+  ResendVerificationResponse,
   TokenResponse,
   LoginRequest,
   RegisterRequest,
@@ -49,8 +50,8 @@ export const authService = {
     return response.data;
   },
 
-  async resendVerification(data: ResendVerificationRequest): Promise<{ success: boolean; message: string }> {
-    const response = await apiClient.post<{ success: boolean; message: string }>(
+  async resendVerification(data: ResendVerificationRequest): Promise<ResendVerificationResponse> {
+    const response = await apiClient.post<ResendVerificationResponse>(
       '/auth/resend-verification',
       data
     );

@@ -4,6 +4,7 @@ const UnauthorizedError = require('./UnauthorizedError');
 const ForbiddenError = require('./ForbiddenError');
 const NotFoundError = require('./NotFoundError');
 const ConflictError = require('./ConflictError');
+const RateLimitError = require('./RateLimitError');
 
 module.exports = {
   AppError,
@@ -12,4 +13,5 @@ module.exports = {
   ForbiddenError,
   NotFoundError,
   ConflictError,
+  RateLimitError,
 };

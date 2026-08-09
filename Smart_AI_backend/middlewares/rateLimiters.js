@@ -3,23 +3,26 @@ const { rateLimit, MemoryStore, ipKeyGenerator } = require('express-rate-limit')
 const WINDOW_MINUTES = 15;
 const WINDOW_MS = WINDOW_MINUTES * 60 * 1000;
 
+const DEFAULT_RATE_LIMIT_CODE = 'TOO_MANY_REQUESTS';
+const DEFAULT_RATE_LIMIT_MESSAGE = 'Ban da gui qua nhieu yeu cau. Vui long thu lai sau.';
+
 const readLimit = (envName, fallback) => {
   const parsed = Number(process.env[envName]);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const handleRateLimitExceeded = (req, res, _next, options) => {
-  res.setHeader('Retry-After', String(Math.ceil(options.windowMs / 1000)));
-  res.status(options.statusCode).json({
-    success: false,
-    error: {
-      code: 'TOO_MANY_REQUESTS',
-      message: 'Ban da gui qua nhieu yeu cau. Vui long thu lai sau.',
-    },
-  });
-};
+const makeRateLimitHandler = ({ code = DEFAULT_RATE_LIMIT_CODE, message = DEFAULT_RATE_LIMIT_MESSAGE } = {}) =>
+  (req, res, _next, options) => {
+    res.setHeader('Retry-After', String(Math.ceil(options.windowMs / 1000)));
+    res.status(options.statusCode).json({
+      success: false,
+      error: { code, message },
+    });
+  };
 
-const createRateLimiter = ({ windowMs, limit, store }) =>
+const handleRateLimitExceeded = makeRateLimitHandler();
+
+const createRateLimiter = ({ windowMs, limit, store, code, message }) =>
   rateLimit({
     windowMs,
     limit,
@@ -27,13 +30,14 @@ const createRateLimiter = ({ windowMs, limit, store }) =>
     legacyHeaders: false,
     keyGenerator: (req) =>
       ipKeyGenerator(req.ip || req.socket?.remoteAddress || '0.0.0.0'),
-    handler: handleRateLimitExceeded,
+    handler: makeRateLimitHandler({ code, message }),
     store,
   });
 
 const stores = {
   authSession: new MemoryStore(),
   emailAction: new MemoryStore(),
+  resendVerification: new MemoryStore(),
   tokenAction: new MemoryStore(),
   semanticSearch: new MemoryStore(),
 };
@@ -48,6 +52,17 @@ const emailActionLimiter = createRateLimiter({
   windowMs: WINDOW_MS,
   limit: readLimit('RATE_LIMIT_EMAIL_ACTION_MAX', 5),
   store: stores.emailAction,
+});
+
+// Coarse per-IP abuse wrapper for the resend-verification route. Its threshold
+// must stay clearly above the per-account 5-successful-resends/15-min policy so
+// a legitimate account can always reach the account-level limiter.
+const resendVerificationLimiter = createRateLimiter({
+  windowMs: WINDOW_MS,
+  limit: readLimit('RATE_LIMIT_RESEND_VERIFICATION_MAX', 30),
+  store: stores.resendVerification,
+  code: 'VERIFICATION_EMAIL_IP_RATE_LIMITED',
+  message: 'Ban da gui qua nhieu yeu cau gui lai email xac nhan. Vui long thu lai sau.',
 });
 
 const tokenActionLimiter = createRateLimiter({
@@ -74,6 +89,7 @@ module.exports = {
   createRateLimiter,
   authSessionLimiter,
   emailActionLimiter,
+  resendVerificationLimiter,
   tokenActionLimiter,
   semanticSearchLimiter,
   resetRateLimiters,

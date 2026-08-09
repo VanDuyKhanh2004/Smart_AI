@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthStore } from '@/stores/authStore';
+import { useResendCooldown } from '@/hooks/useResendCooldown';
 import GoogleLoginButton from './GoogleLoginButton';
 
 interface FormErrors {
@@ -17,6 +18,14 @@ const LoginForm: React.FC = () => {
   const [errors, setErrors] = useState<FormErrors>({});
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
+  const {
+    remainingSeconds,
+    isOnCooldown,
+    isSending,
+    startCooldown,
+    startSending,
+    stopSending,
+  } = useResendCooldown();
   
   const { login, resendVerification, isLoading, error, errorCode, clearError } = useAuthStore();
 
@@ -65,12 +74,20 @@ const LoginForm: React.FC = () => {
       return;
     }
 
+    startSending();
     try {
       const message = await resendVerification(email);
       setResendMessage(message);
+      startCooldown(60);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gửi lại thất bại';
       setResendError(message);
+      const retryAfterSeconds = (err as Error & { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+        startCooldown(retryAfterSeconds);
+      }
+    } finally {
+      stopSending();
     }
   };
 
@@ -173,9 +190,13 @@ const LoginForm: React.FC = () => {
               variant="outline"
               className="w-full"
               onClick={handleResend}
-              disabled={isLoading}
+              disabled={isLoading || isOnCooldown || isSending}
             >
-              Gửi lại email xác nhận
+              {isSending
+                ? 'Đang gửi...'
+                : isOnCooldown
+                  ? `Gửi lại sau ${remainingSeconds}s`
+                  : 'Gửi lại email xác nhận'}
             </Button>
           )}
 

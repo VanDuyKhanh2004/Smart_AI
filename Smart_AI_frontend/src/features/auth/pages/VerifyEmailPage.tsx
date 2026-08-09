@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { authService } from '@/services/auth.service';
 import { useAuthStore } from '@/stores/authStore';
+import { useResendCooldown } from '@/hooks/useResendCooldown';
 
 const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -15,6 +16,14 @@ const VerifyEmailPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
+  const {
+    remainingSeconds,
+    isOnCooldown,
+    isSending,
+    startCooldown,
+    startSending,
+    stopSending,
+  } = useResendCooldown();
   const { resendVerification } = useAuthStore();
 
   const isLoading = status === 'loading';
@@ -122,12 +131,20 @@ const VerifyEmailPage: React.FC = () => {
       return;
     }
 
+    startSending();
     try {
       const responseMessage = await resendVerification(email);
       setResendMessage(responseMessage);
+      startCooldown(60);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Gui lai that bai.';
       setResendError(errorMessage);
+      const retryAfterSeconds = (error as Error & { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+        startCooldown(retryAfterSeconds);
+      }
+    } finally {
+      stopSending();
     }
   };
 
@@ -232,8 +249,12 @@ const VerifyEmailPage: React.FC = () => {
                     {resendError}
                   </div>
                 )}
-                <Button type="button" variant="outline" className="w-full" onClick={handleResend}>
-                  Gui lai email xac nhan
+                <Button type="button" variant="outline" className="w-full" onClick={handleResend} disabled={isOnCooldown || isSending}>
+                  {isSending
+                    ? 'Đang gửi...'
+                    : isOnCooldown
+                      ? `Gửi lại sau ${remainingSeconds}s`
+                      : 'Gui lai email xac nhan'}
                 </Button>
               </div>
             )}

@@ -21,6 +21,7 @@ export interface RegisterResult {
   message: string;
   email: string;
   requiresEmailVerification: boolean;
+  resendCooldownSeconds?: number;
 }
 
 interface AuthActions {
@@ -105,6 +106,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       const { message } = response;
       const registeredEmail = response.data?.email || email;
       const requiresEmailVerification = response.data?.requiresEmailVerification ?? true;
+      const resendCooldownSeconds = response.data?.resendCooldownSeconds ?? 60;
 
       set({
         isLoading: false,
@@ -112,7 +114,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         errorCode: null,
       });
 
-      return { message, email: registeredEmail, requiresEmailVerification };
+      return { message, email: registeredEmail, requiresEmailVerification, resendCooldownSeconds };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Registration failed';
       const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string; code?: string } } } };
@@ -131,8 +133,15 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       return response.message;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Resend verification failed';
-      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string } } } };
-      throw new Error(axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message);
+      const axiosError = error as { response?: { data?: { message?: string; error?: { message?: string }; data?: { retryAfterSeconds?: number } } } };
+      const retryAfterSeconds = axiosError.response?.data?.data?.retryAfterSeconds;
+      const err = new Error(
+        axiosError.response?.data?.error?.message || axiosError.response?.data?.message || message
+      );
+      if (typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+        (err as Error & { retryAfterSeconds?: number }).retryAfterSeconds = Math.ceil(retryAfterSeconds);
+      }
+      throw err;
     }
   },
 
