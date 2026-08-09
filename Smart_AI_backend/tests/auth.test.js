@@ -106,6 +106,16 @@ jest.mock('../services/emailQueueService', () => ({
   enqueueUnlockAccountEmail: jest.fn(),
 }));
 
+const verificationResendService = require('../services/verificationResendService');
+jest.mock('../services/verificationResendService', () => ({
+  claimResendCooldown: jest.fn(),
+  startResendCooldown: jest.fn(),
+  releaseResendCooldown: jest.fn(),
+  checkLongWindow: jest.fn(),
+  incrementLongWindow: jest.fn(),
+  getCooldownSeconds: jest.fn(() => 60),
+}));
+
 const mockVerifyIdToken = jest.fn();
 jest.mock('google-auth-library', () => ({
   OAuth2Client: jest.fn(() => ({
@@ -164,6 +174,11 @@ describe('Auth Controller — centralized error handling', () => {
     User.create.mockResolvedValue(mockUser);
     User.findByEmailWithPassword.mockResolvedValue(null);
     User.findByUnlockToken.mockResolvedValue(null);
+    verificationResendService.claimResendCooldown.mockResolvedValue({ allowed: true, retryAfterSeconds: 60 });
+    verificationResendService.checkLongWindow.mockResolvedValue({ allowed: true });
+    verificationResendService.incrementLongWindow.mockResolvedValue({ count: 1 });
+    verificationResendService.startResendCooldown.mockResolvedValue(true);
+    verificationResendService.releaseResendCooldown.mockResolvedValue(true);
     mockVerifyIdToken.mockReset();
     mockVerifyIdToken.mockResolvedValue({ getPayload: () => ({ sub: 'mock', email: 'mock@test.com', email_verified: true }) });
   });
@@ -195,6 +210,89 @@ describe('Auth Controller — centralized error handling', () => {
       expect(res.status).toBe(409);
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe('EMAIL_EXISTS');
+    });
+
+    it('should return 409 EMAIL_NOT_VERIFIED for an existing unverified account and expose only the email', async () => {
+      const pendingUser = {
+        ...mockUserUnverified,
+        email: 'pending@test.com',
+        emailVerificationToken: 'token-hash-should-not-leak',
+        emailVerificationExpires: new Date(Date.now() + 1000 * 60 * 60 * 24),
+        password: 'hashedpassword-do-not-leak',
+        refreshToken: 'refresh-do-not-leak',
+      };
+      mockFindOne(pendingUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'pending@test.com', password: 'password123' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED');
+      expect(res.body.error.message).toBe('Tài khoản với email này chưa được xác nhận.');
+      expect(res.body.data).toEqual({ email: 'pending@test.com' });
+      expect(res.body.error.password).toBeUndefined();
+      expect(res.body.error.emailVerificationToken).toBeUndefined();
+      expect(res.body.error.emailVerificationExpires).toBeUndefined();
+      expect(JSON.stringify(res.body)).not.toContain('hashed-password');
+      expect(JSON.stringify(res.body)).not.toContain('token-hash');
+      expect(JSON.stringify(res.body)).not.toContain('refresh-do-not-leak');
+    });
+
+    it('duplicate register of an unverified account must not mutate or recreate the user nor enqueue email', async () => {
+      const expiry = new Date(Date.now() + 1000 * 60 * 60 * 24);
+      const pendingUser = {
+        ...mockUserUnverified,
+        email: 'pending@test.com',
+        emailVerificationToken: 'token-hash-should-not-leak',
+        emailVerificationExpires: expiry,
+        refreshToken: 'pending-refresh-token',
+      };
+      mockFindOne(pendingUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'pending@test.com', password: 'password123' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('EMAIL_NOT_VERIFIED');
+      expect(pendingUser.save).not.toHaveBeenCalled();
+      expect(User.create).not.toHaveBeenCalled();
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(pendingUser.password).toBe('hashedpassword');
+      expect(pendingUser.emailVerified).toBe(false);
+      expect(pendingUser.emailVerificationToken).toBe('token-hash-should-not-leak');
+      expect(pendingUser.emailVerificationExpires).toBe(expiry);
+      expect(pendingUser.googleId).toBeNull();
+      expect(pendingUser.refreshToken).toBe('pending-refresh-token');
+    });
+
+    it('existing verified email keeps the EMAIL_EXISTS behavior even after save/enqueue mocks are set', async () => {
+      mockFindOne(mockUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'user@test.com', password: 'password123' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('EMAIL_EXISTS');
+      expect(User.create).not.toHaveBeenCalled();
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(mockUser.password).toBe('hashedpassword');
+    });
+
+    it('existing Google-linked account still yields EMAIL_EXISTS (OAuth behavior unchanged)', async () => {
+      mockFindOne(mockUserGoogleOnly);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'user@test.com', password: 'password123' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('EMAIL_EXISTS');
+      expect(User.create).not.toHaveBeenCalled();
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
     });
 
     it('should return 400 on Mongoose ValidationError', async () => {
@@ -246,6 +344,19 @@ describe('Auth Controller — centralized error handling', () => {
       expect(res.body.data.requiresEmailVerification).toBe(true);
       expect(res.body.data.user.emailVerified).toBe(false);
       expect(enqueueVerificationEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts the resend cooldown on registration and reports its duration', async () => {
+      mockFindOne(null);
+      User.create.mockResolvedValue(mockUser);
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ name: 'Test User', email: 'cooldown-register@test.com', password: 'password123' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.resendCooldownSeconds).toBe(60);
+      expect(verificationResendService.startResendCooldown).toHaveBeenCalledTimes(1);
     });
 
     it('verification email URL uses the configured frontend base and /verify-email route', async () => {
@@ -856,6 +967,273 @@ describe('Auth Controller — centralized error handling', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('EMAIL_ALREADY_VERIFIED');
+    });
+
+    it('should return 429 VERIFICATION_EMAIL_COOLDOWN with retryAfterSeconds during the cooldown', async () => {
+      verificationResendService.claimResendCooldown.mockResolvedValue({
+        allowed: false,
+        retryAfterSeconds: 42,
+      });
+      mockFindOne(mockUserUnverified);
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'cooldown@test.com' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('VERIFICATION_EMAIL_COOLDOWN');
+      expect(res.body.error.message).toBe('Vui long cho truoc khi gui lai email xac nhan.');
+      expect(res.body.data).toEqual({ retryAfterSeconds: 42 });
+      expect(res.headers['retry-after']).toBe('42');
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(User.findOne).toHaveBeenCalled();
+    });
+
+    it('should return 429 VERIFICATION_EMAIL_RATE_LIMITED when the long window is exhausted', async () => {
+      verificationResendService.claimResendCooldown.mockResolvedValue({ allowed: true, retryAfterSeconds: 60 });
+      verificationResendService.checkLongWindow.mockResolvedValue({
+        allowed: false,
+        retryAfterSeconds: 300,
+      });
+      mockFindOne(mockUserUnverified);
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'rate-limited@test.com' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('VERIFICATION_EMAIL_RATE_LIMITED');
+      expect(res.body.data).toEqual({ retryAfterSeconds: 300 });
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(verificationResendService.releaseResendCooldown).toHaveBeenCalledWith(mockUserUnverified._id);
+      expect(verificationResendService.incrementLongWindow).not.toHaveBeenCalled();
+      expect(mockUserUnverified.save).not.toHaveBeenCalled();
+    });
+
+    it('increments the long window after a successful resend', async () => {
+      mockFindOne(mockUserUnverified);
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'window-count@test.com' });
+
+      expect(res.status).toBe(200);
+      expect(verificationResendService.incrementLongWindow).toHaveBeenCalledTimes(1);
+      expect(res.body.data.resendCooldownSeconds).toBe(60);
+    });
+
+    it('does not send an email or rotate the token when the cooldown rejects a request', async () => {
+      verificationResendService.claimResendCooldown.mockResolvedValue({
+        allowed: false,
+        retryAfterSeconds: 55,
+      });
+      mockFindOne(mockUserUnverified);
+      const saveSpy = jest.spyOn(mockUserUnverified, 'save');
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'zero-mutation@test.com' });
+
+      expect(res.status).toBe(429);
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(saveSpy).not.toHaveBeenCalled();
+      expect(verificationResendService.incrementLongWindow).not.toHaveBeenCalled();
+      saveSpy.mockRestore();
+    });
+  });
+
+  /* =====================================================
+   * POST /api/auth/resend-verification — route-stack limits
+   * (proves the express middleware + controller pipeline, not just the service)
+   * ===================================================== */
+  describe('POST /api/auth/resend-verification — route-stack rate limiting', () => {
+    const extractToken = (url) => {
+      const m = url.match(/[?&]token=([0-9a-f]{64})/);
+      return m ? m[1] : null;
+    };
+
+    const simulateRedisWindow = () => {
+      let simWindow = 0;
+      verificationResendService.claimResendCooldown.mockResolvedValue({ allowed: true, retryAfterSeconds: 60 });
+      verificationResendService.checkLongWindow.mockImplementation(async () =>
+        simWindow >= 5 ? { allowed: false, retryAfterSeconds: 300 } : { allowed: true }
+      );
+      verificationResendService.incrementLongWindow.mockImplementation(async () => ({ count: ++simWindow }));
+      return () => simWindow;
+    };
+
+    it('reaches five successful account resends then rejects the sixth with VERIFICATION_EMAIL_RATE_LIMITED', async () => {
+      const getWindow = simulateRedisWindow();
+      const user = { ...mockUserUnverified, emailVerified: false, email: 'stack@test.com' };
+
+      for (let i = 1; i <= 5; i += 1) {
+        mockFindOne(user);
+        const res = await request(app)
+          .post('/api/auth/resend-verification')
+          .send({ email: 'stack@test.com' });
+        expect(res.status).toBe(200);
+      }
+
+      expect(getWindow()).toBe(5);
+      const emailsSentBefore = enqueueVerificationEmail.mock.calls.length;
+      const storedHashAfterFive = user.emailVerificationToken;
+      const newestToken = extractToken(enqueueVerificationEmail.mock.calls[emailsSentBefore - 1][1]);
+
+      mockFindOne(user);
+      const res6 = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'stack@test.com' });
+
+      expect(res6.status).toBe(429);
+      expect(res6.body.success).toBe(false);
+      expect(res6.body.error.code).toBe('VERIFICATION_EMAIL_RATE_LIMITED');
+      expect(res6.headers['retry-after']).toBe('300');
+
+      expect(getWindow()).toBe(5);
+      expect(verificationResendService.incrementLongWindow).toHaveBeenCalledTimes(5);
+      expect(enqueueVerificationEmail).toHaveBeenCalledTimes(emailsSentBefore);
+      expect(user.emailVerificationToken).toBe(storedHashAfterFive);
+      expect(user.emailVerified).toBe(false);
+    });
+
+    it('the sixth rejection leaves the newest link from resend #5 valid', async () => {
+      simulateRedisWindow();
+      const user = { ...mockUserUnverified, emailVerified: false, email: 'stack6@test.com' };
+
+      for (let i = 1; i <= 5; i += 1) {
+        mockFindOne(user);
+        await request(app).post('/api/auth/resend-verification').send({ email: 'stack6@test.com' });
+      }
+      const newestToken = extractToken(enqueueVerificationEmail.mock.calls[4][1]);
+
+      mockFindOne(user);
+      await request(app).post('/api/auth/resend-verification').send({ email: 'stack6@test.com' });
+      expect(enqueueVerificationEmail).toHaveBeenCalledTimes(5);
+
+      mockFindOne(user);
+      const res = await request(app)
+        .get('/api/auth/verify-email')
+        .query({ token: newestToken, email: 'stack6@test.com' });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it('increments the account window only after the email is enqueued', async () => {
+      simulateRedisWindow();
+      mockFindOne(mockUserUnverified);
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'order@test.com' });
+
+      expect(res.status).toBe(200);
+      const enqueueOrder = enqueueVerificationEmail.mock.invocationCallOrder[0];
+      const incrementOrder = verificationResendService.incrementLongWindow.mock.invocationCallOrder[0];
+      expect(incrementOrder).toBeGreaterThan(enqueueOrder);
+    });
+
+    it('cooldown-rejected requests never touch the long window', async () => {
+      verificationResendService.claimResendCooldown.mockResolvedValue({ allowed: false, retryAfterSeconds: 42 });
+      mockFindOne(mockUserUnverified);
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'cooldown-only@test.com' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.error.code).toBe('VERIFICATION_EMAIL_COOLDOWN');
+      expect(verificationResendService.checkLongWindow).not.toHaveBeenCalled();
+      expect(verificationResendService.incrementLongWindow).not.toHaveBeenCalled();
+      expect(verificationResendService.releaseResendCooldown).not.toHaveBeenCalled();
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(mockUserUnverified.save).not.toHaveBeenCalled();
+    });
+
+    it('long-window-rejected requests do not increment the window and roll back the claimed cooldown', async () => {
+      verificationResendService.claimResendCooldown.mockResolvedValue({ allowed: true, retryAfterSeconds: 60 });
+      verificationResendService.checkLongWindow.mockResolvedValue({ allowed: false, retryAfterSeconds: 300 });
+      mockFindOne(mockUserUnverified);
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'window-only@test.com' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.error.code).toBe('VERIFICATION_EMAIL_RATE_LIMITED');
+      expect(verificationResendService.incrementLongWindow).not.toHaveBeenCalled();
+      expect(verificationResendService.releaseResendCooldown).toHaveBeenCalledWith(mockUserUnverified._id);
+      expect(enqueueVerificationEmail).not.toHaveBeenCalled();
+      expect(mockUserUnverified.save).not.toHaveBeenCalled();
+    });
+
+    it('the dedicated IP limiter does not shadow the account-level five-resend contract', async () => {
+      const getWindow = simulateRedisWindow();
+      const user = { ...mockUserUnverified, emailVerified: false, email: 'no-shadow@test.com' };
+
+      for (let i = 1; i <= 6; i += 1) {
+        mockFindOne(user);
+        const res = await request(app)
+          .post('/api/auth/resend-verification')
+          .send({ email: 'no-shadow@test.com' });
+        if (i <= 5) {
+          expect(res.status).toBe(200);
+        } else {
+          expect(res.status).toBe(429);
+          expect(res.body.error.code).toBe('VERIFICATION_EMAIL_RATE_LIMITED');
+          expect(verificationResendService.releaseResendCooldown).toHaveBeenCalledTimes(1);
+        }
+      }
+      expect(getWindow()).toBe(5);
+    });
+
+    it('IP limiter eventually blocks abusive traffic with a distinct code and message', async () => {
+      verificationResendService.claimResendCooldown.mockResolvedValue({ allowed: true, retryAfterSeconds: 60 });
+      verificationResendService.checkLongWindow.mockResolvedValue({ allowed: true });
+      verificationResendService.incrementLongWindow.mockResolvedValue({ count: 1 });
+
+      for (let i = 0; i < 30; i += 1) {
+        mockFindOne(mockUserUnverified);
+        const res = await request(app)
+          .post('/api/auth/resend-verification')
+          .send({ email: 'ip-abuse@test.com' });
+        expect(res.status).toBe(200);
+      }
+
+      mockFindOne(mockUserUnverified);
+      const blocked = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'ip-abuse@test.com' });
+
+      expect(blocked.status).toBe(429);
+      expect(blocked.body.success).toBe(false);
+      expect(blocked.body.error.code).toBe('VERIFICATION_EMAIL_IP_RATE_LIMITED');
+      expect(blocked.body.error.message).toContain('gui lai email xac nhan');
+      expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+      expect(Number(blocked.headers['ratelimit-limit'])).toBe(30);
+      expect(verificationResendService.incrementLongWindow).toHaveBeenCalledTimes(30);
+      expect(enqueueVerificationEmail).toHaveBeenCalledTimes(30);
+    });
+
+    it('forgot-password still uses the unchanged 5/15-min shared email limiter (TOO_MANY_REQUESTS)', async () => {
+      for (let i = 0; i < 5; i += 1) {
+        mockFindOne(null);
+        const res = await request(app)
+          .post('/api/auth/forgot-password')
+          .send({ email: 'forgot@test.com' });
+        expect(res.status).toBe(200);
+      }
+
+      mockFindOne(null);
+      const res = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ email: 'forgot@test.com' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.error.code).toBe('TOO_MANY_REQUESTS');
+      expect(res.body.error.code).not.toBe('VERIFICATION_EMAIL_IP_RATE_LIMITED');
+      expect(Number(res.headers['ratelimit-limit'])).toBe(5);
     });
   });
 

@@ -22,6 +22,7 @@ const { loginRateLimit } = require('../middlewares/loginRateLimitMiddleware');
 const {
   authSessionLimiter,
   emailActionLimiter,
+  resendVerificationLimiter,
   tokenActionLimiter,
 } = require('../middlewares/rateLimiters');
 
@@ -35,7 +36,7 @@ router.delete('/unlink/google', protect, unlinkGoogle);
 router.post('/refresh', authSessionLimiter, refreshToken);
 router.get('/verify-email', authSessionLimiter, verifyEmail);
 router.post('/verify-email', authSessionLimiter, verifyEmail);
-router.post('/resend-verification', emailActionLimiter, resendVerification);
+router.post('/resend-verification', resendVerificationLimiter, resendVerification);
 router.post('/forgot-password', emailActionLimiter, requestPasswordReset);
 router.post('/reset-password', tokenActionLimiter, resetPassword);
 router.post('/request-unlock', emailActionLimiter, requestUnlockAccount);

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import VerifyEmailPage from '@/features/auth/pages/VerifyEmailPage';
 import { authService } from '@/services/auth.service';
@@ -96,5 +96,68 @@ describe('VerifyEmailPage', () => {
     expect((await screen.findAllByText('Email da duoc kich hoat')).length).toBeGreaterThan(0);
     expect(screen.getByText('VERIFIED')).toBeInTheDocument();
     expect(screen.queryByText('Gui lai email xac nhan')).not.toBeInTheDocument();
+  });
+
+  it('enters a 60s cooldown after a successful resend and disables the button', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(authService.verifyEmail).mockRejectedValue({
+        response: { data: { error: { code: 'VERIFICATION_TOKEN_EXPIRED' } } },
+      });
+      vi.mocked(authService.resendVerification).mockResolvedValue({
+        success: true,
+        message: 'Đã gửi lại email xác nhận',
+      });
+
+      render(
+        <MemoryRouter initialEntries={['/verify-email?token=expired&email=user@test.com']}>
+          <VerifyEmailPage />
+        </MemoryRouter>
+      );
+
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Gui lai email xac nhan' }));
+      await act(async () => {});
+
+      expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeDisabled();
+      expect(screen.getByText('Đã gửi lại email xác nhận')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('syncs the countdown label from a backend 429 VERIFICATION_EMAIL_COOLDOWN', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(authService.verifyEmail).mockRejectedValue({
+        response: { data: { error: { code: 'VERIFICATION_TOKEN_EXPIRED' } } },
+      });
+      const cooldownError = Object.assign(new Error('Request failed with status code 429'), {
+        response: {
+          data: {
+            success: false,
+            error: { code: 'VERIFICATION_EMAIL_COOLDOWN', message: 'Vui long cho truoc khi gui lai email xac nhan.' },
+            data: { retryAfterSeconds: 30 },
+          },
+        },
+      });
+      vi.mocked(authService.resendVerification).mockRejectedValue(cooldownError);
+
+      render(
+        <MemoryRouter initialEntries={['/verify-email?token=expired&email=user@test.com']}>
+          <VerifyEmailPage />
+        </MemoryRouter>
+      );
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Gui lai email xac nhan' }));
+      await act(async () => {});
+
+      expect(screen.getByRole('button', { name: 'Gửi lại sau 30s' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

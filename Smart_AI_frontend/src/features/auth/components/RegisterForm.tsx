@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthStore, type RegisterResult } from '@/stores/authStore';
+import { useResendCooldown } from '@/hooks/useResendCooldown';
 
 interface FormErrors {
   name?: string;
@@ -18,8 +19,17 @@ const RegisterForm: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [registeredResult, setRegisteredResult] = useState<RegisterResult | null>(null);
+  const [recoveryEmail, setRecoveryEmail] = useState<string | null>(null);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [resendError, setResendError] = useState<string | null>(null);
+  const {
+    remainingSeconds,
+    isOnCooldown,
+    isSending,
+    startCooldown,
+    startSending,
+    stopSending,
+  } = useResendCooldown();
   
   const { register, resendVerification, isLoading, error, clearError } = useAuthStore();
 
@@ -58,6 +68,7 @@ const RegisterForm: React.FC = () => {
     e.preventDefault();
     clearError();
     setRegisteredResult(null);
+    setRecoveryEmail(null);
     setResendMessage(null);
     setResendError(null);
     
@@ -68,8 +79,12 @@ const RegisterForm: React.FC = () => {
     try {
       const result = await register(name, email, password);
       setRegisteredResult(result);
-    } catch {
-      // Error is handled by the store
+      startCooldown(result.resendCooldownSeconds ?? 60);
+    } catch (err) {
+      const code = (err as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+      if (code === 'EMAIL_NOT_VERIFIED') {
+        setRecoveryEmail(email);
+      }
     }
   };
 
@@ -77,17 +92,26 @@ const RegisterForm: React.FC = () => {
     setResendMessage(null);
     setResendError(null);
 
-    if (!email.trim()) {
+    const resendTarget = recoveryEmail ?? email;
+    if (!resendTarget.trim()) {
       setResendError('Vui lòng nhập email để gửi lại');
       return;
     }
 
+    startSending();
     try {
-      const message = await resendVerification(email);
+      const message = await resendVerification(resendTarget);
       setResendMessage(message);
+      startCooldown(60);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gửi lại thất bại';
       setResendError(message);
+      const retryAfterSeconds = (err as Error & { retryAfterSeconds?: number }).retryAfterSeconds;
+      if (typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+        startCooldown(retryAfterSeconds);
+      }
+    } finally {
+      stopSending();
     }
   };
 
@@ -191,25 +215,33 @@ const RegisterForm: React.FC = () => {
             )}
           </div>
           
-          {error && (
+          {error && !recoveryEmail && (
             <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
               {error}
             </div>
           )}
 
-          {registeredResult && (
+          {(registeredResult || recoveryEmail) && (
             <div
               className="space-y-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-700"
-              data-testid="register-success"
+              data-testid={recoveryEmail ? 'register-recovery' : 'register-success'}
             >
               <p className="font-semibold">
-                Đăng ký thành công. Vui lòng kiểm tra email và xác nhận tài khoản trước khi đăng nhập.
+                {recoveryEmail
+                  ? 'Tài khoản này đã được đăng ký nhưng chưa được xác nhận email.'
+                  : 'Đăng ký thành công. Vui lòng kiểm tra email và xác nhận tài khoản trước khi đăng nhập.'}
               </p>
               <p>
-                Chúng tôi đã gửi email xác nhận đến{' '}
-                <span className="font-medium">{registeredResult.email}</span>.
+                {recoveryEmail
+                  ? 'Email xác nhận đã được gửi trước đó. Bạn có thể gửi lại email xác nhận đến'
+                  : 'Chúng tôi đã gửi email xác nhận đến'}{' '}
+                <span className="font-medium">{recoveryEmail ?? registeredResult?.email}</span>.
               </p>
-              <p>Bạn cần xác nhận email trước khi có thể đăng nhập và sử dụng tài khoản.</p>
+              {recoveryEmail ? (
+                <p>Vui lòng xác nhận email để kích hoạt tài khoản trước khi đăng nhập.</p>
+              ) : (
+                <p>Bạn cần xác nhận email trước khi có thể đăng nhập và sử dụng tài khoản.</p>
+              )}
             </div>
           )}
 
@@ -236,15 +268,19 @@ const RegisterForm: React.FC = () => {
             )}
           </Button>
 
-          {registeredResult && (
+          {(registeredResult || recoveryEmail) && (
             <Button
               type="button"
               variant="outline"
               className="w-full"
               onClick={handleResend}
-              disabled={isLoading}
+              disabled={isLoading || isOnCooldown || isSending}
             >
-              Gửi lại email xác nhận
+              {isSending
+                ? 'Đang gửi...'
+                : isOnCooldown
+                  ? `Gửi lại sau ${remainingSeconds}s`
+                  : 'Gửi lại email xác nhận'}
             </Button>
           )}
         </form>

@@ -21,8 +21,17 @@ const {
   ForbiddenError,
   NotFoundError,
   ConflictError,
+  RateLimitError,
 } = require('../utils/errors');
 const { hashToken } = require('../utils/tokenHash');
+const {
+  claimResendCooldown,
+  startResendCooldown,
+  releaseResendCooldown,
+  checkLongWindow,
+  incrementLongWindow,
+  getCooldownSeconds,
+} = require('../services/verificationResendService');
 const {
   EMAIL_VERIFICATION_TOKEN_TTL_MS,
   PASSWORD_RESET_TOKEN_TTL_MS,
@@ -85,6 +94,14 @@ const register = asyncHandler(async (req, res) => {
 
   const existingUser = await User.findOne({ email: email.toLowerCase() });
   if (existingUser) {
+    if (!existingUser.emailVerified && !existingUser.googleId) {
+      const notVerifiedError = new ConflictError(
+        'Tài khoản với email này chưa được xác nhận.',
+        'EMAIL_NOT_VERIFIED'
+      );
+      notVerifiedError.data = { email: existingUser.email };
+      throw notVerifiedError;
+    }
     throw new ConflictError('Email đã được đăng ký', 'EMAIL_EXISTS');
   }
 
@@ -101,12 +118,18 @@ const register = asyncHandler(async (req, res) => {
   const verifyUrl = buildVerifyUrl(verificationToken, user.email);
   enqueueVerificationEmail(user, verifyUrl, req.requestId);
 
+  // Registration sends the first verification email and starts the resend
+  // cooldown. It must never be blocked by a stale cooldown key or a
+  // temporarily unavailable Redis, hence the best-effort call.
+  await startResendCooldown(user._id);
+
   res.status(201).json({
     success: true,
     message: 'Vui long xac nhan email de kich hoat tai khoan',
     data: {
       email: user.email,
       requiresEmailVerification: true,
+      resendCooldownSeconds: getCooldownSeconds(),
       user: user.toJSON()
     }
   });
@@ -526,15 +549,47 @@ const resendVerification = asyncHandler(async (req, res) => {
     throw new BadRequestError('Email da duoc xac nhan', 'EMAIL_ALREADY_VERIFIED');
   }
 
+  // 1) Atomically claim the 60-second per-account cooldown (SET NX EX).
+  //    Near-simultaneous requests are serialized by Redis, so at most one
+  //    resend per account can proceed within the cooldown window.
+  const cooldown = await claimResendCooldown(user._id);
+  if (!cooldown.allowed) {
+    throw new RateLimitError(
+      'Vui long cho truoc khi gui lai email xac nhan.',
+      'VERIFICATION_EMAIL_COOLDOWN',
+      cooldown.retryAfterSeconds
+    );
+  }
+
+  // 2) Long-window check: cap at 5 successful resends / 15 minutes per account.
+  //    The cooldown claimed above belongs to this request alone, so on rejection
+  //    roll it back instead of leaving an extra 60-second cooldown on top of the
+  //    15-minute denial. The token/email lifecycle is untouched on this path.
+  const windowCheck = await checkLongWindow(user._id);
+  if (!windowCheck.allowed) {
+    await releaseResendCooldown(user._id);
+    throw new RateLimitError(
+      'Ban da gui qua nhieu email xac nhan. Vui long thu lai sau.',
+      'VERIFICATION_EMAIL_RATE_LIMITED',
+      windowCheck.retryAfterSeconds
+    );
+  }
+
   const verificationToken = createEmailVerificationToken(user);
   await user.save({ validateBeforeSave: false });
 
   const verifyUrl = buildVerifyUrl(verificationToken, user.email);
   enqueueVerificationEmail(user, verifyUrl, req.requestId);
 
+  // Only a fully successful send is counted against the long window.
+  await incrementLongWindow(user._id);
+
   res.status(200).json({
     success: true,
-    message: 'Da gui lai email xac nhan'
+    message: 'Da gui lai email xac nhan',
+    data: {
+      resendCooldownSeconds: getCooldownSeconds()
+    }
   });
 });
 

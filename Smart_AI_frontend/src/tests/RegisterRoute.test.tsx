@@ -114,7 +114,7 @@ describe('Register /register route integration', () => {
     expect(panel).toHaveTextContent(
       'Bạn cần xác nhận email trước khi có thể đăng nhập và sử dụng tài khoản.'
     );
-    expect(screen.getByRole('button', { name: 'Gửi lại email xác nhận' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeInTheDocument();
     expect(localStorage.getItem('accessToken')).toBeNull();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });

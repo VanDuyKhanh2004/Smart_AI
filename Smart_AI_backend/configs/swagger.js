@@ -416,6 +416,7 @@ const options = {
           responses: {
             201: { description: 'User registered successfully' },
             400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+            409: { description: 'Account already exists. EMAIL_EXISTS when verified, EMAIL_NOT_VERIFIED when the account still requires email verification', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           },
         },
       },
@@ -567,6 +568,12 @@ const options = {
           },
           responses: {
             200: { description: 'Verification email sent' },
+            400: { description: 'Email already verified or validation error' },
+            404: { description: 'User not found' },
+            429: {
+              description: 'Rate limited. Codes: VERIFICATION_EMAIL_IP_RATE_LIMITED (per-IP abuse limit 30/15min), VERIFICATION_EMAIL_COOLDOWN (60s per account), VERIFICATION_EMAIL_RATE_LIMITED (5 successful resends/15min per account). Retry-After header set.',
+            },
+            503: { description: 'Throttling service temporarily unavailable' },
           },
         },
       },

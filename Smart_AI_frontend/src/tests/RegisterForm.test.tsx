@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import RegisterForm from '@/features/auth/components/RegisterForm';
 import { useAuthStore } from '@/stores/authStore';
@@ -40,13 +40,21 @@ const REGISTER_BODY = {
   },
 };
 
-async function fillAndSubmit() {
-  const user = userEvent.setup();
+async function fillAndSubmit(user = userEvent.setup()) {
   await user.type(screen.getByLabelText('Họ và tên'), 'Phạm Hùng Thiên');
   await user.type(screen.getByLabelText('Email'), 'thienhungpham5@gmail.com');
   await user.type(screen.getByLabelText('Mật khẩu'), 'password123');
   await user.type(screen.getByLabelText('Xác nhận mật khẩu'), 'password123');
   await user.click(screen.getByRole('button', { name: 'Đăng ký' }));
+}
+
+async function fillAndSubmitFireEvent() {
+  fireEvent.change(screen.getByLabelText('Họ và tên'), { target: { value: 'Phạm Hùng Thiên' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'thienhungpham5@gmail.com' } });
+  fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+  fireEvent.change(screen.getByLabelText('Xác nhận mật khẩu'), { target: { value: 'password123' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Đăng ký' }));
+  await act(async () => {});
 }
 
 describe('RegisterForm success-state runtime contract', () => {
@@ -62,6 +70,10 @@ describe('RegisterForm success-state runtime contract', () => {
     localStorage.clear();
     vi.clearAllMocks();
     vi.mocked(authService.register).mockResolvedValue(REGISTER_BODY);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('enters the success panel after a 201 service/store contract', async () => {
@@ -110,19 +122,86 @@ describe('RegisterForm success-state runtime contract', () => {
       success: true,
       message: 'Đã gửi lại email xác nhận',
     });
+    vi.useFakeTimers();
 
+    render(<RegisterForm />);
+    await fillAndSubmitFireEvent();
+
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+    await act(async () => {});
+
+    expect(authService.resendVerification).toHaveBeenCalledWith({
+      email: 'thienhungpham5@gmail.com',
+    });
+    expect(screen.getByText('Đã gửi lại email xác nhận')).toBeInTheDocument();
+  });
+
+  it('enters the 60s resend cooldown right after successful registration', async () => {
     render(<RegisterForm />);
     await fillAndSubmit();
 
-    const resendButton = await screen.findByRole('button', { name: 'Gửi lại email xác nhận' });
-    await userEvent.click(resendButton);
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeDisabled();
+  });
 
-    await waitFor(() => {
-      expect(authService.resendVerification).toHaveBeenCalledWith({
-        email: 'thienhungpham5@gmail.com',
-      });
+  it('shows Đang gửi... while a resend request is in flight', async () => {
+    let resolveResend: (value: { success: boolean; message: string }) => void;
+    vi.mocked(authService.resendVerification).mockReturnValue(
+      new Promise((resolve) => {
+        resolveResend = resolve;
+      })
+    );
+    vi.useFakeTimers();
+
+    render(<RegisterForm />);
+    await fillAndSubmitFireEvent();
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
     });
-    expect(await screen.findByText('Đã gửi lại email xác nhận')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+    await act(async () => {});
+
+    expect(screen.getByRole('button', { name: 'Đang gửi...' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Đang gửi...' })).toBeDisabled();
+
+    act(() => {
+      resolveResend({ success: true, message: 'Đã gửi lại email xác nhận' });
+    });
+  });
+
+  it('syncs the countdown from a backend 429 retryAfterSeconds', async () => {
+    const cooldownError = Object.assign(new Error('Request failed with status code 429'), {
+      response: {
+        data: {
+          success: false,
+          error: { code: 'VERIFICATION_EMAIL_COOLDOWN', message: 'Vui long cho truoc khi gui lai email xac nhan.' },
+          data: { retryAfterSeconds: 42 },
+        },
+      },
+    });
+    vi.mocked(authService.resendVerification).mockRejectedValue(cooldownError);
+    vi.useFakeTimers();
+
+    render(<RegisterForm />);
+    await fillAndSubmitFireEvent();
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+    await act(async () => {});
+
+    expect(screen.getByText('Vui long cho truoc khi gui lai email xac nhan.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 42s' })).toBeInTheDocument();
   });
 
   it('shows backend validation errors when registration fails', async () => {
@@ -137,6 +216,141 @@ describe('RegisterForm success-state runtime contract', () => {
 
     expect(await screen.findByText('Email đã được đăng ký')).toBeInTheDocument();
     expect(screen.queryByTestId('register-success')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Gửi lại email xác nhận' })).not.toBeInTheDocument();
+  });
+});
+
+describe('RegisterForm EMAIL_NOT_VERIFIED recovery contract', () => {
+  beforeEach(() => {
+    useAuthStore.setState({
+      user: null,
+      accessToken: null,
+      isAuthenticated: false,
+      isLoading: false,
+      error: null,
+      errorCode: null,
+    });
+    localStorage.clear();
+    vi.clearAllMocks();
+    vi.mocked(authService.register).mockRejectedValue({
+      response: {
+        data: {
+          success: false,
+          error: {
+            code: 'EMAIL_NOT_VERIFIED',
+            message: 'Tài khoản với email này chưa được xác nhận.',
+          },
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('renders the verification recovery UI instead of the generic duplicate-email error', async () => {
+    render(<RegisterForm />);
+    await fillAndSubmit();
+
+    const panel = await screen.findByTestId('register-recovery');
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveTextContent(
+      'Tài khoản này đã được đăng ký nhưng chưa được xác nhận email.'
+    );
+    expect(screen.queryByTestId('register-success')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Đăng ký' })).toBeInTheDocument();
+  });
+
+  it('preserves and displays the submitted email in the recovery panel', async () => {
+    render(<RegisterForm />);
+    await fillAndSubmit();
+
+    const panel = await screen.findByTestId('register-recovery');
+    expect(panel).toHaveTextContent('thienhungpham5@gmail.com');
+    expect(screen.getByText('thienhungpham5@gmail.com')).toBeInTheDocument();
+  });
+
+  it('resend button goes through the existing resendVerification flow', async () => {
+    vi.mocked(authService.resendVerification).mockResolvedValue({
+      success: true,
+      message: 'Đã gửi lại email xác nhận',
+    });
+
+    render(<RegisterForm />);
+    await fillAndSubmit();
+    await screen.findByTestId('register-recovery');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+    await act(async () => {});
+
+    expect(authService.resendVerification).toHaveBeenCalledWith({
+      email: 'thienhungpham5@gmail.com',
+    });
+    expect(screen.getByText('Đã gửi lại email xác nhận')).toBeInTheDocument();
+  });
+
+  it('starts the 60s resend cooldown after a successful resend in the recovered state', async () => {
+    vi.mocked(authService.resendVerification).mockResolvedValue({
+      success: true,
+      message: 'Đã gửi lại email xác nhận',
+    });
+    vi.useFakeTimers();
+
+    render(<RegisterForm />);
+    await fillAndSubmitFireEvent();
+    await act(async () => {});
+    expect(screen.getByTestId('register-recovery')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+    await act(async () => {});
+
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60s' })).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(screen.getByRole('button', { name: 'Gửi lại email xác nhận' })).toBeInTheDocument();
+  });
+
+  it('syncs the recovered-state countdown from a backend 429 retryAfterSeconds', async () => {
+    const cooldownError = Object.assign(new Error('Request failed with status code 429'), {
+      response: {
+        data: {
+          success: false,
+          error: { code: 'VERIFICATION_EMAIL_COOLDOWN', message: 'Vui long cho truoc khi gui lai email xac nhan.' },
+          data: { retryAfterSeconds: 42 },
+        },
+      },
+    });
+    vi.mocked(authService.resendVerification).mockRejectedValue(cooldownError);
+    vi.useFakeTimers();
+
+    render(<RegisterForm />);
+    await fillAndSubmitFireEvent();
+    await act(async () => {});
+    expect(screen.getByTestId('register-recovery')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại email xác nhận' }));
+    await act(async () => {});
+
+    expect(screen.getByText('Vui long cho truoc khi gui lai email xac nhan.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 42s' })).toBeInTheDocument();
+  });
+
+  it('verified duplicate registration still shows the normal already-registered behavior', async () => {
+    vi.mocked(authService.register).mockRejectedValue({
+      response: {
+        data: { success: false, error: { code: 'EMAIL_EXISTS', message: 'Email đã được đăng ký' } },
+      },
+    });
+
+    render(<RegisterForm />);
+    await fillAndSubmit();
+
+    expect(await screen.findByText('Email đã được đăng ký')).toBeInTheDocument();
+    expect(screen.queryByTestId('register-recovery')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Gửi lại email xác nhận' })).not.toBeInTheDocument();
   });
 });

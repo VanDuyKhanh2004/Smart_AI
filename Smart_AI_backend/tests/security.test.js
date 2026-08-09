@@ -263,7 +263,7 @@ describe('Auth/session limiter (google-login, refresh, verify-email)', () => {
   });
 });
 
-describe('Email-action limiter (resend-verification, forgot-password, request-unlock)', () => {
+describe('Email-action limiter (forgot-password, request-unlock) and dedicated resend-verification limiter', () => {
   let app;
 
   beforeEach(() => {
@@ -271,24 +271,40 @@ describe('Email-action limiter (resend-verification, forgot-password, request-un
     app = buildApp();
   });
 
-  it('allows 5 requests to POST /api/auth/resend-verification then returns 429', async () => {
+  it('forgot-password and request-unlock still share the unchanged 5/15-min email bucket', async () => {
+    for (let i = 0; i < 4; i++) {
+      await request(app).post('/api/auth/forgot-password').send({});
+    }
+    const unlock1 = await request(app).post('/api/auth/request-unlock').send({});
+    expect(unlock1.status).toBe(200);
+    const unlock2 = await request(app).post('/api/auth/request-unlock').send({});
+    expect(unlock2.status).toBe(429);
+    expect(unlock2.headers['ratelimit-limit']).toBe('5');
+    expect(unlock2.body.error.code).toBe('TOO_MANY_REQUESTS');
+  });
+
+  it('resend-verification no longer shares the email-action bucket', async () => {
     for (let i = 0; i < 5; i++) {
+      await request(app).post('/api/auth/forgot-password').send({});
+    }
+    const blockedForgot = await request(app).post('/api/auth/forgot-password').send({});
+    expect(blockedForgot.status).toBe(429);
+
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app).post('/api/auth/resend-verification').send({});
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('resend-verification allows 30 requests then returns 429 with a distinct code', async () => {
+    for (let i = 0; i < 30; i++) {
       const res = await request(app).post('/api/auth/resend-verification').send({});
       expect(res.status).toBe(200);
     }
     const blocked = await request(app).post('/api/auth/resend-verification').send({});
     expect(blocked.status).toBe(429);
-    expect(blocked.headers['ratelimit-limit']).toBe('5');
-  });
-
-  it('shares one bucket across resend-verification, forgot-password, and request-unlock', async () => {
-    for (let i = 0; i < 4; i++) {
-      await request(app).post('/api/auth/resend-verification').send({});
-    }
-    const forgot = await request(app).post('/api/auth/forgot-password').send({});
-    expect(forgot.status).toBe(200);
-    const unlock = await request(app).post('/api/auth/request-unlock').send({});
-    expect(unlock.status).toBe(429);
+    expect(blocked.headers['ratelimit-limit']).toBe('30');
+    expect(blocked.body.error.code).toBe('VERIFICATION_EMAIL_IP_RATE_LIMITED');
   });
 });
 
@@ -436,7 +452,7 @@ describe('Sensitive data leakage', () => {
 
   it('does not echo tokens, credentials, or request bodies in 429 responses', async () => {
     const secret = 'SUPERSECRET-TOKEN-abc123';
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 30; i++) {
       await request(app)
         .post('/api/auth/resend-verification')
         .set('Authorization', `Bearer ${secret}`)

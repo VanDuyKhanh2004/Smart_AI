@@ -28,6 +28,15 @@ export interface RegisterResponse {
     user: User;
     email?: string;
     requiresEmailVerification?: boolean;
+    resendCooldownSeconds?: number;
+  };
+}
+
+export interface ResendVerificationResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    resendCooldownSeconds?: number;
   };
 }
 

@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 let redisClient = null;
 let shuttingDown = false;
 let status = 'disconnected';
+let connectPromise = null;
 
 const calculateReconnectDelay = (attemptIndex) => {
   return Math.min(500 * Math.pow(2, attemptIndex), 30000);
@@ -32,7 +33,7 @@ const getRedisClient = () => {
 };
 
 const connectRedis = async () => {
-  if (redisClient?.isOpen) {
+  if (redisClient?.isOpen || connectPromise) {
     return;
   }
 
@@ -46,6 +47,7 @@ const connectRedis = async () => {
   });
 
   redisClient.on('connect', () => {
+    status = 'connecting';
     logger.info('Redis connecting...');
   });
 
@@ -68,7 +70,34 @@ const connectRedis = async () => {
     logger.error({ err: error }, 'Redis connection error');
   });
 
-  await redisClient.connect();
+  // Kick off the connection in the background and return immediately.
+  // node-redis keeps retrying internally based on `reconnectStrategy` and its
+  // `connect()` promise only resolves once connected (or rejects when a
+  // strategy returns an Error, e.g. during shutdown). Awaiting that promise
+  // here would stall server startup while Redis is unreachable, so degrade.
+  status = 'connecting';
+  const connectOp = redisClient.connect();
+  connectPromise = connectOp
+    .then(() => {
+      connectPromise = null;
+      return undefined;
+    })
+    .catch((error) => {
+      connectPromise = null;
+      if (!shuttingDown) {
+        logger.warn(
+          { err: { message: error.message } },
+          'Redis initial connect failed — running in degraded mode',
+        );
+      }
+      return undefined;
+    });
+
+  logger.info(
+    'Redis connection started in background (non-blocking); server will start even if Redis is unavailable',
+  );
+
+  return undefined;
 };
 
 const disconnectRedis = async () => {
