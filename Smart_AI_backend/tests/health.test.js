@@ -351,7 +351,7 @@ describe('Readiness endpoint GET /api/health/ready', () => {
     expect(res.body.status).toBe('not_ready');
   });
 
-  it('returns 503 when Redis is down', async () => {
+  it('returns 200 and status "degraded" when Redis is down (Redis is non-critical for readiness)', async () => {
     const mongoose = require('mongoose');
     mongoose.connection.readyState = 1;
     const { getRedisClient } = require('../configs/redis');
@@ -360,11 +360,14 @@ describe('Readiness endpoint GET /api/health/ready', () => {
     await buildApp();
     const res = await request(app).get('/api/health/ready');
 
-    expect(res.status).toBe(503);
-    expect(res.body.status).toBe('not_ready');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.dependencies.redis.status).toBe('down');
+    expect(res.body.dependencies.mongodb.status).toBe('up');
   });
 
-  it('returns 503 when Redis is reconnecting (readiness)', async () => {
+  it('returns 200 and status "degraded" when Redis is reconnecting (readiness)', async () => {
     const mongoose = require('mongoose');
     mongoose.connection.readyState = 1;
     const { getRedisClient, getRedisStatus } = require('../configs/redis');
@@ -374,8 +377,41 @@ describe('Readiness endpoint GET /api/health/ready', () => {
     await buildApp();
     const res = await request(app).get('/api/health/ready');
 
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.status).toBe('degraded');
     expect(res.body.dependencies.redis.status).toBe('reconnecting');
+  });
+
+  it('does not hang the readiness probe when Redis is open but not ready; reports as degraded', async () => {
+    const mongoose = require('mongoose');
+    mongoose.connection.readyState = 1;
+    const { getRedisClient } = require('../configs/redis');
+    const pingMock = jest.fn();
+    getRedisClient.mockReturnValue({ isOpen: true, isReady: false, ping: pingMock });
+
+    await buildApp();
+    const res = await request(app).get('/api/health/ready');
+
+    expect(pingMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.dependencies.redis.status).toBe('down');
+  });
+
+  it('returns 503 and status "not_ready" when MongoDB is down even if Redis is up', async () => {
+    const mongoose = require('mongoose');
+    mongoose.connection.readyState = 0;
+    const { getRedisClient } = require('../configs/redis');
+    const redisClient = { isOpen: true, ping: jest.fn().mockResolvedValue('PONG') };
+    getRedisClient.mockReturnValue(redisClient);
+
+    await buildApp();
+    const res = await request(app).get('/api/health/ready');
+
+    expect(res.status).toBe(503);
+    expect(res.body.success).toBe(false);
+    expect(res.body.status).toBe('not_ready');
   });
 
   it('logs a structured warning when unhealthy', async () => {

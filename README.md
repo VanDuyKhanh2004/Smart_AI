@@ -122,7 +122,7 @@
                           │ HTTP (REST) / WebSocket (Socket.IO)
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│               Backend (Express 4 + Node.js 18+)              │
+│               Backend (Express 4 + Node.js 20+)              │
 │    Middleware: correlationId, cors, requestLogger, auth      │
 │    Controllers: auth, product, order, cart, chat, review,    │
 │                 promotion, store, appointment, complaint     │
@@ -158,7 +158,7 @@
 ## Setup
 
 ### Prerequisites
-- Node.js >= 18
+- Node.js >= 20
 - npm >= 9
 - Docker Desktop (for Docker deployment)
 - MongoDB Atlas cluster (for `$vectorSearch`)

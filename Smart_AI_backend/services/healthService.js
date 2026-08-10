@@ -4,6 +4,21 @@ const { getBullMQHealth } = require('../bullmq/bootstrap');
 
 const SERVICE_NAME = 'smart-ai-backend';
 
+/*
+ * Health semantics:
+ *
+ * - liveness (`/live`): the process is up — no dependency checks.
+ * - health (`/health`): 200 healthy only when MongoDB AND Redis are up; 503
+ *   otherwise. Informational summary of all services.
+ * - readiness (`/ready`): MongoDB is the critical dependency (persistent source
+ *   of truth). Redis is treated as non-critical for serving: core HTTP flows,
+ *   Mongo-backed CRUD, chat (with local dedup fallback) all continue while
+ *   Redis is down. Therefore:
+ *     MongoDB down -> not_ready (503)
+ *     MongoDB up, Redis down -> degraded (200) — process keeps serving traffic
+ *     MongoDB up, Redis up -> ready (200)
+ */
+
 const checkMongoDB = async () => {
   const start = Date.now();
   const state = mongoose.connection.readyState;
@@ -36,6 +51,13 @@ const checkRedis = async () => {
   }
 
   if (!client.isOpen) {
+    return { status: 'down', responseTimeMs: Date.now() - start };
+  }
+
+  // node-redis keeps isOpen true across reconnects and buffers ping() while not
+  // ready; probing a not-ready connection would hang the health probe. Report
+  // it as down instead so the probe returns promptly.
+  if (client.isReady === false) {
     return { status: 'down', responseTimeMs: Date.now() - start };
   }
 
@@ -102,11 +124,17 @@ const getReadinessData = async (req) => {
   ]);
 
   const totalDurationMs = Date.now() - totalStart;
-  const allUp = mongodb.status === 'up' && redis.status === 'up';
+
+  // MongoDB is the only critical dependency for serving traffic. Redis down
+  // degrades a subset of features (cache, dedup cross-instance guarantees,
+  // resend throttling) but must not unroute the whole process.
+  const mongoReady = mongodb.status === 'up';
+  const redisUp = redis.status === 'up';
+  const status = mongoReady && redisUp ? 'ready' : mongoReady ? 'degraded' : 'not_ready';
 
   return {
-    success: allUp,
-    status: allUp ? 'ready' : 'not_ready',
+    success: mongoReady,
+    status,
     service: SERVICE_NAME,
     environment: process.env.NODE_ENV || 'development',
     uptimeSeconds: Math.floor(process.uptime()),

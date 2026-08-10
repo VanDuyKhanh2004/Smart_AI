@@ -1,6 +1,7 @@
 const { Worker } = require('bullmq');
 const logger = require('../utils/logger');
 const { getBullMQConnection, getBullMQConfig } = require('../queues/queueConnection');
+const { logWorkerError } = require('../utils/reconnectLogger');
 
 const createWorker = (name, processor, options = {}) => {
   const { prefix, defaultConcurrency } = getBullMQConfig();
@@ -43,13 +44,9 @@ const createWorker = (name, processor, options = {}) => {
   });
 
   worker.on('error', (err) => {
-    logger.error(
-      {
-        queueName: name,
-        err: { message: err?.message },
-      },
-      'BullMQ worker error',
-    );
+    // Connection-level errors repeat once per backoff step during an outage;
+    // collapse them per interval while preserving periodic observability.
+    logWorkerError(name, err);
   });
 
   worker.on('stalled', (jobId) => {
