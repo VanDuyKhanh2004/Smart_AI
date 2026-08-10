@@ -1,5 +1,6 @@
 const logger = require('../utils/logger');
 const { isShuttingDown, calculateReconnectDelay } = require('../configs/redis');
+const { logReconnectAttempt } = require('../utils/reconnectLogger');
 
 const retryStrategy = (times) => {
   if (isShuttingDown()) {
@@ -7,7 +8,7 @@ const retryStrategy = (times) => {
     return null;
   }
   const delayMs = calculateReconnectDelay(times - 1);
-  logger.info({ attempt: times, delayMs }, 'BullMQ Redis reconnect scheduled');
+  logReconnectAttempt('BullMQ Redis reconnect scheduled', times, delayMs);
   return delayMs;
 };
 

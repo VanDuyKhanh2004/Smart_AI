@@ -26,6 +26,7 @@ jest.mock('../configs/redis', () => ({
 }));
 
 const dedup = require('../services/chatMessageDedupService');
+const { getRedisClient } = require('../configs/redis');
 
 const USER = '507f1f77bcf86cd799439011';
 const SESSION = '550e8400-e29b-41d4-a716-446655440000';
@@ -109,5 +110,69 @@ describe('chatMessageDedupService', () => {
     expect(dedup.buildKey(USER, SESSION, CLIENT_ID)).toBe(
       `chat:message:user:${USER}:${SESSION}:${CLIENT_ID}`
     );
+  });
+});
+
+describe('chatMessageDedupService — Redis readiness gate', () => {
+  beforeEach(() => {
+    dedup._resetLocal();
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    getRedisClient.mockReturnValue(null);
+  });
+
+  it('falls back to local store when client is open but NOT ready (no Redis call, no hang)', async () => {
+    const client = {
+      isOpen: true,
+      isReady: false,
+      set: jest.fn(),
+      get: jest.fn(),
+      setEx: jest.fn(),
+      del: jest.fn(),
+    };
+    getRedisClient.mockReturnValue(client);
+
+    const result = await dedup.claim(USER, SESSION, CLIENT_ID);
+    expect(result).toEqual({ claimed: true, duplicate: false, state: 'processing' });
+    expect(client.set).not.toHaveBeenCalled();
+
+    await dedup.markCompleted(USER, SESSION, CLIENT_ID, { ok: true });
+    expect(client.setEx).not.toHaveBeenCalled();
+    expect(dedup._getLocalSize()).toBeGreaterThan(0);
+  });
+
+  it('uses Redis when the client is ready', async () => {
+    const client = {
+      isOpen: true,
+      isReady: true,
+      set: jest.fn().mockResolvedValue('OK'),
+      get: jest.fn(),
+      setEx: jest.fn(),
+      del: jest.fn(),
+    };
+    getRedisClient.mockReturnValue(client);
+
+    const result = await dedup.claim(USER, SESSION, CLIENT_ID);
+    expect(result).toEqual({ claimed: true, duplicate: false, state: 'processing' });
+    expect(client.set).toHaveBeenCalledTimes(1);
+    expect(dedup._getLocalSize()).toBe(0);
+  });
+
+  it('degrades to local when a ready client rejects mid-flight', async () => {
+    const client = {
+      isOpen: true,
+      isReady: true,
+      set: jest.fn().mockRejectedValue(new Error('ClientOfflineError')),
+      get: jest.fn(),
+      setEx: jest.fn(),
+      del: jest.fn(),
+    };
+    getRedisClient.mockReturnValue(client);
+
+    const result = await dedup.claim(USER, SESSION, CLIENT_ID);
+    expect(result).toEqual({ claimed: true, duplicate: false, state: 'processing' });
+    expect(dedup._getLocalSize()).toBe(1);
   });
 });

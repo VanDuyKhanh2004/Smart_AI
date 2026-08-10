@@ -65,6 +65,33 @@ describe('calculateReconnectDelay', () => {
   });
 });
 
+describe('Node Redis reconnectStrategy logging throttle', () => {
+  let redis;
+
+  beforeEach(() => {
+    jest.resetModules();
+    mockRedisHandlers = {};
+    mockRedisClient.connect.mockClear();
+    mockRedisClient.quit.mockClear();
+    getMockLogger().info.mockClear();
+    redis = require('../configs/redis');
+  });
+
+  it('logs the first attempt and suppresses identical-delay repeats', () => {
+    const logger = getMockLogger();
+    redis.reconnectStrategy(8); // capped at 30000
+    redis.reconnectStrategy(8); // same delay -> suppressed
+    expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs again when the backoff delay changes', () => {
+    const logger = getMockLogger();
+    redis.reconnectStrategy(5); // 16000
+    redis.reconnectStrategy(6); // 30000 (delay changed) -> logged
+    expect(logger.info).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('Node Redis reconnectStrategy', () => {
   let redis;
 
@@ -183,6 +210,20 @@ describe('BullMQ retryStrategy', () => {
     );
   });
 
+  it('throttles repeated identical-delay BullMQ reconnect schedules', () => {
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    const logger = getMockLogger();
+    logger.info.mockClear();
+    const conn = queueConnection.getBullMQConnection();
+    conn.retryStrategy(8); // capped delay 30000
+    conn.retryStrategy(8);
+    conn.retryStrategy(9); // same capped delay -> still throttled
+    const scheduleCalls = logger.info.mock.calls.filter(
+      (c) => c[1] === 'BullMQ Redis reconnect scheduled',
+    );
+    expect(scheduleCalls).toHaveLength(1);
+  });
+
   it('logs shutdown stop', () => {
     process.env.REDIS_URL = 'redis://localhost:6379';
     const logger = getMockLogger();
@@ -269,6 +310,14 @@ describe('Status transitions', () => {
     expect(redis.getRedisStatus()).toBe('connected');
     redis.setShuttingDown();
     expect(redis.getRedisStatus()).toBe('disconnected');
+  });
+
+  it('creates the shared client with disableOfflineQueue to avoid indefinite command buffering', async () => {
+    await redis.connectRedis();
+    const { createClient } = require('redis');
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({ disableOfflineQueue: true })
+    );
   });
 
   it('isShuttingDown returns true after setShuttingDown', () => {

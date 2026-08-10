@@ -1,6 +1,11 @@
 const { createClient } = require('redis');
 
 const logger = require('../utils/logger');
+const {
+  logReconnectAttempt,
+  logThrottledWarn,
+  logThrottledError,
+} = require('../utils/reconnectLogger');
 
 let redisClient = null;
 let shuttingDown = false;
@@ -24,7 +29,7 @@ const reconnectStrategy = (retries) => {
     return new Error('SHUTTING_DOWN');
   }
   const delayMs = calculateReconnectDelay(retries);
-  logger.info({ attempt: retries + 1, delayMs }, 'Redis reconnect scheduled');
+  logReconnectAttempt('Redis reconnect scheduled', retries + 1, delayMs);
   return delayMs;
 };
 
@@ -44,6 +49,11 @@ const connectRedis = async () => {
   redisClient = createClient({
     url: process.env.REDIS_URL,
     socket: { reconnectStrategy },
+    // Do not buffer commands in memory while reconnecting: with the waiters on
+    // isReady they would otherwise sit in the offline queue and hang requests
+    // indefinitely. Fail fast instead and let each caller apply its failure
+    // policy (fail-open cache, local fallback, or fail-closed 503).
+    disableOfflineQueue: true,
   });
 
   redisClient.on('connect', () => {
@@ -58,7 +68,7 @@ const connectRedis = async () => {
 
   redisClient.on('reconnecting', () => {
     status = 'reconnecting';
-    logger.warn('Redis reconnecting...');
+    logThrottledWarn('redis:client:reconnecting', 'Redis reconnecting...');
   });
 
   redisClient.on('end', () => {
@@ -67,7 +77,11 @@ const connectRedis = async () => {
   });
 
   redisClient.on('error', (error) => {
-    logger.error({ err: error }, 'Redis connection error');
+    logThrottledError(
+      'redis:client:error',
+      'Redis connection error',
+      { err: { message: error && error.message } },
+    );
   });
 
   // Kick off the connection in the background and return immediately.

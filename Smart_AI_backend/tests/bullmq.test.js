@@ -257,6 +257,18 @@ describe('BullMQ workerFactory', () => {
     );
   });
 
+  it('throttles repeated connection errors from the same worker', () => {
+    const { createWorker } = require('../workers/workerFactory');
+    const pinoError = mockPino().error;
+    pinoError.mockClear();
+    const worker = createWorker('testQueue', jest.fn());
+
+    worker.emit('error', new Error('conn lost 1'));
+    worker.emit('error', new Error('conn lost 2'));
+
+    expect(pinoError).toHaveBeenCalledTimes(1);
+  });
+
   it('stalled event logs job id', () => {
     const { createWorker } = require('../workers/workerFactory');
     const pinoWarn = mockPino().warn;

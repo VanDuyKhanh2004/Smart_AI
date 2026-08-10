@@ -42,6 +42,17 @@ function buildKey(userId, sessionId, clientMessageId) {
   return `${KEY_PREFIX}${userId}:${sessionId}:${clientMessageId}`;
 }
 
+// node-redis keeps isOpen true across reconnects and buffers commands while not
+// ready. Only dispatch to Redis when the client can actually serve a command;
+// otherwise fall back to the local store instead of hanging the request.
+function getReadyClient() {
+  const client = getRedisClient && getRedisClient();
+  if (!client || client.isOpen !== true || client.isReady !== true) {
+    return null;
+  }
+  return client;
+}
+
 function encode(state, payload) {
   return JSON.stringify(payload ? { state, payload } : { state });
 }
@@ -93,21 +104,26 @@ function localClaim(key) {
 
 async function claim(userId, sessionId, clientMessageId) {
   const key = buildKey(userId, sessionId, clientMessageId);
-  const client = getRedisClient && getRedisClient();
+  const client = getReadyClient();
 
-  if (client && client.isOpen) {
-    const claimed = await client.set(key, encode('processing'), { NX: true, EX: TTL_SECONDS });
-    if (claimed === 'OK') {
-      return { claimed: true, duplicate: false, state: 'processing' };
+  if (client) {
+    try {
+      const claimed = await client.set(key, encode('processing'), { NX: true, EX: TTL_SECONDS });
+      if (claimed === 'OK') {
+        return { claimed: true, duplicate: false, state: 'processing' };
+      }
+      const raw = await client.get(key);
+      const rec = decode(raw);
+      return {
+        claimed: false,
+        duplicate: true,
+        state: rec ? rec.state : 'processing',
+        payload: rec ? rec.payload : undefined,
+      };
+    } catch {
+      // A transient Redis error must not block the chat pipeline; degrade to
+      // the bounded local store for this message.
     }
-    const raw = await client.get(key);
-    const rec = decode(raw);
-    return {
-      claimed: false,
-      duplicate: true,
-      state: rec ? rec.state : 'processing',
-      payload: rec ? rec.payload : undefined,
-    };
   }
 
   return localClaim(key);
@@ -115,10 +131,15 @@ async function claim(userId, sessionId, clientMessageId) {
 
 async function markCompleted(userId, sessionId, clientMessageId, payload) {
   const key = buildKey(userId, sessionId, clientMessageId);
-  const client = getRedisClient && getRedisClient();
-  if (client && client.isOpen) {
-    await client.setEx(key, TTL_SECONDS, encode('completed', payload));
-    return;
+  const client = getReadyClient();
+  if (client) {
+    try {
+      await client.setEx(key, TTL_SECONDS, encode('completed', payload));
+      return;
+    } catch {
+      // Same degraded fallback as claim: persist locally so a redelivery within
+      // TTL still replays the payload in this process.
+    }
   }
   localStore.set(key, {
     record: { state: 'completed', payload },
@@ -133,8 +154,8 @@ async function markCompleted(userId, sessionId, clientMessageId, payload) {
  */
 async function release(userId, sessionId, clientMessageId) {
   const key = buildKey(userId, sessionId, clientMessageId);
-  const client = getRedisClient && getRedisClient();
-  if (client && client.isOpen) {
+  const client = getReadyClient();
+  if (client) {
     try {
       await client.del(key);
     } catch (err) {

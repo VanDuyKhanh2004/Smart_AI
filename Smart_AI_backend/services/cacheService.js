@@ -1,9 +1,20 @@
 const { getRedisClient } = require('../configs/redis');
 
+// node-redis keeps isOpen true across reconnects and (without disableOfflineQueue)
+// buffers commands while not ready. Fail-open consumers must not wait forever on
+// a Redis that is momentarily unready, so treat non-ready clients as absent.
+const getReadyClient = () => {
+  const client = getRedisClient();
+  if (!client || client.isOpen !== true || client.isReady !== true) {
+    return null;
+  }
+  return client;
+};
+
 const get = async (key) => {
   try {
-    const client = getRedisClient();
-    if (!client?.isOpen) {
+    const client = getReadyClient();
+    if (!client) {
       return null;
     }
 
@@ -21,8 +32,8 @@ const get = async (key) => {
 
 const set = async (key, value, ttlSeconds = 300) => {
   try {
-    const client = getRedisClient();
-    if (!client?.isOpen) {
+    const client = getReadyClient();
+    if (!client) {
       return;
     }
 
@@ -34,8 +45,8 @@ const set = async (key, value, ttlSeconds = 300) => {
 
 const del = async (key) => {
   try {
-    const client = getRedisClient();
-    if (!client?.isOpen) {
+    const client = getReadyClient();
+    if (!client) {
       return;
     }
 
@@ -47,8 +58,8 @@ const del = async (key) => {
 
 const exists = async (key) => {
   try {
-    const client = getRedisClient();
-    if (!client?.isOpen) {
+    const client = getReadyClient();
+    if (!client) {
       return false;
     }
 
@@ -62,8 +73,8 @@ const exists = async (key) => {
 
 const invalidatePattern = async (pattern) => {
   try {
-    const client = getRedisClient();
-    if (!client?.isOpen) {
+    const client = getReadyClient();
+    if (!client) {
       return 0;
     }
 
