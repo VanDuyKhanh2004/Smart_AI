@@ -6,6 +6,9 @@ on:
     paths:
       - Smart_AI_frontend/**
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy
