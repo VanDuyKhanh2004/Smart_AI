@@ -28,6 +28,12 @@ const {
   LEGACY_INDEX_NAME,
 } = require('../scripts/migrateConversationOwnershipIndex');
 
+// Capture the pre-suite process state so failure-path assertions can never
+// leak a non-zero exit code (or a mutated MONGO_CONNECTION_STRING) out of this
+// test suite into the shared Jest process.
+const originalExitCode = process.exitCode;
+const originalMongoConnectionString = process.env.MONGO_CONNECTION_STRING;
+
 const baseIndexes = [{ v: 2, key: { _id: 1 }, name: '_id_' }];
 const legacyIndex = { v: 2, key: { sessionId: 1 }, name: LEGACY_INDEX_NAME, unique: true };
 const targetUnique = { v: 2, key: { userId: 1, sessionId: 1 }, name: TARGET_INDEX_NAME, unique: true };
@@ -59,6 +65,16 @@ beforeEach(() => {
   mockMongoose.connect.mockReset();
   mockMongoose.disconnect.mockReset();
   mockMongoose.connection.db = null;
+});
+
+afterEach(() => {
+  // Restore the exact pre-suite state (undefined stays undefined — never force 0).
+  process.exitCode = originalExitCode;
+  if (originalMongoConnectionString === undefined) {
+    delete process.env.MONGO_CONNECTION_STRING;
+  } else {
+    process.env.MONGO_CONNECTION_STRING = originalMongoConnectionString;
+  }
 });
 
 describe('planIndexMigration (pure planning)', () => {
