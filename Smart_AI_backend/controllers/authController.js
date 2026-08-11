@@ -24,6 +24,7 @@ const {
   RateLimitError,
 } = require('../utils/errors');
 const { hashToken } = require('../utils/tokenHash');
+const logger = require('../utils/logger');
 const {
   claimResendCooldown,
   startResendCooldown,
@@ -43,13 +44,13 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
 if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
-  console.error('GOOGLE_CLIENT_ID chưa được cấu hình trong biến môi trường');
+  logger.warn('GOOGLE_CLIENT_ID chưa được cấu hình trong biến môi trường');
 }
 if (!JWT_SECRET || JWT_SECRET === 'YOUR_JWT_SECRET') {
-  console.error('JWT_SECRET chưa được cấu hình trong biến môi trường');
+  logger.warn('JWT_SECRET chưa được cấu hình trong biến môi trường');
 }
 if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET === 'YOUR_REFRESH_SECRET') {
-  console.error('JWT_REFRESH_SECRET chưa được cấu hình trong biến môi trường');
+  logger.warn('JWT_REFRESH_SECRET chưa được cấu hình trong biến môi trường');
 }
 
 const client = GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID'
@@ -761,7 +762,10 @@ const adminUnlockAccount = asyncHandler(async (req, res) => {
 
   await user.resetLoginAttempts();
 
-  console.log(`Admin ${req.user.email} unlocked account ${email}`);
+  logger.info(
+    { adminUserId: req.user._id, unlockedUserId: user._id },
+    'Admin unlocked account',
+  );
 
   res.status(200).json({
     success: true,

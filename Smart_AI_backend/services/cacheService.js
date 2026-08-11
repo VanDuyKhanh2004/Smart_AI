@@ -1,4 +1,5 @@
 const { getRedisClient } = require('../configs/redis');
+const logger = require('../utils/logger');
 
 // node-redis keeps isOpen true across reconnects and (without disableOfflineQueue)
 // buffers commands while not ready. Fail-open consumers must not wait forever on
@@ -25,7 +26,7 @@ const get = async (key) => {
 
     return JSON.parse(value);
   } catch (error) {
-    console.error('Cache get error:', error.message);
+    logger.warn({ err: { message: error.message }, key, scope: 'cache:get' }, 'Cache get error');
     return null;
   }
 };
@@ -39,7 +40,7 @@ const set = async (key, value, ttlSeconds = 300) => {
 
     await client.setEx(key, ttlSeconds, JSON.stringify(value));
   } catch (error) {
-    console.error('Cache set error:', error.message);
+    logger.warn({ err: { message: error.message }, key, scope: 'cache:set' }, 'Cache set error');
   }
 };
 
@@ -52,7 +53,7 @@ const del = async (key) => {
 
     await client.del(key);
   } catch (error) {
-    console.error('Cache del error:', error.message);
+    logger.warn({ err: { message: error.message }, key, scope: 'cache:del' }, 'Cache del error');
   }
 };
 
@@ -66,7 +67,7 @@ const exists = async (key) => {
     const result = await client.exists(key);
     return result === 1;
   } catch (error) {
-    console.error('Cache exists error:', error.message);
+    logger.warn({ err: { message: error.message }, key, scope: 'cache:exists' }, 'Cache exists error');
     return false;
   }
 };
@@ -94,7 +95,7 @@ const invalidatePattern = async (pattern) => {
 
     return deletedCount;
   } catch (error) {
-    console.error('Cache invalidatePattern error:', error.message);
+    logger.warn({ err: { message: error.message }, pattern, scope: 'cache:invalidatePattern' }, 'Cache invalidatePattern error');
     return 0;
   }
 };

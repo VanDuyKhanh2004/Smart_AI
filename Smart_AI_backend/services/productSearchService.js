@@ -1,5 +1,6 @@
 const Product = require('../models/Product');
 const { generateEmbedding } = require('../utils/openai');
+const logger = require('../utils/logger');
 
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 10;
@@ -43,10 +44,10 @@ function buildMongoFilter(filters) {
 const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
   const safeLimit = Math.min(Math.max(1, Math.floor(limit)), MAX_LIMIT);
 
-  console.log(`[Semantic Search] Query: "${queryText}"`);
+  logger.debug({ queryLength: queryText?.length || 0 }, '[Semantic Search] Query received');
   if (filters) {
     const logSafe = { ...filters };
-    console.log(`[Semantic Search] Filters: ${JSON.stringify(logSafe)}`);
+    logger.debug({ filters: logSafe }, '[Semantic Search] Filters');
   }
 
   const mongoFilter = buildMongoFilter(filters);
@@ -54,9 +55,9 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
   try {
     const queryVector = await generateEmbedding(queryText);
 
-    console.log(`[Semantic Search] Embedding generated: ${queryVector.length} dimensions`);
+    logger.debug({ dimensions: queryVector.length }, '[Semantic Search] Embedding generated');
 
-    console.log(`[Semantic Search] Executing $vectorSearch on index "vector_index"`);
+    logger.debug('[Semantic Search] Executing $vectorSearch on index "vector_index"');
 
     const pipeline = [
       {
@@ -84,13 +85,13 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
 
     let products = await Product.aggregate(pipeline);
 
-    console.log(`[Semantic Search] Vector results: ${products.length}`);
+    logger.debug({ resultCount: products.length }, '[Semantic Search] Vector results');
 
     if (products.length > 0) {
       return { products, searchMode: 'vector' };
     }
 
-    console.log(`[Semantic Search] Vector Search EMPTY — switching to text fallback`);
+    logger.debug('[Semantic Search] Vector Search EMPTY — switching to text fallback');
 
     const textFilter = { $text: { $search: queryText }, isActive: true };
     if (mongoFilter) Object.assign(textFilter, mongoFilter);
@@ -104,13 +105,13 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
       .limit(safeLimit)
       .lean();
 
-    console.log(`[Semantic Search] Text Search FALLBACK — results: ${products.length}`);
+    logger.debug({ resultCount: products.length }, '[Semantic Search] Text Search FALLBACK results');
 
     if (products.length > 0) {
       return { products, searchMode: 'text' };
     }
 
-    console.log(`[Semantic Search] Text also empty — using latest-products fallback`);
+    logger.debug('[Semantic Search] Text also empty — using latest-products fallback');
 
     const latestFilter = { isActive: true, inStock: { $gt: 0 } };
     if (mongoFilter) Object.assign(latestFilter, mongoFilter);
@@ -121,16 +122,18 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
       .limit(safeLimit)
       .lean();
 
-    console.log(`[Semantic Search] Fallback results: ${products.length}`);
+    logger.debug({ resultCount: products.length }, '[Semantic Search] Fallback results');
 
     return { products, searchMode: 'fallback' };
   } catch (error) {
-    console.log(`[Semantic Search] $vectorSearch THREW an error — switching to text fallback`);
-    console.log(`[Semantic Search]   message: ${error.message}`);
-    console.log(`[Semantic Search]   code: ${error.code}`);
-    console.log(`[Semantic Search]   codeName: ${error.codeName}`);
+    logger.debug('[Semantic Search] $vectorSearch THREW an error — switching to text fallback');
+    logger.debug({
+      message: error.message,
+      code: error.code,
+      codeName: error.codeName,
+    }, '[Semantic Search] vector search error details');
     if (process.env.NODE_ENV === 'development') {
-      console.log(`[Semantic Search]   stack: ${error.stack}`);
+      logger.debug({ stack: error.stack }, '[Semantic Search] vector search stack');
     }
 
     try {
@@ -146,13 +149,13 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
         .limit(safeLimit)
         .lean();
 
-      console.log(`[Semantic Search] Text Search FALLBACK — results: ${products.length}`);
+      logger.debug({ resultCount: products.length }, '[Semantic Search] Text Search FALLBACK results');
 
       if (products.length > 0) {
         return { products, searchMode: 'text' };
       }
 
-      console.log(`[Semantic Search] Text also empty — using latest-products fallback`);
+      logger.debug('[Semantic Search] Text also empty — using latest-products fallback');
 
       const latestFilter = { isActive: true, inStock: { $gt: 0 } };
       if (mongoFilter) Object.assign(latestFilter, mongoFilter);
@@ -163,11 +166,11 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
         .limit(safeLimit)
         .lean();
 
-      console.log(`[Semantic Search] Fallback results: ${fallbackProducts.length}`);
+      logger.debug({ resultCount: fallbackProducts.length }, '[Semantic Search] Fallback results');
 
       return { products: fallbackProducts, searchMode: 'fallback' };
     } catch (fallbackError) {
-      console.log(`[Semantic Search] Fallback also threw: ${fallbackError.message}`);
+      logger.warn({ err: { message: fallbackError.message } }, '[Semantic Search] Fallback also threw');
       return { products: [], searchMode: 'fallback' };
     }
   }

@@ -5,6 +5,7 @@ const Product = require('../models/Product');
 const { generateAISuggestion } = require('../services/aiSuggestionService');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
+const logger = require('../utils/logger');
 
 /**
  * Create a new question
@@ -63,7 +64,7 @@ const createQuestion = asyncHandler(async (req, res) => {
       await aiAnswer.save();
     }
   } catch (aiError) {
-    console.error('AI suggestion error:', aiError.message);
+    logger.error({ err: { message: aiError.message }, questionId: question._id }, 'AI suggestion error');
   }
 
   const populatedQuestion = await Question.findById(question._id)

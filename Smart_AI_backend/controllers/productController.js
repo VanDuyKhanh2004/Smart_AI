@@ -200,11 +200,11 @@ const getAllProducts = asyncHandler(async (req, res) => {
 
   const cached = await cache.get(cacheKey);
   if (cached) {
-    console.log("Cache HIT:", cacheKey);
+    logger.debug({ cacheKey }, 'Cache HIT');
     return res.status(200).json(cached);
   }
 
-  console.log("Cache MISS:", cacheKey);
+  logger.debug({ cacheKey }, 'Cache MISS');
   const skip = (page - 1) * limit;
   const minRating = req.query.minRating
     ? parseFloat(req.query.minRating)
