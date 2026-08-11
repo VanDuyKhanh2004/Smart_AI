@@ -1,5 +1,6 @@
 const Product = require("../models/Product");
 const mongoose = require("mongoose");
+const logger = require("../utils/logger");
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 20;
@@ -97,15 +98,16 @@ const recommend = async (productId, limit = DEFAULT_LIMIT) => {
   }
 
   const sourceProduct = sourceResult.product;
-  console.log(
-    `[Recommendation] Source product: ${sourceProduct.name} (${sourceProduct._id})`
+  logger.debug(
+    { sourceProductId: sourceProduct._id, sourceProductName: sourceProduct.name },
+    '[Recommendation] Source product'
   );
 
   if (hasValidEmbedding(sourceProduct)) {
     try {
-      console.log(`[Recommendation] Executing vector search`);
+      logger.debug('[Recommendation] Executing vector search');
       const products = await recommendByVector(sourceProduct, safeLimit);
-      console.log(`[Recommendation] Vector results: ${products.length}`);
+      logger.debug({ resultCount: products.length }, '[Recommendation] Vector results');
 
       if (products.length > 0) {
         return {
@@ -115,11 +117,11 @@ const recommend = async (productId, limit = DEFAULT_LIMIT) => {
         };
       }
     } catch (error) {
-      console.log(`[Recommendation] Vector search error: ${error.message}`);
+      logger.warn({ err: { message: error.message } }, '[Recommendation] Vector search error');
     }
   }
 
-  console.log(`[Recommendation] Using brand-price fallback`);
+  logger.debug('[Recommendation] Using brand-price fallback');
   const brandPriceProducts = await recommendByBrandPrice(
     sourceProduct,
     safeLimit
@@ -133,7 +135,7 @@ const recommend = async (productId, limit = DEFAULT_LIMIT) => {
     };
   }
 
-  console.log(`[Recommendation] Using latest-products fallback`);
+  logger.debug('[Recommendation] Using latest-products fallback');
   const latestProducts = await recommendLatest(sourceProduct, safeLimit);
 
   return {

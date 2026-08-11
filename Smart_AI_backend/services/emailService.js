@@ -1,12 +1,13 @@
 const { BrevoClient } = require("@getbrevo/brevo");
 const brevoPkg = require("@getbrevo/brevo/package.json");
 const { getFrontendBaseUrl } = require("../configs/frontendConfig");
+const logger = require("../utils/logger");
 
-console.log("Brevo SDK version:", brevoPkg.version);
+logger.info({ brevoSdkVersion: brevoPkg.version }, "Brevo SDK loaded");
 
 function fireAndForget(promise, label) {
   promise.catch((err) => {
-    console.error(`${label}:`, err.message);
+    logger.error({ err: { message: err.message }, scope: label }, `${label} failed`);
   });
 }
 
@@ -14,9 +15,11 @@ const brevoKey = process.env.BREVO_API_KEY;
 const brevoFromName = process.env.BREVO_FROM_NAME;
 const brevoFromEmail = process.env.BREVO_FROM_EMAIL;
 
-console.log("BREVO_API_KEY:", brevoKey ? "PRESENT" : "MISSING");
-console.log("BREVO_FROM_NAME:", brevoFromName || "MISSING");
-console.log("BREVO_FROM_EMAIL:", brevoFromEmail || "MISSING");
+logger.info({
+  brevoApiKey: brevoKey ? "PRESENT" : "MISSING",
+  brevoFromName: brevoFromName || "MISSING",
+  brevoFromEmail: brevoFromEmail || "MISSING",
+}, "Brevo configuration check");
 
 const missingVars = [];
 if (!brevoKey) missingVars.push("BREVO_API_KEY");
@@ -24,10 +27,9 @@ if (!brevoFromName) missingVars.push("BREVO_FROM_NAME");
 if (!brevoFromEmail) missingVars.push("BREVO_FROM_EMAIL");
 
 if (missingVars.length > 0) {
-  console.warn(
-    "Brevo configuration is missing:",
-    missingVars.join(", "),
-    "— emails will be silently skipped",
+  logger.warn(
+    { missingVars },
+    "Brevo configuration is missing — emails will be silently skipped",
   );
 }
 
@@ -36,17 +38,17 @@ let client = null;
 function getClient() {
   if (client) return client;
   client = new BrevoClient({ apiKey: brevoKey });
-  console.log("Brevo initialized successfully");
+  logger.info("Brevo initialized successfully");
   return client;
 }
 
 async function sendMail(options) {
   if (!brevoKey || !brevoFromName || !brevoFromEmail) {
-    console.warn("Email failed: Brevo not configured");
+    logger.warn("Email failed: Brevo not configured");
     return;
   }
   const c = getClient();
-  console.log("Sending email...");
+  logger.info({ subject: options.subject }, "Sending email...");
   try {
     const result = await c.transactionalEmails.sendTransacEmail({
       sender: { name: brevoFromName, email: brevoFromEmail },
@@ -55,9 +57,12 @@ async function sendMail(options) {
       htmlContent: options.html,
       textContent: options.text,
     });
-    console.log("Email sent successfully");
+    logger.info({ subject: options.subject }, "Email sent successfully");
   } catch (err) {
-    console.error("Email failed:", err);
+    logger.error(
+      { err: { message: err.message, name: err.name, status: err.status }, subject: options.subject },
+      "Email failed",
+    );
   }
 }
 

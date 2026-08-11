@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 require('dotenv').config();
+const logger = require('../utils/logger');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -194,12 +195,12 @@ const generateAISuggestion = async (questionText, product) => {
   try {
     // Validate inputs
     if (!questionText || typeof questionText !== 'string') {
-      console.error('Invalid questionText provided to generateAISuggestion');
+      logger.warn('Invalid questionText provided to generateAISuggestion');
       return null;
     }
 
     if (!product) {
-      console.error('No product provided to generateAISuggestion');
+      logger.warn('No product provided to generateAISuggestion');
       return null;
     }
 
@@ -207,7 +208,7 @@ const generateAISuggestion = async (questionText, product) => {
     const { specsText, specsList } = extractProductSpecs(product);
 
     if (!specsText || specsList.length === 0) {
-      console.log('Product has no specs, cannot generate AI suggestion');
+      logger.info({ productId: product._id }, 'Product has no specs, cannot generate AI suggestion');
       return null;
     }
 
@@ -262,7 +263,7 @@ Hãy phân tích và trả lời câu hỏi dựa trên thông số kỹ thuật
     const content = response?.choices?.[0]?.message?.content?.trim();
     
     if (!content) {
-      console.error('OpenAI returned empty response');
+      logger.warn('OpenAI returned empty response');
       return null;
     }
 
@@ -271,14 +272,13 @@ Hãy phân tích và trả lời câu hỏi dựa trên thông số kỹ thuật
     try {
       parsedResponse = parseJsonFromResponse(content);
     } catch (parseError) {
-      console.error('Failed to parse AI response as JSON:', parseError.message);
-      console.error('Raw response:', content);
+      logger.warn({ err: { message: parseError.message } }, 'Failed to parse AI response as JSON');
       return null;
     }
 
     // Validate response structure
     if (!parsedResponse.answerText || typeof parsedResponse.confidence !== 'number') {
-      console.error('Invalid AI response structure:', parsedResponse);
+      logger.warn({ structureKeys: parsedResponse ? Object.keys(parsedResponse) : [] }, 'Invalid AI response structure');
       return null;
     }
 
@@ -287,7 +287,7 @@ Hãy phân tích và trả lời câu hỏi dựa trên thông số kỹ thuật
 
     // Only return suggestion if confidence >= 0.5 (Requirement 5.4)
     if (confidence < 0.5) {
-      console.log(`AI suggestion confidence (${confidence}) below threshold, not returning suggestion`);
+      logger.debug({ confidence }, 'AI suggestion confidence below threshold, not returning suggestion');
       return null;
     }
 
@@ -304,7 +304,7 @@ Hãy phân tích và trả lời câu hỏi dựa trên thông số kỹ thuật
       )
     );
 
-    console.log(`AI suggestion generated with confidence ${confidence}, using ${validSourceSpecs.length} source specs`);
+    logger.info({ confidence, sourceSpecCount: validSourceSpecs.length }, 'AI suggestion generated');
 
     return {
       answerText: parsedResponse.answerText,
@@ -313,15 +313,15 @@ Hãy phân tích và trả lời câu hỏi dựa trên thông số kỹ thuật
     };
 
   } catch (error) {
-    console.error('Error generating AI suggestion:', error.message);
-    
+    logger.error({ err: { message: error.message } }, 'Error generating AI suggestion');
+
     // Handle specific OpenAI errors
     if (error.message.includes('API key')) {
-      console.error('OpenAI API key issue');
+      logger.error('OpenAI API key issue');
     } else if (error.message.includes('quota')) {
-      console.error('OpenAI API quota exceeded');
+      logger.error('OpenAI API quota exceeded');
     } else if (error.message.includes('rate limit')) {
-      console.error('OpenAI API rate limited');
+      logger.error('OpenAI API rate limited');
     }
     
     return null;

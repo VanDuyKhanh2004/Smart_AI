@@ -12,8 +12,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "jest --forceExit --detectOpenHandles",
-    "test:watch": "jest --watch --forceExit --detectOpenHandles",
+    "test": "jest --detectOpenHandles",
+    "test:watch": "jest --watch --detectOpenHandles",
     "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js",
     "migrate:product-images:dry-run": "node scripts/migrateProductImagesToCloudinary.js --dry-run",
     "migrate:product-images": "node scripts/migrateProductImagesToCloudinary.js",

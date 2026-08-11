@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/jwt');
+const logger = require('../utils/logger');
 
 /**
  * Protect routes - verify JWT and attach user to request
@@ -62,7 +63,7 @@ const protect = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error);
+    logger.error({ err: error, requestId: req.requestId }, 'Auth middleware error');
     res.status(500).json({
       success: false,
       error: {

@@ -1,5 +1,6 @@
 const OpenAI = require("openai");
 require("dotenv").config();
+const logger = require("../utils/logger");
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY không được định nghĩa trong file .env");
@@ -21,7 +22,7 @@ if (process.env.GEMINI_API_KEY) {
     const { GoogleGenAI } = require("@google/genai");
     googleGenAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   } catch (e) {
-    console.warn("Gemini SDK not available for chat fallback:", e.message);
+    logger.warn({ err: { message: e.message } }, "Gemini SDK not available for chat fallback");
   }
 }
 
@@ -307,7 +308,7 @@ const preclassifyIntent = (userQuery) => {
   for (const [set, response] of checks) {
     const result = matchSet(set, response);
     if (result) {
-      console.log(`[Pre-classifier] Matched "${normalized}" as small_talk`);
+      logger.debug('[Pre-classifier] Matched as small_talk');
       return result;
     }
   }
@@ -328,7 +329,7 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
     // --- Deterministic pre-classifier (no LLM call) ---
     const preResult = preclassifyIntent(userQuery);
     if (preResult) {
-      console.log("[classifyIntentAndRespond] Using pre-classifier result, skipping LLM");
+      logger.debug("[classifyIntentAndRespond] Using pre-classifier result, skipping LLM");
       return preResult;
     }
 
@@ -392,7 +393,7 @@ const generateResponse = async (prompt) => {
 
     return await callChat(messages, { maxTokens: 400, temperature: 0.7 });
   } catch (error) {
-    console.error("generateResponse error:", error.message);
+    logger.error({ err: { message: error.message } }, "generateResponse error");
     return "Xin lỗi, tôi đang gặp sự cố kỹ thuật. Vui lòng thử lại sau.";
   }
 };
@@ -411,30 +412,30 @@ const generateChatResponse = async (chatHistory, userMessage, productContext = [
       { role: "user", content: userMessage },
     ];
 
-    console.log("Chat provider: OpenAI");
+    logger.info("Chat provider: OpenAI");
     try {
       const text = await callChat(messages, { maxTokens: 600, temperature: 0.7 });
       return { text, provider: "OpenAI" };
     } catch (openAIError) {
       if (isOpenAIUnavailableError(openAIError)) {
-        console.log("OpenAI failed, switching to Gemini. Error:", openAIError.message);
+        logger.warn({ err: { message: openAIError.message } }, "OpenAI failed, switching to Gemini");
       } else {
-        console.log("OpenAI error, attempting Gemini fallback. Error:", openAIError.message);
+        logger.warn({ err: { message: openAIError.message } }, "OpenAI error, attempting Gemini fallback");
       }
 
-      console.log("Chat provider: Gemini");
+      logger.info("Chat provider: Gemini");
       try {
         const text = await callGeminiChat(systemPrompt, chatHistory, userMessage);
         return { text, provider: "Gemini" };
       } catch (geminiError) {
-        console.log("Gemini failed, using deterministic fallback. Error:", geminiError.message);
+        logger.warn({ err: { message: geminiError.message } }, "Gemini failed, using deterministic fallback");
 
         const text = buildDeterministicResponse(productContext, userMessage);
         return { text, provider: "deterministic" };
       }
     }
   } catch (error) {
-    console.error("generateChatResponse error:", error.message);
+    logger.error({ err: { message: error.message } }, "generateChatResponse error");
     const text = buildDeterministicResponse(productContext, userMessage);
     return { text, provider: "deterministic" };
   }
@@ -616,7 +617,7 @@ const generateChatResponseStream = async ({ userMessage, chatHistory = [], produ
       return { fullResponse: assembled || text, provider: "openai", finishReason: finalizeReason(finishReason), streamed: true };
     } catch (openAIError) {
       if (emittedAny) throw partialError(openAIError);
-      console.log("Chat stream provider: OpenAI failed, falling back to Gemini. Error:", openAIError.message);
+      logger.warn({ err: { message: openAIError.message } }, "Chat stream provider: OpenAI failed, falling back to Gemini");
     }
 
     throwIfAborted(signal);
@@ -632,7 +633,7 @@ const generateChatResponseStream = async ({ userMessage, chatHistory = [], produ
       return { fullResponse: assembled || text, provider: "gemini", finishReason: finalizeReason(finishReason), streamed: true };
     } catch (geminiError) {
       if (emittedAny) throw partialError(geminiError);
-      console.log("Chat stream provider: Gemini failed, using deterministic fallback. Error:", geminiError.message);
+      logger.warn({ err: { message: geminiError.message } }, "Chat stream provider: Gemini failed, using deterministic fallback");
     }
 
     throwIfAborted(signal);
@@ -738,7 +739,7 @@ Trả về JSON với:
 
       return parsedResponse;
     } catch (parseError) {
-      console.error("Error parsing complaint response:", parseError.message);
+      logger.warn({ err: { message: parseError.message } }, "Error parsing complaint response");
 
       return {
         responseText:
@@ -757,7 +758,7 @@ Trả về JSON với:
       };
     }
   } catch (error) {
-    console.error("Error in generateComplaintResponse:", error.message);
+    logger.error({ err: { message: error.message } }, "Error in generateComplaintResponse");
 
     return {
       responseText:
@@ -779,17 +780,17 @@ Trả về JSON với:
 
 const testGeminiConnection = async () => {
   try {
-    console.log("Testing OpenAI chat connection...");
+    logger.info("Testing OpenAI chat connection...");
     const testResponse = await generateResponse(
       "Chào bạn, tôi đang test kết nối API. Vui lòng trả lời ngắn gọn."
     );
     if (testResponse && !testResponse.includes("sự cố kỹ thuật")) {
-      console.log("OpenAI chat connection thành công");
+      logger.info("OpenAI chat connection successful");
       return true;
     }
     throw new Error("Test response không hợp lệ");
   } catch (error) {
-    console.error("OpenAI chat connection failed:", error.message);
+    logger.error({ err: { message: error.message } }, "OpenAI chat connection failed");
     return false;
   }
 };

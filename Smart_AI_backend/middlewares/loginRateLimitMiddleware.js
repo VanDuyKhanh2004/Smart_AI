@@ -1,4 +1,5 @@
 const { getRedisClient } = require("../configs/redis");
+const logger = require("../utils/logger");
 
 const LOGIN_IP_MAX_ATTEMPTS = Number(process.env.LOGIN_IP_MAX_ATTEMPTS || 20);
 const LOGIN_IP_WINDOW_MINUTES = Number(process.env.LOGIN_IP_WINDOW_MINUTES || 15);
@@ -93,7 +94,7 @@ const loginRateLimit = async (req, res, next) => {
     });
   } catch (error) {
     // Never leak a raw Redis error to the client; fail open instead.
-    console.error('Login rate limit error:', error.message);
+    logger.error({ err: { message: error.message }, requestId: req.requestId }, 'Login rate limit error');
     return next();
   }
 };
