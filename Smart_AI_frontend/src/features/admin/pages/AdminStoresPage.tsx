@@ -128,7 +128,7 @@ export function AdminStoresPage() {
 
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Quản lý cửa hàng</h1>
         <Button onClick={() => setIsFormOpen(true)}>
@@ -176,9 +176,19 @@ export function AdminStoresPage() {
             ) : (
               stores.map((store) => (
                 <TableRow key={store.id}>
-                  <TableCell className="font-medium">{store.name}</TableCell>
-                  <TableCell className="max-w-xs truncate">{store.address.fullAddress}</TableCell>
-                  <TableCell>{store.phone}</TableCell>
+                  <TableCell
+                    className="font-medium align-top whitespace-normal break-words leading-relaxed"
+                    title={store.name}
+                  >
+                    {store.name}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-sm align-top whitespace-normal break-words leading-relaxed line-clamp-3"
+                    title={store.address.fullAddress}
+                  >
+                    {store.address.fullAddress}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">{store.phone}</TableCell>
                   <TableCell>
                     <Badge variant={store.isActive ? 'default' : 'secondary'}>
                       {store.isActive ? 'Hoạt động' : 'Đã ẩn'}

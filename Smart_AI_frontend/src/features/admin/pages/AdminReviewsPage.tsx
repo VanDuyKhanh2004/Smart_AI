@@ -223,7 +223,7 @@ export function AdminReviewsPage() {
 
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Quản lý đánh giá</h1>
       </div>
@@ -307,7 +307,10 @@ export function AdminReviewsPage() {
                     <TableCell>
                       <StarRating rating={review.rating} size="sm" />
                     </TableCell>
-                    <TableCell className="max-w-xs truncate">
+                    <TableCell
+                      className="max-w-xs align-top whitespace-normal break-words leading-relaxed line-clamp-3"
+                      title={review.comment || "-"}
+                    >
                       {review.comment || "-"}
                     </TableCell>
                     <TableCell>{getStatusBadge(review.status)}</TableCell>

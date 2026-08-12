@@ -96,14 +96,18 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         {/* Main Content Area - Requirements: 1.3 */}
         <main
           className={cn(
-            'flex-1 min-h-[calc(100vh-64px)]',
-            'transition-all duration-300 ease-in-out',
-            // Adjust margin based on sidebar state (desktop only)
-            'lg:ml-0',
-            isCollapsed ? 'lg:pl-16' : 'lg:pl-64'
+            // min-w-0 lets the main content shrink below its intrinsic width so
+            // wide tables scroll inside their own overflow wrapper instead of
+            // forcing the shared admin layout to overflow horizontally.
+            'flex-1 min-w-0 min-h-[calc(100vh-64px)]',
+            // The sidebar is sticky (in-flow) at desktop (lg:sticky wins over
+            // fixed in the CSS cascade), so as a flex sibling it already
+            // reserves its w-64/w-16 width. Main must NOT add compensating
+            // padding or the sidebar width is accounted for twice.
+            'transition-all duration-300 ease-in-out'
           )}
         >
-          <div className="container mx-auto px-4 py-6">
+          <div className="w-full px-4 py-6">
             {children}
           </div>
         </main>
