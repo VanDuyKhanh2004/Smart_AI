@@ -97,7 +97,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed top-0 left-0 z-50 h-screen',
+          // shrink-0 prevents the fixed-width sidebar (Requirements: 1.2) from
+          // being compressed when wide page content overflows the flex line.
+          'fixed top-0 left-0 z-50 h-screen shrink-0',
           // Background and border - Requirements: 6.1: Consistent styling with main theme
           // Using sidebar-specific CSS variables for theme consistency
           'bg-sidebar border-r border-sidebar-border',

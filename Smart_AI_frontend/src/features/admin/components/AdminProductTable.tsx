@@ -97,7 +97,10 @@ export function AdminProductTable({
         <TableBody>
           {products.map((product) => (
             <TableRow key={product._id}>
-              <TableCell className="font-medium max-w-[200px] truncate">
+              <TableCell
+                className="font-medium align-top max-w-[280px] whitespace-normal break-words leading-relaxed line-clamp-2"
+                title={product.name}
+              >
                 {product.name}
               </TableCell>
               <TableCell>{product.brand}</TableCell>

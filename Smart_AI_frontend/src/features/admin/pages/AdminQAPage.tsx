@@ -459,7 +459,7 @@ export function AdminQAPage() {
 
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Quản lý Hỏi đáp</h1>
       </div>
@@ -528,10 +528,10 @@ export function AdminQAPage() {
               <TableHead className="w-10"></TableHead>
               <TableHead>ID</TableHead>
               <TableHead>Người hỏi</TableHead>
-              <TableHead className="max-w-xs">Câu hỏi</TableHead>
+              <TableHead className="max-w-[240px]">Câu hỏi</TableHead>
               <TableHead>Trạng thái</TableHead>
               <TableHead>Upvotes</TableHead>
-              <TableHead>Ngày tạo</TableHead>
+              <TableHead className="w-36 whitespace-nowrap">Ngày tạo</TableHead>
               <TableHead>Hành động</TableHead>
             </TableRow>
           </TableHeader>
@@ -578,8 +578,11 @@ export function AdminQAPage() {
                         {questionId.slice(0, 8)}...
                       </TableCell>
                       <TableCell>{question.user?.name || "N/A"}</TableCell>
-                      <TableCell className="max-w-xs">
-                        <p className="truncate" title={question.questionText}>
+                      <TableCell className="max-w-[240px] align-top whitespace-normal">
+                        <p
+                          className="break-words leading-relaxed line-clamp-2"
+                          title={question.questionText}
+                        >
                           {question.questionText}
                         </p>
                       </TableCell>

@@ -183,4 +183,25 @@ describe('AdminProductPage', () => {
     expect(payload.imageFile).toBeNull();
     expect(payload.imageUrl).toBe('https://example.com/img.jpg');
   });
+
+  it('renders the page in a full-width wrapper (no centered container) so tables use available main width', async () => {
+    const { container } = render(<AdminProductPage />);
+    await waitFor(() => expect(mockGetAllProducts).toHaveBeenCalled());
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain('w-full');
+    expect(root.className).toContain('space-y-6');
+    expect(root.className).not.toContain('container');
+  });
+
+  it('wraps the product name instead of single-line truncation', async () => {
+    render(<AdminProductPage />);
+
+    const name = await screen.findByText('iPhone 14');
+    const nameCell = name.closest('td') as HTMLElement;
+    expect(nameCell.className).toContain('whitespace-normal');
+    expect(nameCell.className).toContain('line-clamp-2');
+    expect(nameCell.className).not.toContain('truncate');
+    expect(nameCell.getAttribute('title')).toBe('iPhone 14');
+  });
 });
