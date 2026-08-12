@@ -73,6 +73,9 @@ const ProductListPage: React.FC = () => {
   // overwrite newer results and cancelled requests produce no error.
   const productsAbortRef = useRef<AbortController | null>(null);
 
+  const productListRef = useRef<HTMLDivElement>(null);
+  const pendingPageScrollRef = useRef<number | null>(null);
+
   const fetchProducts = async (page: number = 1, filters: ProductFilterState = currentFilters) => {
     productsAbortRef.current?.abort();
     const controller = new AbortController();
@@ -158,9 +161,23 @@ const ProductListPage: React.FC = () => {
   };
 
   const handlePageChange = (page: number) => {
+    if (page === currentPage) return;
+    pendingPageScrollRef.current = page;
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const scrollToProductList = () => {
+    productListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  useEffect(() => {
+    if (pendingPageScrollRef.current === null) return;
+    const requestedPage = pendingPageScrollRef.current;
+    if (pagination?.currentPage !== requestedPage) return;
+    if (loading) return;
+    pendingPageScrollRef.current = null;
+    scrollToProductList();
+  }, [pagination, loading]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('vi-VN', {
@@ -255,7 +272,7 @@ const ProductListPage: React.FC = () => {
       {/* Banner Carousel */}
       <BannerCarousel />
       
-      <div className="mb-8">
+      <div ref={productListRef} className="mb-8 scroll-mt-16">
         <h1 className="text-3xl font-bold mb-2">Danh sách sản phẩm</h1>
         <p className="text-muted-foreground">
           {pagination && (
