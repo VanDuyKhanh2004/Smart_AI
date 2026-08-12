@@ -102,10 +102,27 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
+      _timeoutRetried?: boolean;
     };
 
     if (originalRequest?.url?.includes('/auth/refresh')) {
       return Promise.reject(error);
+    }
+
+    // Bounded retry for idempotent GETs that hit a network timeout (no HTTP
+    // response) — e.g. a cold-started backend after a free-tier instance sleeps.
+    // Exactly one retry, GET only, never on HTTP status errors or aborts.
+    if (
+      originalRequest &&
+      error.code === 'ECONNABORTED' &&
+      !error.response &&
+      !originalRequest._timeoutRetried &&
+      !originalRequest.signal?.aborted &&
+      (originalRequest.method === undefined ||
+        originalRequest.method.toUpperCase() === 'GET')
+    ) {
+      originalRequest._timeoutRetried = true;
+      return apiClient(originalRequest);
     }
 
     if (error.response?.status === 401 && !originalRequest?._retry) {
