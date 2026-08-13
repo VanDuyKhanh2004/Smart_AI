@@ -8,7 +8,10 @@ const {
   generateChatResponse,
   generateChatResponseStream,
   generateComplaintResponse,
+  preclassifyComplaintContinuation,
 } = require("../utils/gemini");
+const complaintService = require("../services/complaintService");
+const complaintFlowService = require("../services/complaintFlowService");
 
 const { createChatStreamBatching } = require("../services/chatStreamBatching");
 const chatActiveStreams = require("../services/chatActiveStreams");
@@ -18,6 +21,26 @@ const { matchesProductConstraints } = require("../utils/productValidator");
 const { rankProducts } = require("../utils/productRanking");
 const { classifyQuery, resolveFollowUpQuery, createContextFromParsed, sanitizeConversationContext } = require("../utils/conversationContext");
 const contextService = require("../services/contextService");
+
+/**
+ * Best-effort extraction of an email/phone from a chat message. Used to enrich
+ * a pending complaint confirmation — never a gate on persistence.
+ */
+const extractContactFromMessage = (message) => {
+  const result = { email: null, phone: null };
+  if (!message || typeof message !== "string") return result;
+
+  const emailMatch = message.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+  if (emailMatch) result.email = emailMatch[0].toLowerCase();
+
+  const phoneMatch = message.match(/(0|\+84)[\s.-]?[\d][\d\s.-]{8,11}/);
+  if (phoneMatch) {
+    const phone = phoneMatch[0].replace(/[\s.\-()]/g, "");
+    if (/^(0|\+84)\d{9,10}$/.test(phone)) result.phone = phone;
+  }
+
+  return result;
+};
 
 class ChatController {
   /**
@@ -420,10 +443,22 @@ class ChatController {
 
   /**
    * Handle Complaint - Xử lý khiếu nại khách hàng
-   * Sử dụng specialized complaint agent và multi-turn conversation
+   *
+   * Complaint handling is resilient and confirmation-gated:
+   *   - Detection may be deterministic (obvious complaint phrases) or AI
+   *     (ambiguous messages), with a safe deterministic default when all
+   *     providers are unavailable. A complaint is NEVER invented on failure.
+   *   - Persistence NEVER happens on detection alone: the first complaint turn
+   *     only sets a pending confirmation; a Complaint record is created only
+   *     after the user explicitly confirms (see handleComplaintConfirmation).
+   *   - An already-existing open/in_progress complaint is an already-confirmed
+   *     workflow and is updated on later turns as before.
+   *   - Persistence goes through complaintService (never inline `new
+   *     Complaint().save()`), so schema validation and required fields hold.
    */
-  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage, clientMessageId, generationId = null) {
+  async handleComplaint(socket, sessionId, userId, chatHistory, userMessage, clientMessageId, generationId = null, signal = null) {
     try {
+      throwIfCancelled(signal);
       logger.info({ sessionId }, 'Handling complaint for session');
 
       // Lấy thông tin conversation bằng cặp ownership { sessionId, userId } để
@@ -432,6 +467,7 @@ class ChatController {
       if (!conversation) {
         throw new Error("Conversation not found for session");
       }
+      throwIfCancelled(signal);
 
       // Kiểm tra xem đã có complaint cho conversation (thuộc sở hữu người dùng này) chưa
       let existingComplaint = await Complaint.findOne({
@@ -440,97 +476,112 @@ class ChatController {
       }).sort({ createdAt: -1 });
 
       logger.info({ sessionId, found: !!existingComplaint }, 'Existing complaint found');
+      throwIfCancelled(signal);
 
-      // Gọi specialized complaint agent
-      const complaintResponse = await generateComplaintResponse(
-        chatHistory,
-        userMessage
-      );
+      // Awaiting confirmation: this turn is the user's decision (or a continued
+      // description). Route WITHOUT re-classifying intent.
+      const pending = await complaintFlowService.getPending(userId, sessionId);
+      if (pending) {
+        const decision = complaintFlowService.classifyComplaintConfirmation(userMessage);
+        if (decision === 'confirmed' || decision === 'declined') {
+          return this.handleComplaintConfirmation(
+            socket, sessionId, userId, conversation, pending, decision,
+            chatHistory, userMessage, clientMessageId, generationId, signal
+          );
+        }
+        return this.handleComplaintContinuation(
+          socket, sessionId, userId, conversation, pending,
+          chatHistory, userMessage, clientMessageId, generationId, signal
+        );
+      }
 
-      logger.info(
-        { sessionId, isComplete: complaintResponse.isComplete },
-        'Complaint response generated'
-      );
+      // Already-confirmed workflow: an open complaint exists for this owned
+      // conversation, so this turn keeps enriching it. No new confirmation is
+      // needed — the record was confirmed when it was created.
+      if (existingComplaint) {
+        const complaintResponse = await generateComplaintResponse(chatHistory, userMessage);
+        throwIfCancelled(signal);
 
-      // Emit response to user
+        try {
+          await complaintService.updateExistingComplaint(existingComplaint, complaintResponse.complaintData);
+        } catch (updateErr) {
+          logger.error({ err: updateErr, sessionId }, 'Error updating existing complaint');
+        }
+
+        const complaintPayload = this.buildAiPayload(
+          sessionId,
+          clientMessageId,
+          complaintResponse.responseText,
+          {
+            responseType: "complaint",
+            isComplete: complaintResponse.isComplete,
+            priority: complaintResponse.complaintData.priority,
+          },
+          generationId
+        );
+        socket.emit("aiResponse", complaintPayload);
+
+        return {
+          fullResponse: complaintResponse.responseText,
+          responseType: "complaint",
+          isComplete: complaintResponse.isComplete,
+          complaintId: existingComplaint._id,
+          priority: complaintResponse.complaintData.priority,
+          relatedProducts: [],
+          aiPayload: complaintPayload,
+        };
+      }
+
+      // First complaint detection: empathetic response + explicit confirmation.
+      // NO Complaint record is created here — persistence is deferred until the
+      // user confirms (independent of LLM availability).
+      const complaintResponse = await generateComplaintResponse(chatHistory, userMessage);
+      throwIfCancelled(signal);
+
+      const complaintData = complaintResponse.complaintData || {};
+      await complaintFlowService.setPending(userId, sessionId, {
+        conversationId: conversation._id,
+        detailedDescription: complaintData.detailedDescription || userMessage,
+        customerContact: complaintData.customerContact || { email: null, phone: null },
+        priority: complaintData.priority || "medium",
+        tags: complaintData.tags || ["general"],
+        attempts: 1,
+      });
+
+      const text = `${complaintResponse.responseText}\n\n` +
+        "Bạn xác nhận muốn gửi khiếu nại này cho bộ phận chăm sóc khách hàng của Dienthoaigiakho không ạ? " +
+        "Anh/chị chỉ cần trả lời Có (hoặc để lại email/SĐT) để em ghi nhận nhé.";
+
       const complaintPayload = this.buildAiPayload(
         sessionId,
         clientMessageId,
-        complaintResponse.responseText,
+        text,
         {
           responseType: "complaint",
-          isComplete: complaintResponse.isComplete,
-          priority: complaintResponse.complaintData.priority,
+          isComplete: false,
+          priority: complaintData.priority || "medium",
+          needsConfirmation: true,
         },
         generationId
       );
       socket.emit("aiResponse", complaintPayload);
 
-      // Cập nhật hoặc tạo mới complaint record
-      let complaintRecord;
-      
-      if (existingComplaint) {
-        // Cập nhật complaint hiện tại
-        if (complaintResponse.complaintData.detailedDescription) {
-          existingComplaint.detailedDescription = complaintResponse.complaintData.detailedDescription;
-        }
-
-        // Cập nhật contact information nếu có
-        if (complaintResponse.complaintData.customerContact.email) {
-          existingComplaint.customerContact.email = complaintResponse.complaintData.customerContact.email;
-        }
-        if (complaintResponse.complaintData.customerContact.phone) {
-          existingComplaint.customerContact.phone = complaintResponse.complaintData.customerContact.phone;
-        }
-
-        // Cập nhật priority và tags
-        existingComplaint.priority = complaintResponse.complaintData.priority;
-        existingComplaint.tags = [...new Set([
-          ...existingComplaint.tags,
-          ...complaintResponse.complaintData.tags
-        ])];
-
-        // Chuyển sang in_progress nếu isComplete = true
-        if (complaintResponse.isComplete && existingComplaint.status === 'open') {
-          existingComplaint.status = 'in_progress';
-        }
-
-        complaintRecord = await existingComplaint.save();
-      } else if (complaintResponse.isComplete) {
-        // Tạo complaint record mới chỉ khi isComplete = true
-        complaintRecord = new Complaint({
-          sessionId: sessionId,
-          conversationId: conversation._id,
-          complaintSummary: `Khiếu nại từ session ${sessionId}`,
-          detailedDescription: complaintResponse.complaintData.detailedDescription,
-          customerContact: complaintResponse.complaintData.customerContact,
-          status: 'in_progress', // Đặt thành in_progress ngay khi có đủ thông tin
-          priority: complaintResponse.complaintData.priority,
-          tags: complaintResponse.complaintData.tags
-        });
-
-        complaintRecord = await complaintRecord.save();
-        logger.info(
-          { sessionId, complaintId: complaintRecord._id },
-          'New complaint record created'
-        );
-      }
-
       return {
-        fullResponse: complaintResponse.responseText,
+        fullResponse: text,
         responseType: "complaint",
-        isComplete: complaintResponse.isComplete,
-        complaintId: complaintRecord ? complaintRecord._id : null,
-        priority: complaintResponse.complaintData.priority,
-        relatedProducts: [], // No product search for complaints
+        isComplete: false,
+        complaintId: null,
+        priority: complaintData.priority || "medium",
+        relatedProducts: [],
         aiPayload: complaintPayload,
       };
 
     } catch (error) {
       logger.error({ err: error }, 'Error in handleComplaint');
 
-      // Fallback response
-      const fallbackResponse = "Em rất xin lỗi về sự bất tiện này. Hiện tại hệ thống đang gặp sự cố. Anh/chị có thể liên hệ hotline 1900xxxx để được hỗ trợ trực tiếp không ạ?";
+      // Deterministic fallback: never expose a provider/raw error, and keep the
+      // complaint conversation alive so the user can still be helped.
+      const fallbackResponse = "Em rất xin lỗi vì sự bất tiện này. Anh/chị có thể mô tả vấn đề và để lại email hoặc số điện thoại để bộ phận CSKH liên hệ hỗ trợ không ạ?";
 
       const fallbackPayload = this.buildAiPayload(
         sessionId,
@@ -554,6 +605,238 @@ class ChatController {
         relatedProducts: [],
         aiPayload: fallbackPayload,
       };
+    }
+  }
+
+  /**
+   * Deterministic continuation of an ALREADY-CONFIRMED complaint. Appends the
+   * new defect/detail to the existing record — the original narrative is
+   * preserved, never overwritten — advances contact/status if any contact info
+   * appears, and acknowledges in Vietnamese. No LLM is involved, so a
+   * continuation always works even when OpenAI/Gemini are unavailable. Never
+   * creates a second complaint record.
+   */
+  async handleExistingComplaintContinuation(socket, sessionId, existingComplaint, userMessage, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+      logger.info({ sessionId, complaintId: existingComplaint._id }, 'Continuing existing complaint');
+
+      const mergedDescription = complaintService.mergeComplaintDescription(
+        existingComplaint.detailedDescription,
+        userMessage
+      );
+      const contact = extractContactFromMessage(userMessage);
+
+      try {
+        await complaintService.updateExistingComplaint(existingComplaint, {
+          detailedDescription: mergedDescription,
+          customerContact: contact,
+        });
+      } catch (updateErr) {
+        logger.error({ err: updateErr, sessionId }, 'Error updating existing complaint continuation');
+      }
+
+      const text =
+        "Dạ, em đã ghi nhận thêm thông tin mới và cập nhật vào khiếu nại hiện tại của anh/chị. " +
+        "Em sẽ chuyển toàn bộ nội dung đến bộ phận chuyên trách để xử lý nhanh nhất có thể ạ.";
+
+      const complaintPayload = this.buildAiPayload(
+        sessionId,
+        clientMessageId,
+        text,
+        {
+          responseType: "complaint",
+          isComplete: false,
+          complaintId: existingComplaint._id,
+          priority: existingComplaint.priority || "medium",
+        },
+        generationId
+      );
+      socket.emit("aiResponse", complaintPayload);
+
+      return {
+        fullResponse: text,
+        responseType: "complaint",
+        isComplete: false,
+        complaintId: existingComplaint._id,
+        priority: existingComplaint.priority || "medium",
+        relatedProducts: [],
+        aiPayload: complaintPayload,
+      };
+    } catch (error) {
+      logger.error({ err: error, sessionId }, 'Error in handleExistingComplaintContinuation');
+      const fallbackResponse = "Em rất xin lỗi, hiện tại hệ thống đang bận. Anh/chị có thể thử lại sau nhé ạ?";
+      const fallbackPayload = this.buildAiPayload(
+        sessionId, clientMessageId, fallbackResponse,
+        { responseType: "complaint", error: true, fallback: true, complaintId: existingComplaint._id },
+        generationId
+      );
+      socket.emit("aiResponse", fallbackPayload);
+      return {
+        fullResponse: fallbackResponse,
+        responseType: "complaint",
+        isComplete: false,
+        complaintId: existingComplaint._id,
+        priority: existingComplaint.priority || "medium",
+        relatedProducts: [],
+        aiPayload: fallbackPayload,
+      };
+    }
+  }
+
+  /**
+   * Complaint confirmation decision turn. On 'confirmed' the complaint is
+   * PERSISTED via complaintService (never because an LLM said so — only because
+   * the user explicitly agreed, optionally providing contact info). On
+   * 'declined' the pending state is cleared and nothing is persisted.
+   */
+  async handleComplaintConfirmation(socket, sessionId, userId, conversation, pending, decision, chatHistory, userMessage, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+
+      // Merge any contact info mentioned in the confirmation reply.
+      const contact = { ...(pending.customerContact || {}) };
+      const msgContact = extractContactFromMessage(userMessage);
+      if (msgContact.email) contact.email = msgContact.email;
+      if (msgContact.phone) contact.phone = msgContact.phone;
+
+      let complaintRecord = null;
+      let text;
+      let isComplete = false;
+
+      if (decision === 'confirmed') {
+        try {
+          complaintRecord = await complaintService.createComplaint({
+            sessionId,
+            conversationId: conversation._id,
+            complaintSummary: `Khiếu nại từ session ${sessionId}`,
+            detailedDescription: pending.detailedDescription || userMessage,
+            customerContact: contact,
+            priority: pending.priority || "medium",
+            tags: pending.tags || ["general"],
+          });
+          text = "Dạ, em đã ghi nhận khiếu nại của anh/chị và chuyển đến bộ phận chuyên trách. " +
+            "Bộ phận CSKH sẽ liên hệ với anh/chị trong thời gian sớm nhất ạ.";
+          isComplete = true;
+        } catch (saveErr) {
+          logger.error({ err: saveErr, sessionId }, 'Error persisting confirmed complaint');
+          // Keep the pending state so a retry confirmation can succeed later.
+          text = "Em rất xin lỗi, hiện tại hệ thống chưa thể ghi nhận khiếu nại. " +
+            "Anh/chị có thể thử lại ngay bây giờ (trả lời Có) hoặc để lại email/SĐT để bộ phận CSKH chủ động liên hệ không ạ?";
+        }
+      } else {
+        text = "Dạ vâng, em đã hủy yêu cầu khiếu nại này. " +
+          "Nếu cần hỗ trợ thêm, anh/chị cứ nhắn cho em nhé.";
+      }
+
+      if (decision === 'declined' || complaintRecord) {
+        await complaintFlowService.clearPending(userId, sessionId);
+      }
+
+      throwIfCancelled(signal);
+
+      const payload = this.buildAiPayload(
+        sessionId,
+        clientMessageId,
+        text,
+        {
+          responseType: "complaint",
+          confirmed: decision === 'confirmed',
+          declined: decision === 'declined',
+          complaintId: complaintRecord ? complaintRecord._id : null,
+          priority: pending.priority || "medium",
+        },
+        generationId
+      );
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: text,
+        responseType: "complaint",
+        isComplete,
+        complaintId: complaintRecord ? complaintRecord._id : null,
+        priority: pending.priority || "medium",
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'Error in handleComplaintConfirmation');
+      const fallbackResponse = "Em rất xin lỗi, hiện tại hệ thống đang bận. Anh/chị có thể thử lại sau nhé ạ?";
+      const fallbackPayload = this.buildAiPayload(
+        sessionId, clientMessageId, fallbackResponse,
+        { responseType: "complaint", confirmed: false, fallback: true }, generationId
+      );
+      socket.emit("aiResponse", fallbackPayload);
+      return {
+        fullResponse: fallbackResponse,
+        responseType: "complaint",
+        isComplete: false,
+        complaintId: null,
+        priority: "medium",
+        relatedProducts: [],
+        aiPayload: fallbackPayload,
+      };
+    }
+  }
+
+  /**
+   * Ambiguous reply while a complaint confirmation is pending (e.g. the user
+   * adds more detail instead of a clear yes/no). The pending state is kept and
+   * enriched; the assistant re-asks for confirmation. Nothing is persisted.
+   */
+  async handleComplaintContinuation(socket, sessionId, userId, conversation, pending, chatHistory, userMessage, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+      const complaintResponse = await generateComplaintResponse(chatHistory, userMessage);
+      throwIfCancelled(signal);
+
+      const complaintData = complaintResponse.complaintData || {};
+      const contact = { ...(pending.customerContact || {}) };
+      if (complaintData.customerContact && complaintData.customerContact.email) contact.email = complaintData.customerContact.email;
+      if (complaintData.customerContact && complaintData.customerContact.phone) contact.phone = complaintData.customerContact.phone;
+      const msgContact = extractContactFromMessage(userMessage);
+      if (msgContact.email) contact.email = msgContact.email;
+      if (msgContact.phone) contact.phone = msgContact.phone;
+
+      const merged = {
+        conversationId: pending.conversationId || conversation._id,
+        detailedDescription: complaintData.detailedDescription || pending.detailedDescription || userMessage,
+        customerContact: contact,
+        priority: complaintData.priority || pending.priority || "medium",
+        tags: Array.isArray(complaintData.tags) && complaintData.tags.length > 0 ? complaintData.tags : (pending.tags || ["general"]),
+        attempts: (pending.attempts || 1) + 1,
+      };
+      await complaintFlowService.setPending(userId, sessionId, merged);
+
+      const text = `${complaintResponse.responseText}\n\n` +
+        "Anh/chị xác nhận muốn gửi khiếu nại này chứ ạ? (Trả lời Có hoặc để lại email/SĐT để em ghi nhận nhé)";
+
+      const payload = this.buildAiPayload(
+        sessionId,
+        clientMessageId,
+        text,
+        {
+          responseType: "complaint",
+          isComplete: false,
+          priority: merged.priority,
+          needsConfirmation: true,
+        },
+        generationId
+      );
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: text,
+        responseType: "complaint",
+        isComplete: false,
+        complaintId: null,
+        priority: merged.priority,
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'Error in handleComplaintContinuation');
+      throw error;
     }
   }
 
@@ -690,6 +973,58 @@ class ChatController {
   async renderResponse({ socket, sessionId, userId, chatHistory, userQuery, clientMessageId, generationId, signal, persistContext = true }) {
     throwIfCancelled(signal);
 
+    // Complaint confirmation intercept: when a complaint is awaiting explicit
+    // user confirmation for this owned conversation, a clear yes/no reply is a
+    // DECISION, never a new intent. Affirmative short replies ("có", "vâng")
+    // would otherwise be classified as small_talk and the complaint would never
+    // be persisted. Ambiguous replies fall through to normal intent processing.
+    const pendingComplaint = await complaintFlowService.getPending(userId, sessionId);
+    if (pendingComplaint) {
+      const decision = complaintFlowService.classifyComplaintConfirmation(userQuery);
+      if (decision === 'confirmed' || decision === 'declined') {
+        const conversation = await Conversation.findOne({ sessionId, userId });
+        if (conversation) {
+          const responseResult = await this.handleComplaintConfirmation(
+            socket, sessionId, userId, conversation, pendingComplaint, decision,
+            chatHistory, userQuery, clientMessageId, generationId, signal
+          );
+          if (responseResult) return responseResult;
+        }
+      }
+      // ambiguous → fall through; if it is/becomes a complaint turn,
+      // handleComplaint re-asks while keeping the pending state.
+    }
+
+    // Complaint continuation intercept: once a complaint has been confirmed and
+    // persists as an open/in_progress record for this owned conversation, an
+    // OBVIOUS additional defect/detail is a continuation of that complaint —
+    // never a fresh product query. Detection is deterministic (no LLM needed);
+    // question-like messages fall through unchanged so an active complaint can
+    // never hijack unrelated product/shipping questions.
+    const continuationResult = preclassifyComplaintContinuation(userQuery);
+    if (continuationResult) {
+      const conversation = await Conversation.findOne({ sessionId, userId });
+      if (conversation) {
+        const existingComplaint = await Complaint.findOne({
+          conversationId: conversation._id,
+          status: { $in: ['open', 'in_progress'] }
+        }).sort({ createdAt: -1 });
+        throwIfCancelled(signal);
+        if (existingComplaint) {
+          const responseResult = await this.handleExistingComplaintContinuation(
+            socket,
+            sessionId,
+            existingComplaint,
+            userQuery,
+            clientMessageId,
+            generationId,
+            signal
+          );
+          if (responseResult) return responseResult;
+        }
+      }
+    }
+
     const intentResult = await this.classifyAndProcessIntent(
       chatHistory,
       userQuery,
@@ -716,7 +1051,8 @@ class ChatController {
         chatHistory,
         userQuery,
         clientMessageId,
-        generationId
+        generationId,
+        signal
       );
     } else {
       // ================================================================

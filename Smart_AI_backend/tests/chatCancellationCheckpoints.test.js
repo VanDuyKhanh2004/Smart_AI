@@ -54,6 +54,7 @@ jest.mock('../utils/gemini', () => ({
   }),
   generateChatResponse: jest.fn().mockResolvedValue({ text: 'buffered', provider: 'deterministic' }),
   generateComplaintResponse: jest.fn(),
+  preclassifyComplaintContinuation: jest.fn().mockReturnValue(null),
 }));
 
 jest.mock('../services/productSearchService', () => ({ search: jest.fn().mockResolvedValue({ products: [] }) }));

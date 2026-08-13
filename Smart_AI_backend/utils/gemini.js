@@ -2,11 +2,14 @@ const OpenAI = require("openai");
 require("dotenv").config();
 const logger = require("../utils/logger");
 
-if (!process.env.OPENAI_API_KEY) {
-  throw new Error("OPENAI_API_KEY không được định nghĩa trong file .env");
+// Lazy provider initialization: the module loads even when no key is present so
+// the deterministic/Gemini paths can still serve a degraded experience. Calls
+// that need OpenAI throw a clear "not configured" error which the callers'
+// fallback chains convert into Gemini/deterministic behavior.
+let openai = null;
+if (process.env.OPENAI_API_KEY) {
+  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL_NAME = process.env.OPENAI_MODEL || "gpt-4o";
 
 // Safe ceiling for assembled final streamed text. Provider token limits are the
@@ -27,6 +30,9 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 const callChat = async (messages, options = {}) => {
+  if (!openai) {
+    throw new Error("OpenAI không được cấu hình — thiếu OPENAI_API_KEY");
+  }
   const response = await openai.chat.completions.create({
     model: MODEL_NAME,
     temperature: options.temperature ?? 0.7,
@@ -137,20 +143,157 @@ const buildDeterministicResponse = (productContext, userMessage) => {
 };
 
 /**
+ * Shared text normalizer for the deterministic pre-classifiers: lowercase,
+ * strip emoji, collapse whitespace, drop trailing punctuation.
+ */
+const normalizePhrase = (str) => {
+  if (!str || typeof str !== "string") return "";
+  return str
+    .toLowerCase()
+    .trim()
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.,!?;:\-–—"''‘’“”]+$/, "")
+    .trim();
+};
+
+/**
+ * Deterministic complaint pre-classifier.
+ * Recognizes OBVIOUS complaint language deterministically so the complaint
+ * flow never depends on a live LLM provider. Deliberately narrow: it must NOT
+ * swallow normal product questions ("điện thoại nào bị lỗi" is a query, not a
+ * complaint). Returns a complaint intent result, or null to defer elsewhere.
+ */
+const preclassifyComplaint = (userQuery) => {
+  const normalized = normalizePhrase(userQuery);
+  if (!normalized) return null;
+
+  const COMPLAINT_RESULT = {
+    intent: "complaint",
+    clarified_query: null,
+    direct_response: null,
+    preclassified: "complaint",
+  };
+
+  // -- Explicit complaint verbs (unambiguous) -----------------------------
+  if (
+    /khiếu\s*nại/.test(normalized) ||
+    /phàn\s*nàn/.test(normalized) ||
+    /phản\s*ánh/.test(normalized) ||
+    /góp\s*ý\s*phàn\s*nàn/.test(normalized)
+  ) {
+    return COMPLAINT_RESULT;
+  }
+
+  // -- Delivery problems (unambiguous) -------------------------------------
+  if (
+    /(giao\s*sai|giao\s*thiếu|giao\s*nhầm|giao\s*trễ)/.test(normalized) ||
+    /(chưa\s*(nhận|thấy|nhận\s*được)\s*(hàng|đơn|gói)|không\s*(nhận|thấy|nhận\s*được)\s*(hàng|đơn|gói)|hàng\s*chưa\s*(về|tới|đến)|chưa\s*có\s*hàng)/.test(normalized) ||
+    /(mất\s*hàng|bị\s*mất\s*đơn|mất\s*đơn\s*hàng|thất\s*lạc|hàng\s*(bị\s*)?mất)/.test(normalized) ||
+    // delayed delivery — guarded so shipping-time questions stay product queries
+    ((/(giao\s*hàng\s*(chậm|trễ)|hàng\s*(giao\s*)?(chậm|trễ))/i.test(normalized)) &&
+      !/(bao\s*lâu|khi\s*nào|mấy\s*ngày|bao\s*nhiêu|phí\s*giao|chậm\s*không|chậm\s*thì)/.test(normalized)) ||
+    // damaged goods received — e.g. "hàng giao bị vỡ"
+    ((/(hàng|đồ|gói|sản\s*phẩm|điện\s*thoại|máy)[^]*?(giao|nhận|về)[^]*?(bị\s*)?(vỡ|hỏng|hư|lỗi|nứt|móp|trầy|dập)/.test(normalized)) &&
+      !/(nào|gì)/.test(normalized)) ||
+    // courier damaged the goods — e.g. "shipper làm hỏng hàng"
+    /(shipper|người\s*giao|nhân\s*viên\s*giao)\s+(làm|để|làm\s*cho)\s+(hỏng|vỡ|lỗi|hư|mất|trầy)/.test(normalized)
+  ) {
+    return COMPLAINT_RESULT;
+  }
+
+  // -- Wrong / mismatched item ----------------------------------------------
+  if (
+    /(hàng|sản\s*phẩm|điện\s*thoại|máy|đơn\s*hàng|món)\s+(không\s*đúng|không\s*giống|không\s*như\s*mô\s*tả|sai\s*màu|sai\s*loại|sai\s*hãng|sai\s*dung\s*lượng)/.test(normalized) &&
+    !/(nào|gì)/.test(normalized)
+  ) {
+    return COMPLAINT_RESULT;
+  }
+
+  // -- First-person ownership + defect/problem -----------------------------
+  if (
+    (/(tôi|mình|em|tớ|tui)\s+(đã|vừa|mới|có)?\s*(mua|nhận|nhận\s*được|đặt)\s+\S*\s*(hàng|sản\s*phẩm|điện\s*thoại|máy|đồ|món)/.test(normalized) ||
+      /(hàng|sản\s*phẩm|điện\s*thoại|máy|món)\s+(tôi\s+mua|mình\s+mua|em\s+mua|tôi\s+đặt|mình\s+đặt|tôi\s+nhận)/.test(normalized)) &&
+    /(bị\s*(lỗi|hỏng|hư|vỡ|trầy|nứt|móp|chạy\s*không|không\s*(lên\s*nguồn|hoạt\s*động|chạy|dùng\s*được))|lỗi\s*rồi|hỏng\s*rồi|hư\s*rồi)/.test(normalized) &&
+    !/(nào|gì)/.test(normalized)
+  ) {
+    return COMPLAINT_RESULT;
+  }
+
+  // -- Defective item reported on its own (short, assertive, not a question) --
+  if (
+    /^(hàng|sản\s*phẩm|điện\s*thoại|máy|đồ|món)\s+(bị\s*)?(lỗi|hỏng|hư|vỡ|trầy|nứt|móp)/.test(normalized) &&
+    normalized.length <= 60 &&
+    !/(nào|gì|không\s+\d|giá)/.test(normalized)
+  ) {
+    return COMPLAINT_RESULT;
+  }
+
+  // -- Service quality complaint -------------------------------------------
+  if (
+    /(dịch\s*vụ|nhân\s*viên|shop|cửa\s*hàng|shipper)\s+(không\s*tốt|quá\s*tệ|rất\s*tệ|kém|không\s*chu\s*đáo|không\s*chuyên\s*nghiệp|vô\s*lý|không\s*niềm\s*nở)/.test(normalized)
+  ) {
+    return COMPLAINT_RESULT;
+  }
+
+  return null;
+};
+
+/**
+ * Deterministic detector for an OBVIOUS continuation of an ALREADY-REPORTED
+ * complaint: the user adds another defect/detail — "Sản phẩm còn bị sọc màn
+ * hình nữa", "Máy còn bị nóng bất thường", "Camera cũng không hoạt động",
+ * "Tôi còn phát hiện màn hình bị nhấp nháy". It is CONTEXT-AWARE by design:
+ * the caller only consults it when an active (open/in_progress) complaint
+ * already exists for the owned conversation. Deliberately narrow and
+ * question-safe — question-like messages (giá bao nhiêu, khi nào, "… không"?)
+ * return null so an active complaint never hijacks unrelated product/shipping
+ * questions. Returns a result object when a continuation is obvious, else null.
+ */
+const preclassifyComplaintContinuation = (userQuery) => {
+  const normalized = normalizePhrase(userQuery);
+  if (!normalized) return null;
+
+  // Question guard: price/when/wh-phrases and a trailing "… không?" are never
+  // treated as continuations, even when a complaint is active.
+  if (
+    /(nào|gì|bao\s*nhiêu|bao\s*lâu|khi\s*nào|mấy\s*(ngày|giờ)|giá|phí\s*giao|thế\s*nào|tại\s*sao)/.test(normalized) ||
+    /\s+không(\s*(ạ|à|nhé|vậy))?$/.test(normalized)
+  ) {
+    return null;
+  }
+
+  const hasDefect = /(sọc|nóng|chai|nhấp\s*nháy|lỗi|hỏng|hư|vỡ|trầy|nứt|móp|dập|rò\s*rỉ|kêu|giật|lag|loạn\s*màu|ám\s*khói|mất\s*(sóng|tín\s*hiệu|tiếng|nguồn)|tự\s*(tắt|khởi\s*động)|tắt\s*nguồn|không\s*(hoạt\s*động|chạy|lên|bật|bấm|sạc|nhận|đọc|kết\s*nối))/.test(normalized);
+
+  const isContinuation =
+    // "… còn bị <defect> …" / "vẫn bị" / "cũng bị" — e.g. "Sản phẩm còn bị sọc màn hình nữa"
+    (/(còn|vẫn|cũng)\s*bị\s*\S+/.test(normalized) && hasDefect) ||
+    // "còn/vẫn/cũng không <verb>" — e.g. "Camera cũng không hoạt động"
+    /(còn|vẫn|cũng)\s+không\s*(hoạt\s*động|chạy|lên|bật|bấm|sạc|nhận|đọc|kết\s*nối)/.test(normalized) ||
+    // "còn/vẫn <thấy|phát hiện>" or "phát hiện thêm" — e.g. "Tôi còn phát hiện màn hình bị nhấp nháy"
+    /((còn|vẫn)\s+(thấy|phát\s*hiện)|phát\s*hiện\s+thêm)/.test(normalized);
+
+  return isContinuation
+    ? { intent: "complaint_continuation", clarified_query: null, direct_response: null, preclassified: "complaint_continuation" }
+    : null;
+};
+
+/**
  * Deterministic pre-classifier for known small-talk patterns.
  * Returns null if no pattern matches (defer to AI classifier).
  */
 const preclassifyIntent = (userQuery) => {
   if (!userQuery || typeof userQuery !== "string") return null;
 
-  const normalize = (str) =>
-    str
-      .toLowerCase()
-      .trim()
-      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
-      .replace(/\s+/g, " ")
-      .replace(/[.,!?;:\-–—"''‘’“”]+$/, "")
-      .trim();
+  // Complaint detection runs FIRST so an obvious complaint never falls through
+  // to the small-talk sets or a provider call.
+  const complaintResult = preclassifyComplaint(userQuery);
+  if (complaintResult) {
+    logger.debug("[Pre-classifier] Matched as complaint");
+    return complaintResult;
+  }
+
+  const normalize = normalizePhrase;
 
   const normalized = normalize(userQuery);
   if (!normalized) return null;
@@ -316,9 +459,20 @@ const preclassifyIntent = (userQuery) => {
   return null;
 };
 
+const INTENT_SYSTEM_PROMPT =
+  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
+
 /**
  * Phân loại ý định và xử lý phản hồi thông minh
  * Trả về object với intent classification và response tương ứng
+ *
+ * Layered resilience:
+ *   1. Deterministic pre-classifier (small talk + obvious complaints) — no LLM.
+ *   2. OpenAI classification for ambiguous messages.
+ *   3. Gemini classification when OpenAI is unavailable.
+ *   4. Safe deterministic default (product_query) when both providers fail.
+ * A provider failure ALWAYS degrades to a safe answer: an unclassified
+ * message is treated as a product query, never invented as a complaint.
  */
 const classifyIntentAndRespond = async (chatHistory, userQuery) => {
   try {
@@ -337,8 +491,7 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
     const messages = [
       {
         role: "system",
-        content:
-          "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.",
+        content: INTENT_SYSTEM_PROMPT,
       },
       ...safeHistory.map((msg) => ({
         role: msg.role === "assistant" ? "assistant" : "user",
@@ -350,9 +503,7 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
       },
     ];
 
-    const responseText = await callChat(messages, { maxTokens: 300, temperature: 0.3 });
-
-    try {
+    const parseIntent = (responseText) => {
       const parsedResponse = parseJsonFromText(responseText);
       if (
         !parsedResponse.intent ||
@@ -361,12 +512,31 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
         throw new Error("Invalid intent classification");
       }
       return parsedResponse;
-    } catch {
-      return {
-        intent: "product_query",
-        clarified_query: userQuery,
-        direct_response: null,
-      };
+    };
+
+    const classifyWithProvider = async (provider) => {
+      const responseText =
+        provider === "gemini"
+          ? await callGeminiChat(INTENT_SYSTEM_PROMPT, safeHistory, `Hãy phân loại tin nhắn mới: ${userQuery}. Chỉ trả JSON.`)
+          : await callChat(messages, { maxTokens: 300, temperature: 0.3 });
+      return parseIntent(responseText);
+    };
+
+    // OpenAI primary, Gemini fallback, deterministic default last.
+    try {
+      return await classifyWithProvider("openai");
+    } catch (openAIError) {
+      logger.warn({ err: { message: openAIError.message } }, "Intent classification: OpenAI failed, falling back to Gemini");
+      try {
+        return await classifyWithProvider("gemini");
+      } catch (geminiError) {
+        logger.warn({ err: { message: geminiError.message } }, "Intent classification: Gemini failed, using deterministic default");
+        return {
+          intent: "product_query",
+          clarified_query: userQuery,
+          direct_response: null,
+        };
+      }
     }
   } catch {
     return {
@@ -487,6 +657,9 @@ const throwIfAborted = throwIfCancelled;
  * via whether any delta was emitted.
  */
 const streamOpenAICompatible = async ({ messages, signal, onDelta, maxTokens = 600, temperature = 0.7 }) => {
+  if (!openai) {
+    throw new Error("OpenAI không được cấu hình — thiếu OPENAI_API_KEY");
+  }
   throwIfAborted(signal);
   const stream = await openai.chat.completions.create({
     model: MODEL_NAME,
@@ -652,8 +825,78 @@ const generateChatResponseStream = async ({ userMessage, chatHistory = [], produ
 };
 
 /**
+ * Validates and sanitizes the LLM complaint payload (contact, priority, tags).
+ * Throws on a structurally invalid payload so callers can fall back.
+ */
+const normalizeComplaintData = (parsedResponse) => {
+  if (
+    !parsedResponse ||
+    typeof parsedResponse.responseText !== "string" ||
+    typeof parsedResponse.isComplete !== "boolean" ||
+    !parsedResponse.complaintData
+  ) {
+    throw new Error("Invalid complaint response structure");
+  }
+
+  if (!parsedResponse.complaintData.customerContact) {
+    parsedResponse.complaintData.customerContact = {};
+  }
+
+  if (parsedResponse.complaintData.customerContact.email) {
+    const email = parsedResponse.complaintData.customerContact.email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    parsedResponse.complaintData.customerContact.email = emailRegex.test(email)
+      ? email
+      : null;
+  }
+
+  if (parsedResponse.complaintData.customerContact.phone) {
+    let phone = parsedResponse.complaintData.customerContact.phone.replace(/[\s\-\.]/g, "");
+    const phoneRegex = /^(0|\+84)[0-9]{9,10}$/;
+    parsedResponse.complaintData.customerContact.phone = phoneRegex.test(phone)
+      ? phone
+      : null;
+  }
+
+  if (
+    !parsedResponse.complaintData.priority ||
+    !["low", "medium", "high", "urgent"].includes(parsedResponse.complaintData.priority)
+  ) {
+    parsedResponse.complaintData.priority = "medium";
+  }
+
+  if (!Array.isArray(parsedResponse.complaintData.tags)) {
+    parsedResponse.complaintData.tags = [];
+  }
+
+  return parsedResponse;
+};
+
+const COMPLAINT_SYSTEM_PROMPT = "Bạn là agent xử lý khiếu nại chuyên nghiệp, trả JSON.";
+
+const buildComplaintFallback = (userMessage, tag = "system_error") => ({
+  responseText:
+    "Em rất xin lỗi vì sự bất tiện này. Anh/chị có thể mô tả thêm về vấn đề và cho em xin email hoặc số điện thoại để em chuyển bộ phận chuyên trách hỗ trợ ngay được không ạ?",
+  isComplete: false,
+  complaintData: {
+    detailedDescription: userMessage,
+    customerContact: {
+      email: null,
+      phone: null,
+    },
+    priority: "medium",
+    tags: [tag],
+  },
+  nextAction: "Yêu cầu thông tin liên lạc từ khách hàng",
+});
+
+/**
  * Specialized complaint handling agent
  * Handles multi-turn conversation and extracts contact information
+ *
+ * Layered resilience: OpenAI primary, Gemini fallback, deterministic fallback.
+ * The caller (chatController) owns confirmation and persistence — this function
+ * never decides whether a complaint record is created.
  */
 const generateComplaintResponse = async (chatHistory, userMessage) => {
   try {
@@ -687,94 +930,34 @@ Trả về JSON với:
   }
 }`;
 
-    const responseText = await callChat(
-      [
-        { role: "system", content: "Bạn là agent xử lý khiếu nại chuyên nghiệp, trả JSON." },
-        { role: "user", content: complaintPrompt },
-      ],
-      { maxTokens: 500, temperature: 0.4 }
-    );
+    const attempt = async (provider) => {
+      const responseText =
+        provider === "gemini"
+          ? await callGeminiChat(COMPLAINT_SYSTEM_PROMPT, safeHistory, complaintPrompt)
+          : await callChat(
+              [
+                { role: "system", content: COMPLAINT_SYSTEM_PROMPT },
+                { role: "user", content: complaintPrompt },
+              ],
+              { maxTokens: 500, temperature: 0.4 }
+            );
+      return normalizeComplaintData(parseJsonFromText(responseText));
+    };
 
     try {
-      const parsedResponse = parseJsonFromText(responseText);
-
-      if (
-        !parsedResponse.responseText ||
-        typeof parsedResponse.isComplete !== "boolean" ||
-        !parsedResponse.complaintData
-      ) {
-        throw new Error("Invalid complaint response structure");
+      return await attempt("openai");
+    } catch (openAIError) {
+      logger.warn({ err: { message: openAIError.message } }, "Complaint agent: OpenAI failed, falling back to Gemini");
+      try {
+        return await attempt("gemini");
+      } catch (geminiError) {
+        logger.warn({ err: { message: geminiError.message } }, "Complaint agent: Gemini failed, using deterministic fallback");
+        return buildComplaintFallback(userMessage);
       }
-
-      if (!parsedResponse.complaintData.customerContact) {
-        parsedResponse.complaintData.customerContact = {};
-      }
-
-      if (parsedResponse.complaintData.customerContact.email) {
-        const email = parsedResponse.complaintData.customerContact.email.trim().toLowerCase();
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        parsedResponse.complaintData.customerContact.email = emailRegex.test(email)
-          ? email
-          : null;
-      }
-
-      if (parsedResponse.complaintData.customerContact.phone) {
-        let phone = parsedResponse.complaintData.customerContact.phone.replace(/[\s\-\.]/g, "");
-        const phoneRegex = /^(0|\+84)[0-9]{9,10}$/;
-        parsedResponse.complaintData.customerContact.phone = phoneRegex.test(phone)
-          ? phone
-          : null;
-      }
-
-      if (
-        !parsedResponse.complaintData.priority ||
-        !["low", "medium", "high", "urgent"].includes(parsedResponse.complaintData.priority)
-      ) {
-        parsedResponse.complaintData.priority = "medium";
-      }
-
-      if (!Array.isArray(parsedResponse.complaintData.tags)) {
-        parsedResponse.complaintData.tags = [];
-      }
-
-      return parsedResponse;
-    } catch (parseError) {
-      logger.warn({ err: { message: parseError.message } }, "Error parsing complaint response");
-
-      return {
-        responseText:
-          "Em rất xin lỗi về sự bất tiện này. Em đã ghi nhận khiếu nại và sẽ chuyển bộ phận chuyên trách. Anh/chị có thể cung cấp email hoặc số điện thoại để em liên hệ ạ?",
-        isComplete: false,
-        complaintData: {
-          detailedDescription: userMessage,
-          customerContact: {
-            email: null,
-            phone: null,
-          },
-          priority: "medium",
-          tags: ["general"],
-        },
-        nextAction: "Yêu cầu thông tin liên lạc từ khách hàng",
-      };
     }
   } catch (error) {
     logger.error({ err: { message: error.message } }, "Error in generateComplaintResponse");
-
-    return {
-      responseText:
-        "Em rất xin lỗi, hiện tại hệ thống đang gặp sự cố kỹ thuật. Anh/chị có thể liên hệ hotline để được hỗ trợ trực tiếp không ạ?",
-      isComplete: false,
-      complaintData: {
-        detailedDescription: userMessage,
-        customerContact: {
-          email: null,
-          phone: null,
-        },
-        priority: "medium",
-        tags: ["system_error"],
-      },
-      nextAction: "Hướng dẫn khách hàng liên hệ hotline",
-    };
+    return buildComplaintFallback(userMessage);
   }
 };
 
@@ -798,6 +981,8 @@ const testGeminiConnection = async () => {
 module.exports = {
   classifyIntentAndRespond,
   preclassifyIntent,
+  preclassifyComplaint,
+  preclassifyComplaintContinuation,
   generateResponse,
   generateChatResponse,
   generateChatResponseStream,

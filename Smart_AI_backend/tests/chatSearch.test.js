@@ -31,6 +31,7 @@ jest.mock('../utils/gemini', () => ({
   classifyIntentAndRespond: jest.fn(),
   generateChatResponse: jest.fn(),
   generateComplaintResponse: jest.fn(),
+  preclassifyComplaintContinuation: jest.fn().mockReturnValue(null),
 }));
 
 jest.mock('../utils/productValidator', () => ({
