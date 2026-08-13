@@ -15,9 +15,9 @@ npm test -- --runInBand                    # Sequential (recommended for DB conn
 npm test -- --watch                        # Watch mode
 ```
 
-### Test Suite (40 files, 1624 tests, verified on branch `feat/socket-authentication`, 2026-08-04)
+### Test Suite (68 suites, 2043 tests, verified on branch `docs/portfolio-project-polish`, 2026-08-13)
 
-> Test totals are updated after code changes. Update the hash after each merged PR when tests are modified.
+> Current snapshot: **68 suites / 2,043 tests** pass (the suite grew from 1624 tests / 40 suites). The table below is a **representative subset** kept as a coverage index; it is not an exhaustive enumeration of the 68 suites. Update totals and hash after each merged PR when tests are modified.
 
 | File | Main Coverage |
 |------|--------------|
@@ -99,9 +99,9 @@ npx vitest                                 # Watch mode
 npx vitest run --reporter=verbose          # Verbose output
 ```
 
-### Test Suite (11 files, 153 tests, verified on branch `feat/socket-authentication`, 2026-08-04)
+### Test Suite (40 files, 421 tests, verified on branch `docs/portfolio-project-polish`, 2026-08-13)
 
-> Test totals are updated after code changes. Update the hash after each merged PR when tests are modified.
+> Current snapshot: **40 files / 421 tests** pass (the suite grew from 153 tests / 11 files). The table below is a **representative subset** kept as a coverage index. Update totals after each merged PR when tests are modified.
 
 | File | Approx. Tests | Coverage |
 |------|---------------|----------|

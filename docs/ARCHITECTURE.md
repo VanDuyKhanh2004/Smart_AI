@@ -85,7 +85,7 @@ Each domain module in `features/` contains:
 ### Testing
 - Vitest with @testing-library/react
 - Mocked API modules via `vi.mock()`
-- 11 test files, 153 tests (verified 2026-08-04)
+- 40 test files, 421 tests (verified 2026-08-13)
 - Radix UI portal considerations: close Select via Escape before asserting button states
 
 ## Backend
@@ -267,7 +267,7 @@ Three queues initialized in `bullmq/bootstrap.js`:
 6. **Constraint Parsing**: Natural language → price range, brands (include/exclude), inStock filters
 7. **Ranking**: Soft preferences (camera, battery, performance, compact) from `productRanking.js`
 8. **Context**: Redis-backed context with multi-turn merging (follow-up detection)
-9. **Response**: OpenAI (`gpt-4o`) generates response via `utils/gemini.js`, delivered as a single complete `aiResponse` event over real-time Socket.IO transport (no token-by-token streaming).
+9. **Response**: OpenAI (`gpt-4o`) generates response via `utils/gemini.js`. On the product-query path the provider streams and the server emits **exactly one** `aiResponseStart`, delta chunks (`aiResponseChunk`), then **exactly one** `aiResponseComplete` with the authoritative content (batching ≈ 40 chars / 40 ms; no fallback after the first chunk). Small-talk, complaint, and deterministic fallback answers are intentionally buffered and delivered as a single `aiResponse`. See [CHAT_MESSAGE_CORRELATION.md](./CHAT_MESSAGE_CORRELATION.md).
 
 ### External AI APIs
 

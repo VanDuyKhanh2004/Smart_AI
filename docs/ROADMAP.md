@@ -1,6 +1,6 @@
 # Roadmap
 
-> Verification: status, test totals, and priorities below reflect the repository as verified on **2026-08-04** on branch **`feat/socket-authentication`** (working tree; latest merged main baseline commit **`8dca92e`**).
+> Verification: status, test totals, and priorities below reflect the repository as verified on **2026-08-13** on branch **`docs/portfolio-project-polish`** (working tree; latest merged main baseline commit **`f5b6c52`**).
 
 ## Completed
 
@@ -37,11 +37,17 @@
 - [x] Natural language constraint parsing (price range, brands, specs)
 - [x] Product ranking by soft preferences
 - [x] Multi-turn chat context (Redis-backed, configurable TTL/max turns)
-- [x] OpenAI chat completions (gpt-4o, primary) and Gemini chat completions (fallback) — delivered as a single `aiResponse` emit over real-time Socket.IO transport
+- [x] OpenAI chat completions (gpt-4o, primary) and Gemini chat completions (fallback) — product-query answers streamed as deltas over real-time Socket.IO (`aiResponseStart` / `aiResponseChunk` / `aiResponseComplete`); small-talk, complaint, and deterministic answers delivered as a single `aiResponse`
 - [x] Gemini embeddings (`gemini-embedding-001`, 1536 dimensions)
 - [x] Content-hash based embedding deduplication
 - [x] Fallback chain (vector → text → latest products)
 - [x] Offline evaluation harness (`evaluation/chatbot/`, 40 deterministic mocked scenarios: constraint parsing, MRR/ranking, multi-turn context, fallback behavior, CLI `--fail-under` thresholds)
+- [x] Chat message correlation + duplicate-submission protection — `clientMessageId` Redis dedup (`processing`/`completed`), replay-not-regenerate on duplicates, bounded process-local LRU fallback
+- [x] Real-time AI response streaming (delta chunks, zero-based sequential `chunkIndex`, authoritative `aiResponseComplete`)
+- [x] Stop AI generation — one `AbortController` per accepted request threaded through the pipeline; no partial assistant content persisted; dedup claim released for clean retry
+- [x] Retry and Regenerate — logical-turn vs generation-attempt identity; generate-then-atomic-replace for regenerate
+- [x] Conversation history restore after reload (read-only REST `GET /api/chat/conversations`)
+- [x] Conversation ownership isolation by authenticated user (unique `{ userId, sessionId }` index, trusted socket identity)
 
 ### Admin Features
 - [x] Admin dashboard with charts and stats
@@ -66,10 +72,12 @@
 - [x] OpenAPI 3.1 documentation with swagger-jsdoc + swagger-ui-express at `/api-docs`
 - [x] Redis auto-reconnect with exponential backoff (500ms → 30s cap, infinite retries, disabled during graceful shutdown)
 - [x] Centralized error handling — all 18 controllers migrated to `asyncHandler` + `AppError` (legacy `{ success, message }` envelope retained only on product create/update and store/appointment/profile/address routes)
+- [x] Security headers — Helmet `v8` with a custom CSP (production `'self'` + Google, HSTS, `frame-ancestors`, `no-referrer`), applied before body parsers
+- [x] Route-level rate limiting — express-rate-limit throttles on auth-session, email-action, resend-verification, token-action, and semantic-search endpoints (in addition to the Redis-backed login limiter)
 
 ### Testing & Quality
-- [x] Backend test suite (1624 tests, 40 suites; verified 2026-08-04)
-- [x] Frontend test suite (153 tests, 11 files; verified 2026-08-04, includes chat markdown/code-block regression tests and chat socket auth tests)
+- [x] Backend test suite (2043 tests, 68 suites; verified 2026-08-13)
+- [x] Frontend test suite (421 tests, 40 files; verified 2026-08-13, includes chat markdown/code-block, chat socket auth, correlation/streaming/stop/retry-regenerate, persistence/hydration tests)
 - [x] CI-enforced TypeScript strict mode check
 - [x] Chat code-block regression coverage — `frontend/src/tests/ChatCodeBlock.test.tsx` (10 scenarios)
 - [x] Socket.IO integration tests — `backend/tests/socketAuth.test.js` (13 scenarios: handshake auth via token/header, all 4 auth error codes, query-param rejection, `socket.data.user` shape, `sendMessage` → AI pipeline, impersonation guard)
@@ -78,24 +86,24 @@
 
 ## Current Baseline
 
-- Backend: 40 suites / **1624 tests** passing; Frontend: 11 files / **153 tests** passing; lint, `tsc -b`, and `npm run build` pass.
+- Backend: 68 suites / **2043 tests** passing; Frontend: 40 files / **421 tests** passing; lint, `tsc -b`, and `npm run build` pass.
 - Chat sockets require a JWT handshake; unauthenticated sockets cannot reach the paid AI pipeline.
 - Production: frontend on Vercel (auto-deploy), backend on Render (manual), MongoDB Atlas (`$vectorSearch`), managed Redis, Cloudinary images, Brevo email (API-only), Google OAuth.
-- Chat responses are a single complete `aiResponse` event (no token-by-token streaming).
+- Product-query chat responses stream as deltas over Socket.IO; small-talk/complaint/deterministic answers are a single `aiResponse`.
 - AI evaluation is offline/mocked only — it does **not** measure live chatbot accuracy or production latency.
 
 ## Next Priorities
 
 Prioritized by security/cost exposure first, then reliability, then performance. None started.
 
-1. **Chat / general / admin rate limiting** — extend beyond the login endpoint to the chat endpoint, general API, and admin routes.
-2. **Helmet** — add security headers (CSP, `X-Frame-Options`, `X-Content-Type-Options`).
+1. **Chat / general / admin rate limiting** — extend beyond the login endpoint and the existing auth/semantic-search route limiters to the chat endpoint, general API, and admin routes.
+2. **httpOnly cookie token strategy** — move access/refresh tokens out of `localStorage` to remove the XSS exposure (documented as a known limitation in SECURITY.md).
 3. **Startup environment validation** — fail fast / warn on missing required env vars (`BREVO_*`, `GEMINI_API_KEY`, `GOOGLE_*`, etc.) instead of silently skipping features.
 4. **Shiki migration** — replace the dead 621-line Shiki code-block component and unused `shiki`/`react-simple-icons` deps with the active `ai/code-block.tsx` (Shiki-ready).
 5. **Bundle optimization** — address the 1.15 MB main chunk (Vite `>500 kB` warning) with `manualChunks` / vendor splitting.
 6. **E2E tests** — add Playwright/Cypress smoke flows (login → browse → checkout → order; admin moderation).
 7. **Controller/service refactoring** — split oversized controllers (`orderController` 803 L, `authController` 726 L, etc.) and extract services for cart/wishlist/compare/review/store/address/promotion/appointment/dashboard.
-8. **True token streaming** — implement token-by-token `aiResponse` chunks (requires backend + frontend changes).
+8. **Legacy error-envelope cleanup** — retire the remaining `{ success, message }` top-level envelopes on product create/update and store/appointment/profile/address routes so every endpoint uses the centralized `{ success, error: {...} }` format.
 9. **Live RAG evaluation** — run a small live eval against real Atlas + real LLM to replace mocked-only numbers.
 10. **Observability/metrics** — route remaining `console.*` calls through Pino; add metrics/APM and log aggregation.
 11. **Backend CD** — automate Render deployment (workflow or blueprint) to match frontend CD.
@@ -118,8 +126,7 @@ Prioritized by security/cost exposure first, then reliability, then performance.
 
 ## Technical Debt
 
-- [ ] No Helmet (CSP / security headers)
-- [ ] Rate limiting only on the login endpoint — chat/general/admin unprotected
+- [ ] No rate limiting on the chat endpoint or general/admin routes (login, auth-session, email-action, resend-verification, token-action, and semantic-search are covered)
 - [ ] Tokens stored in `localStorage` (XSS exposure; `httpOnly` cookie strategy not implemented)
 - [ ] Two error envelopes coexist (`{ success, error: {...} }` vs `{ success, message }` on product create/update and store/appointment/profile/address routes)
 - [ ] Some controller tests mock implementation details (tight coupling to mocks)
