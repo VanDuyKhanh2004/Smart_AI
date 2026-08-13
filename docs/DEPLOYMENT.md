@@ -54,13 +54,13 @@ node index.js
 curl https://your-app.onrender.com/health
 
 # Readiness check (dependencies: MongoDB, Redis)
-curl https://your-app.onrender.com/health/ready
+curl https://your-app.onrender.com/api/health/ready
 
 # API info
 curl https://your-app.onrender.com/api/info
 ```
 
-Use `GET /health` (liveness) and `GET /health/ready` (readiness) as Render health checks.
+Use `GET /health` (liveness) and `GET /api/health/ready` (readiness) as Render health checks.
 
 ## Frontend (Vercel)
 

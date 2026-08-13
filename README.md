@@ -1,367 +1,227 @@
-# Smart AI Agent
+# Smart AI
 
-> AI-powered E-commerce Platform
+> Full-stack AI e-commerce platform — React storefront, Express API, and a real-time RAG shopping assistant.
 
 ![License](https://img.shields.io/badge/license-MIT-green)
 
----
+Smart AI is an e-commerce platform that pairs a complete storefront and admin dashboard with a floating AI shopping assistant. The assistant answers natural-language product queries (including multi-turn follow-ups) through a retrieval-augmented (RAG) pipeline — intent classification, MongoDB Atlas vector + text search, constraint parsing, and preference ranking — with answers streamed to the browser over Socket.IO. The React frontend deploys to Vercel (or Docker + nginx) and the Express backend to Render (or Docker), backed by MongoDB Atlas and Redis.
 
-## Features
+The platform is Vietnamese-language: user-facing store and assistant messages are written in Vietnamese, and the assistant is built and tested against Vietnamese shopping queries.
 
-### Authentication & Security
-- JWT authentication with access/refresh tokens
-- Google OAuth login
-- Email verification flow
-- Password reset with secure tokens
-- Account lock protection (5 failed attempts, 15min lockout)
-- Account unlock via email token
-- Login rate limiting (Redis-backed, 20 attempts/15min)
+## Highlights
 
-### E-commerce Core
-- Product catalog with image upload (Cloudinary)
-- Semantic product search (vector + text + fallback)
-- Product recommendations (vector + brand/price + fallback)
-- Shopping cart (server + guest local cart merge on login)
-- Checkout with idempotency (UUID v4 key, fingerprint validation)
-- Order management (create/view/cancel; admin: list/stats/update status)
-- Centralized order status transitions with validated rules
-- Customer reviews with moderation (pending/approved/rejected)
-- Wishlist
-- Product comparison tool
-- Promotion/discount application (percentage/fixed, date range, usage limits)
-- Customer order detail page with loading skeleton and error states
-- Order confirmation emails with safe HTTPS image rendering
-
-### AI Chatbot
-- RAG pipeline: intent classification (product_query|small_talk|complaint) → MongoDB Atlas `$vectorSearch` → text fallback → constraint parsing (price range, brands, specs) → ranking by soft preferences → response via OpenAI `gpt-4o` (primary) or Gemini `gemini-2.0-flash` (fallback), delivered as one complete response over real-time Socket.IO transport (single `aiResponse` emit; no token-by-token streaming)
-- Multi-turn conversation context (Redis-backed, 30-min TTL, 20 max turns)
-- Complaint handling agent (structured: priority, tags, contact info)
-- Content-hash based embedding deduplication
-- Offline evaluation framework at `evaluation/chatbot/` — 40 deterministic mocked scenarios covering constraint parsing, MRR/ranking, multi-turn context, and fallback behavior, with CLI thresholds (`--fail-under`); does not measure live chatbot accuracy or production latency
-
-### Admin Dashboard
-- Product management
-- Order management with status transitions
-- Review moderation
-- Q&A management
-- Promotion management
-- Store management
-- Appointment management
-- Complaint management
-- Charts and stats
-
-### Infrastructure
-- Docker Compose (MongoDB 7, Redis 7, backend, frontend with nginx)
-- BullMQ job queues (email, embeddings, system ping) with concurrency control
-- Graceful shutdown sequence
-- Health check endpoints (liveness, readiness, dependency status)
-- Correlation ID middleware for request tracing
-- Pino structured logging with sensitive data redaction
-
----
-
-## Tech Stack
-
-### Frontend
-| Package | Version |
-|---------|---------|
-| React | 18 |
-| TypeScript | 5.8 (strict mode, `noUnusedLocals`, `noUnusedParameters`) |
-| Vite | 7 |
-| Tailwind CSS | 4 |
-| shadcn/ui | Radix UI primitives + CVA + clsx + tailwind-merge |
-| Zustand | 5 (auth, cart, compare, wishlist stores) |
-| TanStack React Query | 5 (server state) |
-| React Router DOM | 7 |
-| Axios | 1 |
-| Socket.IO Client | 4 |
-| Recharts | 3 |
-| React Markdown | 10 + remark-gfm + remark-math + rehype-katex |
-| Lucide React | icons |
-| embla-carousel-react | carousels |
-| Vitest | 4 + @testing-library/react 16 + jsdom |
-
-### Backend
-| Package | Version |
-|---------|---------|
-| Express | 4 |
-| Mongoose | 8 |
-| BullMQ | 5 |
-| Redis client (`redis`) | 6 |
-| OpenAI | 5 |
-| `@google/genai` / `@google/generative-ai` | 2 / 0.24 |
-| Cloudinary | 2 |
-| `@getbrevo/brevo` | 6 |
-| Socket.IO | 4 |
-| Pino | 10 |
-| `jsonwebtoken` | 9 |
-| `bcryptjs` | 3 |
-| `google-auth-library` / `googleapis` | 10 / 171 |
-| Jest | 30 + Supertest 7 |
-| Docker | Compose |
-
-### AI Provider Roles
-- **OpenAI** (primary): chat completions (`gpt-4o`), intent classification, complaint handling — uses `openai` npm package (in `utils/gemini.js`)
-- **Google Gemini**: embeddings (`gemini-embedding-001`, 1536-dim), chat fallback (`gemini-2.0-flash`) — uses `@google/genai` (in `utils/openai.js`)
-- *Note: utility filenames are historically inverted relative to provider*
-
----
+- **RAG shopping assistant** — query pipeline over MongoDB Atlas `$vectorSearch` with a stacked text/latest-products fallback, rule-based constraint parsing (price, brand, in-stock), soft-preference ranking, all tied to OpenAI `gpt-4o` (primary) with Gemini `gemini-2.0-flash` and a deterministic fallback.
+- **Reliable real-time chat UX** — answers streamed to the browser in real time (small deltas over Socket.IO) with **message correlation + duplicate protection**, **user-initiated stop generation**, **Retry / Regenerate**, and **conversation history restore after reload**.
+- **Semantic product search** — `gemini-embedding-001` embeddings (1536-dim) maintained by a content-hash-deduplicated BullMQ pipeline, queried via Atlas `$vectorSearch` with `$text` ranking fallback.
+- **Secure identity** — JWT access/refresh flows, Google OAuth, email verification (hashed, one-time tokens), account lockout, Redis-backed login IP rate limiting (atomic Lua script), and a JWT-gated chat socket.
+- **Reliable under failures** — graceful shutdown sequence, liveness/health/readiness endpoints, Redis auto-reconnect with an explicit fail-open/fail-closed policy map, idempotent checkout, and a bounded single-retry for timed-out GET requests (cold-start hardening).
+- **Quality rail** — **2,464 automated tests** (backend 68 suites / 2,043 tests, frontend 40 files / 421 tests) plus an offline, deterministic AI evaluation harness; CI enforces type-check, lint, tests, and a production build on every push/PR.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   Frontend (React 18 + TS)                    │
-│    Vite 7 · Tailwind 4 · shadcn/ui · Zustand 5               │
-│    TanStack Query 5 · React Router DOM 7 · Axios             │
-│    Socket.IO Client 4 · Recharts 3                           │
-│    Features: auth, products, cart, checkout, orders,          │
-│              chat, compare, wishlist, reviews, complaints,    │
-│              stores, appointments, admin, addresses, profile  │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ HTTP (REST) / WebSocket (Socket.IO)
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│               Backend (Express 4 + Node.js 20+)              │
-│    Middleware: correlationId, cors, requestLogger, auth      │
-│    Controllers: auth, product, order, cart, chat, review,    │
-│                 promotion, store, appointment, complaint     │
-│    Services: productImage, productSearch, productRanking,    │
-│              recommendation, cache, conversationContext      │
-│    BullMQ Workers: system (ping), email, embedding           │
-│    Socket.IO Handlers: chat (single aiResponse), notifications │
-└──────┬──────────────────┬──────────────────┬────────────────┘
-       │                  │                  │
-       ▼                  ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
-│  MongoDB 7   │  │   Redis 7    │  │   Cloudinary     │
-│ (Mongoose 8) │  │  (redis v6)  │  │  (Images CDN)    │
-│              │  │              │  │                  │
-│ Atlas for    │  │ Cache/Queue  │  │ smart-ai/products│
-│ $vectorSearch│  │ Rate Limit   │  │                  │
-│              │  │ Chat Context │  │                  │
-└──────────────┘  └──────┬───────┘  └──────────────────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │  BullMQ 5    │
-                  │ (Redis-backed)│
-                  │              │
-                  │ systemQueue  │
-                  │ emailQueue   │
-                  │ embeddingQueue│
-                  └──────────────┘
+```mermaid
+flowchart TB
+    subgraph FE["Frontend — React 18 · TypeScript strict · Vite 7"]
+        UI["Storefront · Admin dashboard · Floating AI chat"]
+        STATE["Zustand stores · TanStack Query · Axios"]
+        SOCK["socket.io-client"]
+    end
+
+    subgraph BE["Backend — Express 4 · Node 20+ (CommonJS)"]
+        REST["REST API — controllers → services → models"]
+        WS["Socket.IO chat handler — auth'd handshake"]
+        RAG["RAG pipeline — intent · constraints · ranking"]
+        QUEUES["BullMQ workers — email · embedding · system"]
+    end
+
+    FE -- "HTTPS / WebSocket" --> BE
+
+    BE --> MONGO[(MongoDB Atlas — persistence · vector search)]
+    BE --> REDIS[(Redis — cache · queues · chat context · rate limits)]
+    BE --> CLD[Cloudinary — product images CDN]
+    BE --> BRV[Brevo — transactional email]
+    BE --> LLM[OpenAI / Gemini — chat generation · embeddings]
+
+    QUEUES --> REDIS
+    RAG --> MONGO
+    RAG --> REDIS
+    RAG --> LLM
 ```
 
----
+### Component roles
 
-## Setup
+| Component | Role |
+|---|---|
+| MongoDB Atlas | Persistence + `$vectorSearch` (1536-dim `embedding_vector` index) |
+| Redis | Product-query cache, BullMQ queues, chat context, login rate limiting |
+| Cloudinary | Product image CDN (secure HTTPS, validated uploads) |
+| Brevo | Transactional email (API only, no SMTP) — welcome, verification, password reset, unlock, order confirmation |
+| OpenAI / Gemini | Chat generation and embeddings; OpenAI primary, Gemini fallback |
 
-### Prerequisites
-- Node.js >= 20
-- npm >= 9
-- Docker Desktop (for Docker deployment)
-- MongoDB Atlas cluster (for `$vectorSearch`)
-- Redis instance (managed or local)
+## AI Shopping Assistant (RAG)
 
-### Backend
+The chat is a Socket.IO flow that runs this pipeline per product query:
+
+1. **Intent classification** — `product_query` \| `small_talk` \| `complaint` (OpenAI, Gemini fallback).
+2. **Embed + retrieve** — query embedded with `gemini-embedding-001`, then Atlas `$vectorSearch`; on failure falls back to weighted `$text` search (name=10, brand=8, description=5, specs=6), then to latest in-stock products.
+3. **Constrain** — rule-based parsing of the natural-language request (price range, brands include/exclude, in-stock) applied deterministically so answers respect the ask.
+4. **Rank** — soft preferences (camera, battery, performance, compact) order results.
+5. **Respond** — `gpt-4o` (primary) or `gemini-2.0-flash` (fallback) generates the Vietnamese answer; a deterministic builder is the final fallback. The product path **streams deltas** (`aiResponseStart` / `aiResponseChunk` / `aiResponseComplete`); small-talk, complaint, and deterministic answers are delivered as one `aiResponse`.
+
+Chat reliability engineering:
+
+- **Duplicate-safe handling** — the client mints a `clientMessageId`; Redis-keyed dedup (`chat:message:user:<user>:<session>:<id>`) makes redelivered messages idempotent: the paid pipeline never re-runs, and a completed answer is **replayed, not regenerated**. A bounded local LRU covers Redis outages (per-process only).
+- **Multi-turn context** — Redis-scoped per `{ user, session }` (30-min TTL, 20 turns), merged with follow-up detection; two users sharing a `sessionId` can never see each other's context.
+- **Ownership isolation** — conversations are indexed by `{ userId, sessionId }`; `userId` is always read from the authenticated socket identity, never from the client payload.
+- **Stop generation** — one `AbortController` per accepted request threads a cancel signal through intent → context → RAG → provider stream, so stopping prevents every later phase (no partial content persisted, dedup claim released for a clean retry).
+- **Retry / Regenerate** — logical-turn vs generation-attempt identity: Retry reuses the turn, Regenerate mints a fresh attempt id and atomically replaces the old answer only after success.
+
+The full event/ack contracts, ordering rules, and test coverage are documented in [`docs/CHAT_MESSAGE_CORRELATION.md`](./docs/CHAT_MESSAGE_CORRELATION.md).
+
+## Engineering Practices
+
+- **Layered modular monolith** — middlewares (cross-cutting) → controllers (HTTP only) → services (business logic) → models (schema only), CommonJS on Node ≥ 20. No microservices.
+- **Centralized error handling** — `AppError` hierarchy, `asyncHandler`, global `errorHandler` + `notFoundHandler`, consistent error envelope, no stack traces in production. (A small documented set of legacy routes still uses the old envelope.)
+- **Observability** — Pino structured logging with request-correlation IDs and redaction of tokens/passwords/credentials/query params (`utils/logger.js`, `utils/sanitizeUrl.js`).
+- **Health checking** — `/health` (liveness, no deps), `/api/health` (MongoDB + Redis), `/api/health/ready` (readiness: MongoDB critical, Redis degraded → still 200), `/api/health/live`.
+- **Background jobs** — BullMQ queues with concurrency control (email, embeddings, system ping); embeddings are content-hash deduplicated.
+- **API documentation** — OpenAPI 3.1 spec (swagger-jsdoc) served at `/api-docs`, kept accurate by a route-accuracy test suite.
+
+## Security
+
+- JWT access/refresh tokens with separate secrets; email tokens are SHA-256 hashed, single-use, and expire.
+- Google OAuth via Google Identity Services; account lockout after 5 failed attempts (15-min window).
+- **Rate limiting** — Redis-backed login limiter (20 attempts / 15 min per IP) using one atomic Lua script, plus express-rate-limit throttles on auth-session, email-action, resend-verification, token-action, and semantic-search endpoints.
+- **Security headers** — Helmet `v8` with a custom CSP (production: strict `'self'` + Google, HSTS, `frame-ancestors`, `no-referrer`), applied before body parsers.
+- **Socket auth** — chat connections must pass a JWT handshake (`io.use(...)`); query-string tokens and refresh tokens are rejected; four stable auth error codes.
+- **Upload hardening** — Cloudinary images via signed server-side uploads; base64/URL validation rejects HTTP, `javascript:`/`blob:`/`file:`, localhost, and private IPs in production.
+- **Secret hygiene** — no secrets in code; env-injected; `VITE_*` (public bundle) never carries backend secrets.
+
+See [`SECURITY.md`](./SECURITY.md) for the full policy and known limitations.
+
+## Reliability & Failure Handling
+
+- **Graceful shutdown** — on SIGTERM/SIGINT: BullMQ workers/queues → Socket.IO (broadcasts `serverShutdown`) → HTTP server → Redis → MongoDB → log flush → exit.
+- **Redis resilience** — auto-reconnect with exponential backoff (`min(500 × 2ⁿ, 30000)ms`, infinite), disabled during shutdown. Every Redis-dependent path has an explicit policy:
+
+| Path | Policy |
+|---|---|
+| Product-query cache | Fail-open (uncached) |
+| Login rate limiting | Fail-open (never blocks legit users on Redis loss) |
+| Email resend throttle | Fail-closed (blocks spam on Redis loss) |
+| Chat dedup | Local bounded LRU fallback (per-process) |
+| Data persistence | MongoDB is always the source of truth |
+
+- **Cold-start hardening** — the axios client retries a timed-out `GET` exactly once (`ECONNABORTED` with no HTTP response, GET-only, never a user abort and never the `/auth/refresh` call), bounding first-load failures during deploy cold starts.
+- **Idempotent checkout** — client UUID key + request fingerprint prevents double-charges.
+
+## Testing & CI/CD
+
+> Test totals are a current snapshot, verified **2026-08-13** on branch `docs/portfolio-project-polish` (HEAD `f5b6c52`).
+
+| Suite | Runner | Count |
+|---|---|---|
+| Backend | Jest 30 + Supertest 7, `--runInBand` | **68 suites / 2,043 tests** |
+| Frontend | Vitest 4 + @testing-library/react 16 + jsdom | **40 files / 421 tests** |
+| AI evaluation | Offline deterministic harness (`npm run evaluate:chatbot`) | **40 mocked scenarios** |
+
+- Backend tests mock every external dependency (MongoDB, Redis, Cloudinary, Brevo, AI providers); Socket.IO suites run a real in-memory HTTP + socket server.
+- The offline evaluation measures constraint accuracy, ranking (MRR), multi-turn context retention, and fallback reliability against curated fixtures — it is deterministic and CI-usable, and honestly documents that it is **not** live chatbot accuracy or production latency.
+- **CI** (`.github/workflows/ci.yml`) — backend `npm test -- --runInBand`; frontend `npx tsc -b`, `npm run lint`, `npm test -- --no-file-parallelism`, `npm run build`. Plus Docker build validation for both images.
+- **CD** (`.github/workflows/deploy-frontend.yml`) — auto-deploys the frontend to Vercel on `main`.
+- Also run: `git diff --check` for whitespace errors.
+
+## Getting Started
+
+Prerequisites: Node ≥ 20, npm ≥ 9, and for the AI features: MongoDB Atlas (`$vectorSearch`), a Redis instance, and API keys for OpenAI/Gemini/Brevo/Cloudinary/Google OAuth.
+
+### Docker (easiest)
 
 ```bash
 cd Smart_AI_backend
-npm install
-# Create Smart_AI_backend/.env using the Environment Variables table below
-npm run dev
-```
-
-The backend starts on `http://localhost:5000`.
-
-### Frontend
-
-```bash
-cd Smart_AI_frontend
-npm install
-cp .env.example .env  # or create .env.local
-# Set VITE_API_BASE_URL=http://localhost:5000/api
-npm run dev
-```
-
-The frontend starts on `http://localhost:5173`.
-
-### Docker
-
-```bash
-# 1. Configure environment
-cd Smart_AI_backend
-cp .env.docker.example .env.docker
-# Edit .env.docker with your API keys.
-# Add any missing vars not in the example (BREVO_API_KEY, etc.)
-
-# 2. Build and start all services
+cp .env.docker.example .env.docker   # add your API keys
 cd ..
 docker compose up --build
+# Frontend: http://localhost:3000 · Backend: http://localhost:5000
+# MongoDB: localhost:27017 · Redis: localhost:6379
 ```
 
-- Frontend: `http://localhost:3000`
-- Backend: `http://localhost:5000`
-- MongoDB: `localhost:27017`
-- Redis: `localhost:6379`
+*SPA note:* the Docker frontend is built with build-time `VITE_*` args, so env changes require a rebuild.
 
-### Environment Variables
-
-> **Note**: `VITE_*` variables are injected at build time — never expose backend secrets in them.
-
-#### Backend
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PORT` | Optional (5000) | Server port |
-| `NODE_ENV` | Optional | `development` or `production` |
-| `MONGO_CONNECTION_STRING` | **Yes** | MongoDB URI (Atlas for vector search) |
-| `REDIS_URL` | Conditional | Required when BullMQ, cache, rate limit, or chat context enabled |
-| `JWT_SECRET` | **Yes** | Access token signing secret |
-| `JWT_EXPIRE` | Optional (15m) | Access token expiry |
-| `JWT_REFRESH_SECRET` | **Yes** | Refresh token signing secret |
-| `JWT_REFRESH_EXPIRE` | Optional (7d) | Refresh token expiry |
-| `OPENAI_API_KEY` | **Yes** | OpenAI API key (primary chat provider) |
-| `GEMINI_API_KEY` | Conditional | Required for embeddings and Gemini fallback |
-| `CLOUDINARY_CLOUD_NAME` | Conditional | Required for product image upload |
-| `CLOUDINARY_API_KEY` | Conditional | Required for product image upload |
-| `CLOUDINARY_API_SECRET` | Conditional | Required for product image upload |
-| `BREVO_API_KEY` | Conditional | Required when transactional emails enabled |
-| `BREVO_FROM_EMAIL` | Conditional | Sender email for transactional emails |
-| `BREVO_FROM_NAME` | Conditional | Sender display name |
-| `GOOGLE_CLIENT_ID` | Conditional | Required for Google OAuth |
-| `GOOGLE_CLIENT_SECRET` | Conditional | Required for Google OAuth |
-| `FRONTEND_URL` | **Yes** in production | CORS and Socket.IO origin |
-| `BULLMQ_ENABLED` | Optional (true) | Enable BullMQ queues |
-| `EMAIL_QUEUE_ENABLED` | Optional (true) | Enable email queue |
-| `EMBEDDING_QUEUE_ENABLED` | Optional (true) | Enable embedding queue |
-| `LOG_LEVEL` | Optional (info) | Pino log level |
-
-#### Frontend
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VITE_API_BASE_URL` | **Yes** | Backend API base URL (absolute, http/https, not matching frontend origin) |
-| `VITE_API_URL` | No | Backend URL for non-API endpoints (socket origin derivation) |
-| `VITE_GOOGLE_CLIENT_ID` | Conditional | Google OAuth client ID |
-
----
-
-## Deployment
-
-### Frontend (Vercel)
-
-- Auto-deployed via GitHub Actions (`.github/workflows/deploy-frontend.yml`) on push to `main` when `Smart_AI_frontend/**` changes
-- Build: `npm run build` (runs `tsc -b && vite build`), output `dist/`
-- Node version: 24
-- `VITE_*` values set in Vercel dashboard — changes require a fresh build
-
-### Backend (Render)
-
-- Detects Render environment via `RENDER_EXTERNAL_URL`
-- Build: `npm ci`
-- Start: `node index.js`
-- Environment variables configured in Render dashboard
-
-### MongoDB Atlas
-
-- Required for `$vectorSearch` functionality
-- Connection via `MONGO_CONNECTION_STRING`
-- Indexes: text indexes on `Product`, vector index on `embedding_vector`, compound indexes on orders
-
-### Redis
-
-- Managed Redis instance required for BullMQ, rate limiting, chat context
-- Connection via `REDIS_URL`
-- Note: Auto-reconnect with exponential backoff (`min(500 × 2^attempt, 30000)ms`, infinite retries) — disabled during graceful shutdown
-- ERD: See `docs/ERD.md` for full database schema, relationships, indexes, and scaling recommendations
-
-### Cloudinary
-
-- Lazy-initialized singleton (`configs/cloudinary.js`)
-- Upload folder: `smart-ai/products`
-- Returns `null` if env vars not set
-- All uploads use `secure: true` (HTTPS)
-
-### Brevo
-
-- Transactional emails: welcome, verification, password-reset, unlock-account, order-confirmation
-- Queue: BullMQ `emailQueue` with direct fallback
-- Config: `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME`
-
----
-
-## Testing
-
-> **Verification metadata**: totals below verified on **2026-08-04** on branch **`docs/synchronize-project-documentation`** at commit **`8dca92e`** (latest merged main baseline).
-
-### Backend (Jest + Supertest)
+### Manual
 
 ```bash
+# Backend (port 5000)
 cd Smart_AI_backend
-npm test                           # Full suite (1611 tests, 39 suites; verified 2026-08-04)
-npm test -- --runInBand            # Sequential (recommended)
-```
+npm install
+cp .env.example .env                 # fill in your keys (key vars below)
+npm run dev
 
-### Frontend (Vitest + @testing-library/react)
-
-```bash
+# Frontend (port 5173)
 cd Smart_AI_frontend
-npm test                           # Vitest run (129 tests, 9 files; verified 2026-08-04)
-npx tsc --noEmit                   # TypeScript strict check
-npm run build                      # Production build (tsc -b + vite build)
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-### CI Validation
+### Key environment variables
 
-```bash
-git diff --check                   # No whitespace errors
+| Variable | Where | Purpose |
+|---|---|---|
+| `MONGO_CONNECTION_STRING` | backend | MongoDB URI (Atlas for `$vectorSearch`) |
+| `REDIS_URL` | backend | Redis connection |
+| `JWT_SECRET` / `JWT_REFRESH_SECRET` | backend | Token signing secrets (must differ) |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` | backend | Chat generation + embeddings |
+| `CLOUDINARY_*` | backend | Product image upload |
+| `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME` | backend | Transactional email |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | backend | Google OAuth |
+| `FRONTEND_URL` | backend | CORS + Socket.IO origin |
+| `VITE_API_BASE_URL` | frontend | Backend API base URL (absolute, must not match the frontend origin) |
+
+The full table (including optional rate-limit/queue tuning) is in the package READMEs and `docs/DEPLOYMENT.md`.
+
+## Repository Map
+
+```
+Smart_AI_backend/      Express API, services, models, middlewares, BullMQ jobs
+Smart_AI_frontend/     React SPA — feature modules, stores, services, AI chat UI
+docs/                  Architecture, ERD, API overview, testing, roadmap, audits
+evaluation/chatbot/    Offline deterministic AI evaluation harness
+scripts/               Data migrations + API benchmarks (backend)
+.github/workflows/     CI (tests/type-check/lint/build) + Vercel CD
 ```
 
----
+## Key Engineering Decisions
 
-## CI/CD
+- **Modular monolith, not microservices** — one deployable backend with clear seams; no distributed complexity that isn't yet warranted.
+- **Socket.IO for chat** — a single authenticated connection carries streaming, dedup, stop, retry/regenerate, and typing state; history is a separate read-only REST layer that reuses the JWT/refresh flow.
+- **Client-generated correlation ids** — `clientMessageId` at the edge gives duplicate-safe/idempotent message handling without server-side queues.
+- **Retrieval before generation** — constraints and ranking are deterministic rules; the LLM only writes the final answer. Cheaper, faster, and testable offline.
+- **Provider fallback chain** — OpenAI → Gemini → deterministic, with *no fallback after the first byte* so a stream never changes mid-way.
+- **Honest evaluation** — an offline, mocked, deterministic eval harness gates AI regressions in CI; its limitations (no live accuracy/latency) are documented explicitly.
+- **Documented trade-offs** — e.g., tokens live in `localStorage` (XSS exposure) pending an `httpOnly` cookie strategy; two error envelopes linger on legacy routes. See `docs/PROJECT_CONTEXT.md` and `docs/ROADMAP.md`.
 
-### CI Pipeline (`.github/workflows/ci.yml`)
+## Demo
 
-Triggers on push or PR to `main` when changes affect `Smart_AI_backend/**`, `Smart_AI_frontend/**`, or workflow files.
+A guided walkthrough covering the storefront search, the AI chat (streaming, stop, retry/regenerate, history restore), auth/email flows, and the admin dashboard is in [`docs/PORTFOLIO_NOTES.md`](./docs/PORTFOLIO_NOTES.md).
 
-- **Backend**: `npm ci` → `npm test` (Node 24, Ubuntu)
-- **Frontend**: `npm ci` → `npx tsc --noEmit` → `npx vitest run` → `npm run build` (Node 24, Ubuntu, cached deps)
-
-### CD Pipeline (`.github/workflows/deploy-frontend.yml`)
-
-Triggers on push to `main` with frontend changes.
-
-1. Checkout code
-2. Install Vercel CLI
-3. `vercel pull` — fetch environment
-4. `vercel build --prod`
-5. `vercel deploy --prebuilt --prod`
-6. Secrets: `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VERCEL_TOKEN`
-
----
+<!-- TODO: add product/search/AI-chat/admin screenshots here -->
 
 ## Documentation
 
 | File | Contents |
 |------|----------|
-| [PROJECT_CONTEXT.md](./docs/PROJECT_CONTEXT.md) | Handoff block, completed work, production state, known limitations |
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System diagram, frontend/backend structure, AI pipeline, external services |
-| [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Render, Vercel, Docker, environment variables table, rollback checklist |
-| [TESTING.md](./docs/TESTING.md) | Test suites, mocking strategy, CI workflow, pre-merge checklist, Radix UI testing notes |
-| [ROADMAP.md](./docs/ROADMAP.md) | Completed items, next priorities, technical debt |
-| [CHANGELOG.md](./docs/CHANGELOG.md) | Keep a Changelog format — unreleased changes |
-| [CODING_STANDARD.md](./docs/CODING_STANDARD.md) | Code style, naming conventions, documentation workflow |
-| [ERD.md](./docs/ERD.md) | Database schema, relationships, indexes, scaling recommendations |
-| [PROJECT_TECHNICAL_AUDIT.md](./docs/PROJECT_TECHNICAL_AUDIT.md) | Point-in-time technical audit (read-only) |
-| [REPOSITORY_HYGIENE_REPORT.md](./docs/REPOSITORY_HYGIENE_REPORT.md) | Point-in-time hygiene report with resolved-after-audit status |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Branch strategy, commit conventions, PR checklist, testing, doc policy |
-| [SECURITY.md](./SECURITY.md) | Supported versions, vulnerability reporting, secrets, env vars, dependency policy |
-| [API_OVERVIEW.md](./docs/API_OVERVIEW.md) | Endpoint groups, authentication, Swagger UI link, common errors |
-
----
+| [`docs/PORTFOLIO_NOTES.md`](./docs/PORTFOLIO_NOTES.md) | Executive summary, CV bullets, interview talking points, demo flow |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Deep-dive: request lifecycle, error handling, socket auth, AI pipeline |
+| [`docs/CHAT_MESSAGE_CORRELATION.md`](./docs/CHAT_MESSAGE_CORRELATION.md) | Chat contracts: correlation, streaming, stop, retry/regenerate, history |
+| [`docs/ERD.md`](./docs/ERD.md) | Full database schema, relationships, indexes |
+| [`docs/API_OVERVIEW.md`](./docs/API_OVERVIEW.md) | Endpoint groups, auth, Swagger UI |
+| [`docs/TESTING.md`](./docs/TESTING.md) | Test suites, mocking strategy, CI, pre-merge checklist |
+| [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) | Render/Vercel/Docker setup, env tables, rollback checklist |
+| [`docs/ROADMAP.md`](./docs/ROADMAP.md) | Completed items, next priorities, technical debt |
+| [`docs/CHANGELOG.md`](./docs/CHANGELOG.md) | Keep-a-Changelog history |
+| [`SECURITY.md`](./SECURITY.md) | Security policy, secrets, hardening, known limitations |
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Branch strategy, PR checklist, doc policy |
 
 ## License
 

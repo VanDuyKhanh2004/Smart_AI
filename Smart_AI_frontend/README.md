@@ -71,7 +71,7 @@ Env changes require a rebuild (`npm run build` or restart `npm run dev`).
 ## Tests
 
 ```bash
-npm test                 # 129 tests / 9 files (verified 2026-08-04)
+npm test                 # 421 tests / 40 files (verified 2026-08-13)
 npx vitest --watch       # Watch mode
 ```
 

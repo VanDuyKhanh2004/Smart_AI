@@ -105,19 +105,19 @@ This address is public. Reporters may alternatively use GitHub private vulnerabi
 1. **Environment separation** — Use separate API keys, databases, and Redis instances for development and production.
 2. **HTTPS only** — The production backend must be served over HTTPS (handled by Render). The frontend on Vercel is HTTPS by default.
 3. **CORS hardening** — `FRONTEND_URL` must be set to the exact production frontend origin. Do not use wildcard `*` in production.
-4. **Rate limiting** — Currently only on the login endpoint (Redis-backed, IP-based). **Known limitation:** no general/admin/chat rate limiting yet. Add rate limiting on admin endpoints, general API, and the chat endpoint in production.
+4. **Rate limiting** — the login endpoint is limited via an atomic Redis-backed script (IP-based, 20 attempts / 15 min, fail-open on Redis loss); auth-session, email-action, resend-verification, token-action, and semantic-search routes carry express-rate-limit throttles. **Known limitation:** no rate limiting on the chat endpoint or general/admin routes yet — add these in production.
 5. **Error handler middleware** — Implemented. `middlewares/errorHandler.js` is a centralized `errorHandler` (with `notFoundHandler` and `AppError` classes in `utils/errors/`) that normalizes Mongoose/JWT errors and returns consistent error envelopes. A small set of legacy controllers still produce legacy response shapes (see `docs/API_OVERVIEW.md`).
 6. **Redis auto-reconnect** — Implemented with exponential backoff (`min(500 × 2^attempt, 30000)ms`, infinite retries); disabled during graceful shutdown.
 7. **No SMS fallback** — Email-only via Brevo (API, not SMTP). If SMS is added later, manage credentials separately.
 8. **Graceful shutdown** — SIGTERM/SIGINT handlers close BullMQ workers, disconnect Socket.IO, stop HTTP server, disconnect Redis and MongoDB, then exit.
-9. **Health checks** — Endpoints: `GET /health` (liveness), `GET /health/readiness` (dependencies). Use these in Render health check configuration.
+9. **Health checks** — Endpoints: `GET /health` (liveness), `GET /api/health` (MongoDB + Redis), `GET /api/health/ready` (readiness: MongoDB critical, Redis degraded), `GET /api/health/live`. Use `/health` and `/api/health/ready` in Render health check configuration.
 10. **Logging** — Pino structured logging with `LOG_LEVEL` configuration. Sensitive data redaction is configured in `utils/logger.js`.
 
 ## Known Limitations
 
 - **Socket.IO chat requires JWT handshake authentication** — the chat socket verifies an access token (`handshake.auth.token` or `Authorization: Bearer`) at connection time via `io.use(...)` and rejects unauthenticated clients with stable codes (`SOCKET_AUTH_REQUIRED`/`INVALID`/`EXPIRED`/`USER_NOT_FOUND`) before they can drive paid AI calls. **Known limitation:** the access token originates from `localStorage` on the frontend (see the `localStorage` item below); a rate limiter for the chat endpoint is not yet implemented.
-- **Helmet is not implemented** — no CSP / `X-Frame-Options` / `X-Content-Type-Options` security headers are set.
-- **Broad rate limiting is not implemented** — only the login endpoint is rate-limited (Redis-backed).
+- **Security headers are applied** — Helmet `v8` with a custom CSP (`middlewares/securityHeaders.js`, mounted at `index.js:71` before body parsers): production CSP `'self'` + `accounts.google.com`, HSTS, `frame-ancestors`, `no-referrer`; dev adds `'unsafe-inline'`. These cover responses served by the Express app; the Vercel-hosted frontend HTML needs its own CSP configured on Vercel.
+- **Broad rate limiting is not implemented** — the login endpoint (Redis-backed) plus auth-session/email-action/resend-verification/token-action/semantic-search routes are limited; the chat endpoint and general/admin routes are not yet covered.
 - **Tokens in `localStorage`** — the frontend stores access and refresh tokens in `localStorage` (`src/lib/axios.ts`, `src/stores/authStore.ts`). This is exposed to any XSS that runs in the page context; an `httpOnly` cookie strategy would remove that exposure but requires backend session/refresh changes.
 
 ## Dependency Update Policy

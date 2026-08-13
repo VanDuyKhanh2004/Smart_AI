@@ -4,7 +4,7 @@ Express 4 (CommonJS) REST + Socket.IO API for the Smart AI e-commerce platform. 
 
 ## Environment Setup
 
-Create `.env` in `Smart_AI_backend/` with the key variables:
+Create `.env` in `Smart_AI_backend/` from the example (`cp .env.example .env`). Key variables:
 
 ```
 NODE_ENV=development
@@ -37,7 +37,7 @@ LOGIN_IP_MAX_ATTEMPTS=20
 LOGIN_IP_WINDOW_MINUTES=15
 ```
 
-See [../README.md](../README.md) for the full environment variable table.
+See [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) for the full environment variable table.
 
 ## Run the server
 
@@ -51,7 +51,7 @@ Starts on `http://localhost:5000`. Swagger UI is served at `/api-docs`.
 ## Tests
 
 ```
-npm test                 # Full suite (1611 tests, 39 suites; verified 2026-08-04)
+npm test                 # Full suite (2043 tests, 68 suites; verified 2026-08-13)
 npm test -- --runInBand  # Sequential (recommended)
 ```
 
