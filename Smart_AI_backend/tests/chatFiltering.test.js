@@ -56,6 +56,7 @@ jest.mock('../utils/gemini', () => ({
     });
   }),
   generateComplaintResponse: jest.fn(),
+  preclassifyComplaintContinuation: jest.fn().mockReturnValue(null),
 }));
 
 const Product = require('../models/Product');

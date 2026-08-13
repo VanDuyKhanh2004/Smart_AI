@@ -18,6 +18,14 @@ const expectNotSmallTalk = (msg) => {
   expect(result).toBeNull();
 };
 
+const expectComplaint = (msg) => {
+  const result = classify(msg);
+  expect(result).not.toBeNull();
+  expect(result.intent).toBe("complaint");
+  expect(result.clarified_query).toBeNull();
+  expect(result.direct_response).toBeNull();
+};
+
 /* ============================================================
    Pure small-talk phrases — should be caught by pre-classifier
    ============================================================ */
@@ -213,16 +221,25 @@ describe("pure product queries — NOT small talk", () => {
   ])('"%s" returns null (pass to AI)', expectNotSmallTalk);
 });
 
-describe("complaint-like messages — NOT small talk", () => {
+describe("unambiguous complaints — deterministic complaint intent", () => {
   test.each([
     "sản phẩm bị lỗi",
     "tôi muốn khiếu nại",
     "hàng giao bị vỡ",
     "điện thoại tôi mua bị hỏng",
-    "tôi muốn đổi trả",
     "tôi muốn khiếu nại về dịch vụ",
     "sản phẩm không đúng mô tả",
     "giao hàng chậm",
+  ])('"%s" is complaint', expectComplaint);
+});
+
+describe("complaint-adjacent ambiguous messages — defer to AI", () => {
+  test.each([
+    "tôi muốn đổi trả",
+    "hàng có được đổi trả không",
+    "giao hàng chậm không",
+    "điện thoại bị lỗi gì",
+    "tư vấn sản phẩm bị lỗi",
   ])('"%s" returns null (pass to AI)', expectNotSmallTalk);
 });
 
