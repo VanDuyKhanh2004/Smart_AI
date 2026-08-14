@@ -77,6 +77,14 @@ const appointmentSchema = new mongoose.Schema({
   cancelReason: {
     type: String,
     maxlength: [500, 'Lý do hủy không được vượt quá 500 ký tự']
+  },
+
+  // Internal: the 30-minute grid buckets this appointment occupies, derived
+  // server-side from the purpose duration. Used by the partial unique index to
+  // atomically prevent overlapping active bookings. Not exposed over the API.
+  occupies: {
+    type: [String],
+    default: undefined
   }
 }, {
   timestamps: true,
@@ -87,6 +95,7 @@ const appointmentSchema = new mongoose.Schema({
       ret.id = ret._id;
       delete ret._id;
       delete ret.__v;
+      delete ret.occupies;
       return ret;
     }
   },
@@ -97,6 +106,7 @@ const appointmentSchema = new mongoose.Schema({
       ret.id = ret._id;
       delete ret._id;
       delete ret.__v;
+      delete ret.occupies;
       return ret;
     }
   }
@@ -107,6 +117,22 @@ appointmentSchema.index({ store: 1, date: 1 });
 appointmentSchema.index({ user: 1, date: -1 });
 appointmentSchema.index({ status: 1 });
 appointmentSchema.index({ date: 1, status: 1 });
+
+// Atomic overlap guard. Every active appointment records the 30-minute buckets
+// it occupies; two grid-aligned appointments overlap if and only if they share
+// a bucket, so a unique index on (store, date, occupies) rejects overlapping
+// bookings at the database level. The partial filter limits the guard to
+// pending/confirmed so cancelled/completed appointments free their buckets.
+appointmentSchema.index(
+  { store: 1, date: 1, occupies: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ['pending', 'confirmed'] },
+      occupies: { $exists: true }
+    }
+  }
+);
 
 // Valid status transitions
 const VALID_STATUS_TRANSITIONS = {

@@ -105,15 +105,17 @@ export function AppointmentForm({
     }
   }, [isOpen, isAuthenticated]);
 
-  // Fetch available time slots when date changes
+  // Fetch available time slots when date and purpose change.
+  // Slots are purpose-aware: changing purpose refreshes the list and resets
+  // the previously selected slot.
   const {
     data: slotsResponse,
     isLoading: isLoadingSlots,
     error: slotsError,
   } = useQuery({
-    queryKey: ['availableSlots', store?.id, selectedDate],
-    queryFn: () => appointmentService.getAvailableSlots(store!.id, selectedDate),
-    enabled: !!store?.id && !!selectedDate,
+    queryKey: ['availableSlots', store?.id, selectedDate, purpose],
+    queryFn: () => appointmentService.getAvailableSlots(store!.id, selectedDate, purpose as AppointmentPurpose),
+    enabled: !!store?.id && !!selectedDate && !!purpose,
   });
 
   const availableSlots = slotsResponse?.data?.slots || [];
@@ -217,6 +219,36 @@ export function AppointmentForm({
             )}
           </div>
 
+          {/* Purpose dropdown — selected before fetching slots */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Mục đích <span className="text-destructive">*</span>
+            </label>
+            <Select
+              value={purpose}
+              onValueChange={(value) => {
+                setPurpose(value as AppointmentPurpose);
+                setSelectedTimeSlot(null);
+                setErrors((prev) => ({ ...prev, purpose: undefined }));
+              }}
+            >
+              <SelectTrigger className={`w-full ${errors.purpose ? 'border-destructive' : ''}`}>
+                <SelectValue placeholder="Chọn mục đích" />
+              </SelectTrigger>
+              <SelectContent>
+                {PURPOSE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.purpose && (
+              <p className="text-sm text-destructive">{errors.purpose}</p>
+            )}
+          </div>
+
           {/* Time slot selector */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
@@ -226,6 +258,10 @@ export function AppointmentForm({
             {!selectedDate ? (
               <p className="text-sm text-muted-foreground">
                 Vui lòng chọn ngày trước
+              </p>
+            ) : !purpose ? (
+              <p className="text-sm text-muted-foreground">
+                Vui lòng chọn mục đích để xem khung giờ phù hợp
               </p>
             ) : isLoadingSlots ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -247,7 +283,8 @@ export function AppointmentForm({
                     key={`${slot.start}-${slot.end}`}
                     type="button"
                     variant={
-                      selectedTimeSlot?.start === slot.start
+                      selectedTimeSlot?.start === slot.start &&
+                      selectedTimeSlot?.end === slot.end
                         ? 'default'
                         : 'outline'
                     }
@@ -257,42 +294,13 @@ export function AppointmentForm({
                       setErrors((prev) => ({ ...prev, timeSlot: undefined }));
                     }}
                   >
-                    {slot.start}
+                    {slot.start} - {slot.end}
                   </Button>
                 ))}
               </div>
             )}
             {errors.timeSlot && (
               <p className="text-sm text-destructive">{errors.timeSlot}</p>
-            )}
-          </div>
-
-          {/* Purpose dropdown */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Mục đích <span className="text-destructive">*</span>
-            </label>
-            <Select
-              value={purpose}
-              onValueChange={(value) => {
-                setPurpose(value as AppointmentPurpose);
-                setErrors((prev) => ({ ...prev, purpose: undefined }));
-              }}
-            >
-              <SelectTrigger className={`w-full ${errors.purpose ? 'border-destructive' : ''}`}>
-                <SelectValue placeholder="Chọn mục đích" />
-              </SelectTrigger>
-              <SelectContent>
-                {PURPOSE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.purpose && (
-              <p className="text-sm text-destructive">{errors.purpose}</p>
             )}
           </div>
 
