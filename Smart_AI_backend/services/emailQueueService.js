@@ -57,6 +57,12 @@ async function sendDirect(jobType, payload) {
       return emailService.sendUnlockAccountEmail(user, payload.unlockUrl);
     case 'email.order-confirmation':
       return emailService.sendOrderConfirmationEmail(user, payload.order);
+    case 'email.appointment-created':
+      return emailService.sendAppointmentCreatedEmail(user, payload.appointment);
+    case 'email.appointment-confirmed':
+      return emailService.sendAppointmentConfirmedEmail(user, payload.appointment);
+    case 'email.appointment-cancelled':
+      return emailService.sendAppointmentCancelledEmail(user, payload.appointment);
     default:
       logger.warn({ jobType }, 'Unknown email type in direct fallback');
   }
@@ -125,11 +131,53 @@ function enqueueOrderConfirmationEmail(user, order, correlationId) {
   return enqueue('email.order-confirmation', payload, `order-confirmation-${orderId || (order && order.orderNumber) || 'unknown'}`);
 }
 
+function enqueueAppointmentCreatedEmail(contact, appointment, correlationId) {
+  const appointmentId = appointment && appointment._id ? appointment._id.toString() : null;
+  const payload = {
+    jobType: 'email.appointment-created',
+    to: contact.email,
+    name: contact.name,
+    appointment,
+    appointmentId,
+    correlationId,
+  };
+  return enqueue('email.appointment-created', payload, `appointment-created-${appointmentId || 'unknown'}`);
+}
+
+function enqueueAppointmentConfirmedEmail(contact, appointment, correlationId) {
+  const appointmentId = appointment && appointment._id ? appointment._id.toString() : null;
+  const payload = {
+    jobType: 'email.appointment-confirmed',
+    to: contact.email,
+    name: contact.name,
+    appointment,
+    appointmentId,
+    correlationId,
+  };
+  return enqueue('email.appointment-confirmed', payload, `appointment-confirmed-${appointmentId || 'unknown'}`);
+}
+
+function enqueueAppointmentCancelledEmail(contact, appointment, correlationId) {
+  const appointmentId = appointment && appointment._id ? appointment._id.toString() : null;
+  const payload = {
+    jobType: 'email.appointment-cancelled',
+    to: contact.email,
+    name: contact.name,
+    appointment,
+    appointmentId,
+    correlationId,
+  };
+  return enqueue('email.appointment-cancelled', payload, `appointment-cancelled-${appointmentId || 'unknown'}`);
+}
+
 module.exports = {
   enqueueWelcomeEmail,
   enqueueVerificationEmail,
   enqueuePasswordResetEmail,
   enqueueUnlockAccountEmail,
   enqueueOrderConfirmationEmail,
+  enqueueAppointmentCreatedEmail,
+  enqueueAppointmentConfirmedEmail,
+  enqueueAppointmentCancelledEmail,
   QUEUE_NAME,
 };
