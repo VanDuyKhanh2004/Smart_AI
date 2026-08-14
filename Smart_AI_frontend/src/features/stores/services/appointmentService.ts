@@ -3,6 +3,7 @@ import type {
   GetAvailableSlotsResponse,
   CreateAppointmentRequest,
   AppointmentResponse,
+  AppointmentPurpose,
   GetAppointmentsResponse,
   GetAppointmentsParams,
   UpdateAppointmentStatusRequest,
@@ -11,10 +12,13 @@ import type {
 export const appointmentService = {
   /**
    * Get available time slots for a store on a specific date
+   * @param purpose Optional appointment purpose; slots are generated with the
+   * matching duration (backend is the source of truth).
    */
-  getAvailableSlots: async (storeId: string, date: string): Promise<GetAvailableSlotsResponse> => {
+  getAvailableSlots: async (storeId: string, date: string, purpose?: AppointmentPurpose): Promise<GetAvailableSlotsResponse> => {
     const response = await apiClient.get<GetAvailableSlotsResponse>(
-      `/appointments/available-slots/${storeId}/${date}`
+      `/appointments/available-slots/${storeId}/${date}`,
+      { params: purpose ? { purpose } : {} }
     );
     return response.data;
   },

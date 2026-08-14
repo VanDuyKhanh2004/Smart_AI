@@ -775,4 +775,262 @@ describe('Appointment Controller — centralized error handling', () => {
       expect(mockEnqueueAppointmentConfirmed).not.toHaveBeenCalled();
     });
   });
+
+  describe('Appointment duration & overlap', () => {
+    const shortHoursStore = {
+      ...mockStore,
+      _id: '507f191e810c19729de860f0',
+      businessHours: {
+        monday: { open: '09:00', close: '18:00', isClosed: false },
+        tuesday: { open: '09:00', close: '18:00', isClosed: false },
+        wednesday: { open: '09:00', close: '18:00', isClosed: false },
+        thursday: { open: '09:00', close: '18:00', isClosed: false },
+        friday: { open: '09:00', close: '18:00', isClosed: false },
+        saturday: { open: '09:00', close: '18:00', isClosed: false },
+        sunday: { open: '09:00', close: '18:00', isClosed: false }
+      },
+    };
+    const DATE = new Date('2099-12-25');
+
+    const { intervalOverlaps, getPurposeDuration, generateTimeSlots } = require('../controllers/appointmentController');
+
+    describe('purpose duration policy', () => {
+      it('maps consultation to 30 minutes', () => {
+        expect(getPurposeDuration('consultation')).toBe(30);
+      });
+
+      it('maps purchase to 30 minutes', () => {
+        expect(getPurposeDuration('purchase')).toBe(30);
+      });
+
+      it('maps warranty to 60 minutes', () => {
+        expect(getPurposeDuration('warranty')).toBe(60);
+      });
+
+      it('maps other to 30 minutes', () => {
+        expect(getPurposeDuration('other')).toBe(30);
+      });
+    });
+
+    describe('generateTimeSlots by purpose', () => {
+      it('generates 30-minute slots for consultation', () => {
+        const slots = generateTimeSlots(mockStore, DATE, [], 'consultation');
+        expect(slots[0]).toEqual({ start: '08:00', end: '08:30' });
+        expect(slots.every((s) => s.start !== '10:00' || (s.end === '10:30'))).toBe(true);
+      });
+
+      it('generates 30-minute slots for purchase', () => {
+        const slots = generateTimeSlots(mockStore, DATE, [], 'purchase');
+        expect(slots[0]).toEqual({ start: '08:00', end: '08:30' });
+      });
+
+      it('generates 60-minute slots for warranty', () => {
+        const slots = generateTimeSlots(mockStore, DATE, [], 'warranty');
+        expect(slots[0]).toEqual({ start: '08:00', end: '09:00' });
+        expect(slots.every((s) => s.end === '09:00' || s.start !== '08:00')).toBe(true);
+      });
+
+      it('generates 30-minute slots for other', () => {
+        const slots = generateTimeSlots(mockStore, DATE, [], 'other');
+        expect(slots[0]).toEqual({ start: '08:00', end: '08:30' });
+      });
+
+      it('excludes a warranty slot that would extend past closing time', () => {
+        const slots = generateTimeSlots(shortHoursStore, DATE, [], 'warranty');
+        expect(slots.some((s) => s.start === '17:30' && s.end === '18:30')).toBe(false);
+        expect(slots.some((s) => s.start === '17:00' && s.end === '18:00')).toBe(true);
+      });
+
+      it('still offers the last 30-minute slot before closing for consultation', () => {
+        const slots = generateTimeSlots(shortHoursStore, DATE, [], 'consultation');
+        expect(slots.some((s) => s.start === '17:30' && s.end === '18:00')).toBe(true);
+        expect(slots.some((s) => s.start === '18:00')).toBe(false);
+      });
+    });
+
+    describe('intervalOverlaps', () => {
+      it('conflicts on the exact same interval', () => {
+        expect(intervalOverlaps(600, 630, 600, 630)).toBe(true);
+      });
+
+      it('conflicts on partial overlap from the left', () => {
+        expect(intervalOverlaps(570, 630, 600, 660)).toBe(true);
+      });
+
+      it('conflicts on partial overlap from the right', () => {
+        expect(intervalOverlaps(630, 660, 600, 660)).toBe(true);
+      });
+
+      it('conflicts when one interval is contained in another', () => {
+        expect(intervalOverlaps(615, 645, 600, 660)).toBe(true);
+      });
+
+      it('conflicts when one interval contains another', () => {
+        expect(intervalOverlaps(600, 660, 615, 645)).toBe(true);
+      });
+
+      it('does not conflict on a touching boundary', () => {
+        expect(intervalOverlaps(600, 630, 630, 660)).toBe(false);
+        expect(intervalOverlaps(630, 660, 600, 630)).toBe(false);
+      });
+    });
+
+    describe('generateTimeSlots blocking semantics', () => {
+      it('excludes a slot blocked by a pending appointment', () => {
+        const existing = [{ timeSlot: { start: '10:00', end: '10:30' }, status: 'pending' }];
+        const slots = generateTimeSlots(mockStore, DATE, existing, 'consultation');
+        expect(slots.some((s) => s.start === '10:00')).toBe(false);
+      });
+
+      it('excludes a slot blocked by a confirmed appointment', () => {
+        const existing = [{ timeSlot: { start: '10:00', end: '10:30' }, status: 'confirmed' }];
+        const slots = generateTimeSlots(mockStore, DATE, existing, 'consultation');
+        expect(slots.some((s) => s.start === '10:00')).toBe(false);
+      });
+
+      it('does not block a slot when the appointment is cancelled', () => {
+        const existing = [{ timeSlot: { start: '10:00', end: '10:30' }, status: 'cancelled' }];
+        const slots = generateTimeSlots(mockStore, DATE, existing, 'consultation');
+        expect(slots.some((s) => s.start === '10:00')).toBe(true);
+      });
+
+      it('does not block a slot when the appointment is completed', () => {
+        const existing = [{ timeSlot: { start: '10:00', end: '10:30' }, status: 'completed' }];
+        const slots = generateTimeSlots(mockStore, DATE, existing, 'consultation');
+        expect(slots.some((s) => s.start === '10:00')).toBe(true);
+      });
+
+      it('excludes a slot that overlaps a 60-minute warranty appointment', () => {
+        const existing = [{ timeSlot: { start: '10:00', end: '11:00' }, status: 'pending', purpose: 'warranty' }];
+        const slots = generateTimeSlots(mockStore, DATE, existing, 'consultation');
+        expect(slots.some((s) => s.start === '10:30' && s.end === '11:00')).toBe(false);
+        expect(slots.some((s) => s.start === '11:00' && s.end === '11:30')).toBe(true);
+      });
+
+      it('treats an appointment missing an end time as its purpose duration', () => {
+        const existing = [{ timeSlot: { start: '10:00' }, status: 'pending', purpose: 'warranty' }];
+        const slots = generateTimeSlots(mockStore, DATE, existing, 'consultation');
+        expect(slots.some((s) => s.start === '10:00')).toBe(false);
+        expect(slots.some((s) => s.start === '10:30')).toBe(false);
+      });
+    });
+
+    describe('POST /api/appointments — server authority & overlap query', () => {
+      it('rejects a client-supplied end time inconsistent with the purpose', async () => {
+        Store.findOne.mockResolvedValue(mockStore);
+        Appointment.findOne.mockResolvedValue(null);
+
+        const res = await request(app)
+          .post('/api/appointments')
+          .send({
+            storeId: STORE_ID,
+            date: '2099-12-25',
+            timeSlot: { start: '10:00', end: '10:30' },
+            purpose: 'warranty',
+            guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('Thời gian kết thúc không khớp với mục đích đã chọn');
+      });
+
+      it('rejects a start time that is not on the 30-minute grid', async () => {
+        Store.findOne.mockResolvedValue(mockStore);
+        Appointment.findOne.mockResolvedValue(null);
+
+        const res = await request(app)
+          .post('/api/appointments')
+          .send({
+            storeId: STORE_ID,
+            date: '2099-12-25',
+            timeSlot: { start: '10:15', end: '10:45' },
+            purpose: 'consultation',
+            guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+      });
+
+      it('queries for interval overlap instead of identical start times', async () => {
+        Store.findOne.mockResolvedValue(mockStore);
+        Appointment.findOne.mockResolvedValue(null);
+
+        await request(app)
+          .post('/api/appointments')
+          .send({
+            storeId: STORE_ID,
+            date: '2099-12-25',
+            timeSlot: { start: '10:30', end: '11:00' },
+            purpose: 'consultation',
+            guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+          });
+
+        expect(Appointment.findOne).toHaveBeenCalledWith(
+          expect.objectContaining({
+            'timeSlot.start': { $lt: '11:00' },
+            'timeSlot.end': { $gt: '10:30' },
+            status: { $in: ['pending', 'confirmed'] }
+          })
+        );
+      });
+
+      it('allows a boundary-touching appointment', async () => {
+        Store.findOne.mockResolvedValue(mockStore);
+        Appointment.findOne.mockResolvedValue(null);
+
+        const res = await request(app)
+          .post('/api/appointments')
+          .send({
+            storeId: STORE_ID,
+            date: '2099-12-25',
+            timeSlot: { start: '10:30', end: '11:00' },
+            purpose: 'consultation',
+            notes: 'Test note',
+            guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+          });
+
+        expect(res.status).toBe(201);
+        expect(res.body.success).toBe(true);
+      });
+
+      it('stores the server-derived end time and occupied buckets', async () => {
+        Store.findOne.mockResolvedValue(mockStore);
+        Appointment.findOne.mockResolvedValue(null);
+
+        await request(app)
+          .post('/api/appointments')
+          .send({
+            storeId: STORE_ID,
+            date: '2099-12-25',
+            timeSlot: { start: '10:00', end: '11:00' },
+            purpose: 'warranty',
+            guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+          });
+
+        const savedData = Appointment.mock.calls[0][0];
+        expect(savedData.timeSlot).toEqual({ start: '10:00', end: '11:00' });
+        expect(savedData.occupies).toEqual(['10:00', '10:30']);
+      });
+
+      it('returns 400 when the store is closed for a warranty booking', async () => {
+        Store.findOne.mockResolvedValue(closedStore);
+
+        const res = await request(app)
+          .post('/api/appointments')
+          .send({
+            storeId: closedStore._id,
+            date: '2099-12-25',
+            timeSlot: { start: '10:00', end: '11:00' },
+            purpose: 'warranty',
+            guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('Cửa hàng đóng cửa vào ngày này');
+      });
+    });
+  });
 });

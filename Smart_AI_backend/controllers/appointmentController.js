@@ -9,44 +9,98 @@ const {
   enqueueAppointmentCancelledEmail,
 } = require('../services/emailQueueService');
 
-const generateTimeSlots = (store, date, existingAppointments) => {
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const dayName = days[date.getDay()];
+const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// The backend is the source of truth for slot durations. Duration is derived
+// from the appointment purpose; users never pick a duration directly.
+const APPOINTMENT_DURATIONS = {
+  consultation: 30,
+  purchase: 30,
+  warranty: 60,
+  other: 30,
+};
+
+const SLOT_GRID_MINUTES = 30;
+
+const getPurposeDuration = (purpose) => APPOINTMENT_DURATIONS[purpose] || APPOINTMENT_DURATIONS.consultation;
+
+const timeToMinutes = (time) => {
+  if (typeof time !== 'string') return null;
+  const [hours, minutes] = time.split(':').map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  return hours * 60 + minutes;
+};
+
+const minutesToTime = (minutes) => {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+};
+
+// Two intervals [aStart, aEnd) and [bStart, bEnd) conflict when they strictly
+// overlap. Touching boundaries (end === start) do NOT conflict.
+const intervalOverlaps = (aStartMin, aEndMin, bStartMin, bEndMin) => {
+  if (aStartMin === null || aEndMin === null || bStartMin === null || bEndMin === null) return false;
+  return bStartMin < aEndMin && aStartMin < bEndMin;
+};
+
+// Normalize an existing appointment into interval minutes. Falls back to the
+// purpose duration when the stored end time is missing (legacy data). Returns
+// null when the stored times cannot be parsed.
+const normalizeInterval = (appointment) => {
+  const start = timeToMinutes(appointment.timeSlot && appointment.timeSlot.start);
+  if (start === null) return null;
+  const end = timeToMinutes(appointment.timeSlot && appointment.timeSlot.end);
+  if (end === null) {
+    return { start, end: start + getPurposeDuration(appointment.purpose) };
+  }
+  return { start, end };
+};
+
+// Split an interval into the 30-minute grid buckets it occupies. Two
+// grid-aligned intervals overlap if and only if they share at least one bucket.
+const computeOccupiedBuckets = (startMinutes, durationMinutes) => {
+  const buckets = [];
+  for (let t = startMinutes; t < startMinutes + durationMinutes; t += SLOT_GRID_MINUTES) {
+    buckets.push(minutesToTime(t));
+  }
+  return buckets;
+};
+
+const generateTimeSlots = (store, date, existingAppointments, purpose = 'consultation') => {
+  const dayName = DAYS[date.getDay()];
   const businessHours = store.businessHours[dayName];
 
   if (!businessHours || businessHours.isClosed) {
     return [];
   }
 
+  const slotDuration = getPurposeDuration(purpose);
+
+  const openMinutes = timeToMinutes(businessHours.open);
+  const closeMinutes = timeToMinutes(businessHours.close);
+
+  if (openMinutes === null || closeMinutes === null) {
+    return [];
+  }
+
+  const blockedIntervals = existingAppointments
+    .filter((apt) => ['pending', 'confirmed'].includes(apt.status))
+    .map(normalizeInterval)
+    .filter((interval) => interval !== null);
+
   const slots = [];
-  const slotDuration = 30;
-
-  const [openHour, openMin] = businessHours.open.split(':').map(Number);
-  const [closeHour, closeMin] = businessHours.close.split(':').map(Number);
-
-  const openMinutes = openHour * 60 + openMin;
-  const closeMinutes = closeHour * 60 + closeMin;
-
-  for (let startMin = openMinutes; startMin + slotDuration <= closeMinutes; startMin += slotDuration) {
+  for (let startMin = openMinutes; startMin + slotDuration <= closeMinutes; startMin += SLOT_GRID_MINUTES) {
     const endMin = startMin + slotDuration;
 
-    const startHour = Math.floor(startMin / 60);
-    const startMinute = startMin % 60;
-    const endHour = Math.floor(endMin / 60);
-    const endMinute = endMin % 60;
-
-    const startTime = `${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}`;
-    const endTime = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
-
-    const isBooked = existingAppointments.some(apt => {
-      return apt.timeSlot.start === startTime &&
-             ['pending', 'confirmed'].includes(apt.status);
+    const isBooked = blockedIntervals.some((interval) => {
+      return intervalOverlaps(startMin, endMin, interval.start, interval.end);
     });
 
     if (!isBooked) {
       slots.push({
-        start: startTime,
-        end: endTime
+        start: minutesToTime(startMin),
+        end: minutesToTime(endMin)
       });
     }
   }
@@ -103,6 +157,9 @@ const sendAppointmentEmail = (jobType, contact, appointment, correlationId) => {
 
 const getAvailableSlots = async (req, res) => {
   const { storeId, date } = req.params;
+  const { purpose } = req.query;
+
+  const normalizedPurpose = purpose && APPOINTMENT_DURATIONS[purpose] ? purpose : 'consultation';
 
   const appointmentDate = new Date(date);
   if (isNaN(appointmentDate.getTime())) {
@@ -131,13 +188,14 @@ const getAvailableSlots = async (req, res) => {
     status: { $in: ['pending', 'confirmed'] }
   });
 
-  const availableSlots = generateTimeSlots(store, appointmentDate, existingAppointments);
+  const availableSlots = generateTimeSlots(store, appointmentDate, existingAppointments, normalizedPurpose);
 
   res.status(200).json({
     success: true,
     message: 'Lấy danh sách khung giờ thành công',
     data: {
       date: date,
+      purpose: normalizedPurpose,
       store: {
         id: store._id,
         name: store.name
@@ -183,25 +241,41 @@ const createAppointment = async (req, res) => {
     throw new NotFoundError('Không tìm thấy cửa hàng', 'STORE_NOT_FOUND', 'legacy-top-level-message');
   }
 
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const dayName = days[appointmentDate.getDay()];
+  const dayName = DAYS[appointmentDate.getDay()];
   const businessHours = storeDoc.businessHours[dayName];
 
   if (!businessHours || businessHours.isClosed) {
     throw new BadRequestError('Cửa hàng đóng cửa vào ngày này', 'STORE_CLOSED', undefined, 'legacy-top-level-message');
   }
 
-  const [slotStartHour, slotStartMin] = timeSlot.start.split(':').map(Number);
-  const [slotEndHour, slotEndMin] = timeSlot.end.split(':').map(Number);
-  const [openHour, openMin] = businessHours.open.split(':').map(Number);
-  const [closeHour, closeMin] = businessHours.close.split(':').map(Number);
+  const slotStartMinutes = timeToMinutes(timeSlot.start);
+  const openMinutes = timeToMinutes(businessHours.open);
+  const closeMinutes = timeToMinutes(businessHours.close);
 
-  const slotStartMinutes = slotStartHour * 60 + slotStartMin;
-  const slotEndMinutes = slotEndHour * 60 + slotEndMin;
-  const openMinutes = openHour * 60 + openMin;
-  const closeMinutes = closeHour * 60 + closeMin;
+  if (slotStartMinutes === null || openMinutes === null || closeMinutes === null) {
+    throw new BadRequestError('Khung giờ không hợp lệ', 'INVALID_TIME_SLOT', undefined, 'legacy-top-level-message');
+  }
 
-  if (slotStartMinutes < openMinutes || slotEndMinutes > closeMinutes) {
+  // Server authority: duration is derived from purpose, never from the client.
+  const duration = getPurposeDuration(purpose);
+  const expectedEndMinutes = slotStartMinutes + duration;
+  const expectedEnd = minutesToTime(expectedEndMinutes);
+
+  if (timeSlot.end !== expectedEnd) {
+    throw new BadRequestError(
+      'Thời gian kết thúc không khớp với mục đích đã chọn',
+      'INVALID_TIME_SLOT',
+      undefined,
+      'legacy-top-level-message'
+    );
+  }
+
+  // Slots are aligned to the 30-minute grid relative to opening time.
+  if ((slotStartMinutes - openMinutes) % SLOT_GRID_MINUTES !== 0) {
+    throw new BadRequestError('Khung giờ phải bắt đầu đúng theo khung 30 phút', 'INVALID_TIME_SLOT', undefined, 'legacy-top-level-message');
+  }
+
+  if (slotStartMinutes < openMinutes || expectedEndMinutes > closeMinutes) {
     throw new BadRequestError('Thời gian không hợp lệ - ngoài giờ làm việc', 'OUTSIDE_BUSINESS_HOURS', undefined, 'legacy-top-level-message');
   }
 
@@ -210,10 +284,14 @@ const createAppointment = async (req, res) => {
   const endOfDay = new Date(appointmentDate);
   endOfDay.setHours(23, 59, 59, 999);
 
+  // Deterministic overlap validation: an appointment conflicts with any other
+  // active appointment whose interval strictly overlaps, not only identical
+  // start times. This query also covers pre-existing records.
   const existingAppointment = await Appointment.findOne({
     store: storeIdValue,
     date: { $gte: startOfDay, $lte: endOfDay },
-    'timeSlot.start': timeSlot.start,
+    'timeSlot.start': { $lt: expectedEnd },
+    'timeSlot.end': { $gt: timeSlot.start },
     status: { $in: ['pending', 'confirmed'] }
   });
 
@@ -221,18 +299,32 @@ const createAppointment = async (req, res) => {
     throw new BadRequestError('Khung giờ đã được đặt', 'SLOT_ALREADY_BOOKED', undefined, 'legacy-top-level-message');
   }
 
+  const occupies = computeOccupiedBuckets(slotStartMinutes, duration);
+
   const newAppointment = new Appointment({
     store: storeIdValue,
     user: userId,
     guestInfo: userId ? undefined : guestInfo,
     date: appointmentDate,
-    timeSlot,
+    timeSlot: { start: timeSlot.start, end: expectedEnd },
     purpose,
     notes,
-    status: 'pending'
+    status: 'pending',
+    occupies
   });
 
-  const savedAppointment = await newAppointment.save();
+  let savedAppointment;
+  try {
+    savedAppointment = await newAppointment.save();
+  } catch (err) {
+    // E11000 duplicate key from the partial unique index on
+    // { store, date, occupies } means a concurrent request reserved an
+    // overlapping bucket first. Backend remains the source of truth.
+    if (err && err.code === 11000) {
+      throw new BadRequestError('Khung giờ đã được đặt', 'SLOT_ALREADY_BOOKED', undefined, 'legacy-top-level-message');
+    }
+    throw err;
+  }
 
   await savedAppointment.populate('store', 'name address phone');
 
@@ -496,5 +588,11 @@ module.exports = {
   updateAppointmentStatus: asyncHandler(updateAppointmentStatus),
   cancelAppointment: asyncHandler(cancelAppointment),
   getAppointmentById: asyncHandler(getAppointmentById),
-  generateTimeSlots
+  generateTimeSlots,
+  getPurposeDuration,
+  intervalOverlaps,
+  computeOccupiedBuckets,
+  timeToMinutes,
+  minutesToTime,
+  APPOINTMENT_DURATIONS
 };
