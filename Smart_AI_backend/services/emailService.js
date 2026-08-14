@@ -11,6 +11,16 @@ function fireAndForget(promise, label) {
   });
 }
 
+function escapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
 const brevoKey = process.env.BREVO_API_KEY;
 const brevoFromName = process.env.BREVO_FROM_NAME;
 const brevoFromEmail = process.env.BREVO_FROM_EMAIL;
@@ -892,6 +902,310 @@ const sendOrderConfirmationEmail = async (user, order) => {
   });
 };
 
+const PURPOSE_LABELS = {
+  consultation: 'Tư vấn',
+  warranty: 'Bảo hành',
+  purchase: 'Mua sắm',
+  other: 'Khác',
+};
+
+const formatAppointmentDate = (date) => {
+  if (!date) return '';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('vi-VN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+};
+
+const getAppointmentStore = (appointment) => {
+  const store = appointment.store || {};
+  return {
+    name: store.name || 'Smart AI',
+    address: (store.address && store.address.fullAddress) || '',
+    phone: store.phone || '',
+  };
+};
+
+const buildAppointmentDetailsRows = (appointment) => {
+  const store = getAppointmentStore(appointment);
+  const purposeLabel = PURPOSE_LABELS[appointment.purpose] || appointment.purpose || 'Khác';
+  const rows = [
+    ['Cửa hàng', store.name],
+    ['Địa chỉ', store.address],
+    ['Số điện thoại', store.phone],
+    ['Ngày hẹn', formatAppointmentDate(appointment.date)],
+    ['Khung giờ', `${appointment.timeSlot && appointment.timeSlot.start} - ${appointment.timeSlot && appointment.timeSlot.end}`],
+    ['Mục đích', purposeLabel],
+  ];
+  if (appointment.notes) rows.push(['Ghi chú', appointment.notes]);
+  if (appointment.cancelReason) rows.push(['Lý do hủy', appointment.cancelReason]);
+
+  return rows
+    .filter(([, value]) => value)
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td style="padding: 8px 0; color: #718096; font-size: 14px; width: 120px;">
+            ${escapeHtml(label)}:
+          </td>
+          <td style="padding: 8px 0; color: #2d3748; font-size: 14px; font-weight: 600;">
+            ${escapeHtml(value)}
+          </td>
+        </tr>
+      `,
+    )
+    .join("");
+};
+
+const buildAppointmentEmailShell = ({ heading, subtitle, content }) => `
+  <!DOCTYPE html>
+  <html lang="vi">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${heading}</title>
+  </head>
+  <body style="margin: 0; padding: 0; background-color: #f4f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f4f7fa;">
+      <tr>
+        <td align="center" style="padding: 40px 20px;">
+          <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+
+            <!-- Header -->
+            <tr>
+              <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+                <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700;">
+                  ${heading}
+                </h1>
+                <p style="margin: 10px 0 0; color: #e8eaf6; font-size: 16px; font-weight: 300;">
+                  ${subtitle}
+                </p>
+              </td>
+            </tr>
+
+            <!-- Content -->
+            <tr>
+              <td style="padding: 40px 30px;">
+                ${content}
+              </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+              <td style="padding: 30px 40px; background-color: #f7fafc; border-top: 1px solid #e2e8f0;">
+                <p style="margin: 0 0 10px; color: #718096; font-size: 14px; line-height: 1.6; text-align: center;">
+                  Trân trọng,<br>
+                  <strong style="color: #2d3748;">Đội ngũ Smart AI</strong>
+                </p>
+                <p style="margin: 20px 0 0; color: #a0aec0; font-size: 12px; line-height: 1.6; text-align: center;">
+                  © ${new Date().getFullYear()} Smart AI. All rights reserved.<br>
+                  Email này được gửi tự động, vui lòng không trả lời.
+                </p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>
+`;
+
+const buildAppointmentCreatedEmail = (contact, appointment) => {
+  const displayName = contact.name || "bạn";
+  const store = getAppointmentStore(appointment);
+  const subject = "📅 Lịch hẹn đã được tiếp nhận - Smart AI";
+
+  const text = [
+    `Xin chào ${displayName},`,
+    "",
+    "Chúng tôi đã nhận được yêu cầu đặt lịch hẹn của bạn.",
+    "Lịch hẹn của bạn đang chờ được xác nhận.",
+    "",
+    `Cửa hàng: ${store.name}`,
+    store.address ? `Địa chỉ: ${store.address}` : "",
+    store.phone ? `Số điện thoại: ${store.phone}` : "",
+    `Ngày hẹn: ${formatAppointmentDate(appointment.date)}`,
+    `Khung giờ: ${appointment.timeSlot && appointment.timeSlot.start} - ${appointment.timeSlot && appointment.timeSlot.end}`,
+    `Mục đích: ${PURPOSE_LABELS[appointment.purpose] || appointment.purpose || 'Khác'}`,
+    appointment.notes ? `Ghi chú: ${appointment.notes}` : "",
+    "",
+    "Chúng tôi sẽ liên hệ xác nhận với bạn trong thời gian sớm nhất.",
+    "",
+    "Smart AI Team",
+  ].join("\n");
+
+  const html = buildAppointmentEmailShell({
+    heading: "📅 Lịch hẹn đã được tiếp nhận",
+    subtitle: "Cảm ơn bạn đã tin tưởng Smart AI",
+    content: `
+      <h2 style="margin: 0 0 20px; color: #2d3748; font-size: 24px; font-weight: 600;">
+        Xin chào ${escapeHtml(displayName)}! 👋
+      </h2>
+      <p style="margin: 0 0 20px; color: #4a5568; font-size: 16px; line-height: 1.8;">
+        Chúng tôi đã nhận được yêu cầu đặt lịch hẹn của bạn tại
+        <strong style="color: #667eea;">${escapeHtml(store.name)}</strong>.
+      </p>
+      <p style="margin: 0 0 30px; color: #4a5568; font-size: 16px; line-height: 1.8;">
+        Lịch hẹn của bạn đang chờ được xác nhận. Chúng tôi sẽ liên hệ xác nhận với bạn trong thời gian sớm nhất.
+      </p>
+      <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #f7fafc; border-radius: 8px; overflow: hidden;">
+        <tr>
+          <td style="padding: 20px;">
+            <table role="presentation" style="width: 100%; border-collapse: collapse;">
+              ${buildAppointmentDetailsRows(appointment)}
+            </table>
+          </td>
+        </tr>
+      </table>
+    `,
+  });
+
+  return { subject, text, html };
+};
+
+const buildAppointmentConfirmedEmail = (contact, appointment) => {
+  const displayName = contact.name || "bạn";
+  const store = getAppointmentStore(appointment);
+  const subject = "✅ Lịch hẹn đã được xác nhận - Smart AI";
+
+  const text = [
+    `Xin chào ${displayName},`,
+    "",
+    "Lịch hẹn của bạn đã được xác nhận!",
+    "",
+    `Cửa hàng: ${store.name}`,
+    store.address ? `Địa chỉ: ${store.address}` : "",
+    store.phone ? `Số điện thoại: ${store.phone}` : "",
+    `Ngày hẹn: ${formatAppointmentDate(appointment.date)}`,
+    `Khung giờ: ${appointment.timeSlot && appointment.timeSlot.start} - ${appointment.timeSlot && appointment.timeSlot.end}`,
+    `Mục đích: ${PURPOSE_LABELS[appointment.purpose] || appointment.purpose || 'Khác'}`,
+    appointment.notes ? `Ghi chú: ${appointment.notes}` : "",
+    "",
+    "Vui lòng đến đúng giờ để được phục vụ tốt nhất.",
+    "",
+    "Smart AI Team",
+  ].join("\n");
+
+  const html = buildAppointmentEmailShell({
+    heading: "✅ Lịch hẹn đã được xác nhận",
+    subtitle: "Hẹn gặp bạn tại cửa hàng",
+    content: `
+      <h2 style="margin: 0 0 20px; color: #2d3748; font-size: 24px; font-weight: 600;">
+        Xin chào ${escapeHtml(displayName)}! 👋
+      </h2>
+      <p style="margin: 0 0 30px; color: #4a5568; font-size: 16px; line-height: 1.8;">
+        Lịch hẹn của bạn tại <strong style="color: #667eea;">${escapeHtml(store.name)}</strong>
+        đã được xác nhận. Vui lòng đến đúng giờ để được phục vụ tốt nhất.
+      </p>
+      <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #f7fafc; border-radius: 8px; overflow: hidden;">
+        <tr>
+          <td style="padding: 20px;">
+            <table role="presentation" style="width: 100%; border-collapse: collapse;">
+              ${buildAppointmentDetailsRows(appointment)}
+            </table>
+          </td>
+        </tr>
+      </table>
+      <table role="presentation" style="margin: 0 auto;">
+        <tr>
+          <td style="border-radius: 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <a href="${getFrontendBaseUrl()}/my-appointments"
+               style="display: inline-block; padding: 14px 40px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px;">
+              Xem lịch hẹn của tôi
+            </a>
+          </td>
+        </tr>
+      </table>
+    `,
+  });
+
+  return { subject, text, html };
+};
+
+const buildAppointmentCancelledEmail = (contact, appointment) => {
+  const displayName = contact.name || "bạn";
+  const store = getAppointmentStore(appointment);
+  const subject = "❌ Lịch hẹn đã bị hủy - Smart AI";
+
+  const text = [
+    `Xin chào ${displayName},`,
+    "",
+    "Lịch hẹn của bạn đã bị hủy.",
+    appointment.cancelReason ? `Lý do hủy: ${appointment.cancelReason}` : "",
+    "",
+    `Cửa hàng: ${store.name}`,
+    `Ngày hẹn: ${formatAppointmentDate(appointment.date)}`,
+    `Khung giờ: ${appointment.timeSlot && appointment.timeSlot.start} - ${appointment.timeSlot && appointment.timeSlot.end}`,
+    "",
+    "Nếu bạn có thắc mắc, vui lòng liên hệ với chúng tôi để được hỗ trợ.",
+    "",
+    "Smart AI Team",
+  ].join("\n");
+
+  const html = buildAppointmentEmailShell({
+    heading: "❌ Lịch hẹn đã bị hủy",
+    subtitle: "Chúng tôi rất tiếc vì sự bất tiện này",
+    content: `
+      <h2 style="margin: 0 0 20px; color: #2d3748; font-size: 24px; font-weight: 600;">
+        Xin chào ${escapeHtml(displayName)},
+      </h2>
+      <p style="margin: 0 0 20px; color: #4a5568; font-size: 16px; line-height: 1.8;">
+        Lịch hẹn của bạn tại <strong style="color: #667eea;">${escapeHtml(store.name)}</strong>
+        đã bị hủy.
+      </p>
+      ${
+        appointment.cancelReason
+          ? `
+      <table role="presentation" style="width: 100%; background-color: #fff5f5; border-left: 4px solid #fc8181; padding: 15px; border-radius: 6px; margin-bottom: 30px;">
+        <tr>
+          <td>
+            <p style="margin: 0; color: #c53030; font-size: 14px; line-height: 1.6;">
+              <strong>Lý do hủy:</strong> ${escapeHtml(appointment.cancelReason)}
+            </p>
+          </td>
+        </tr>
+      </table>
+      `
+          : ""
+      }
+      <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #f7fafc; border-radius: 8px; overflow: hidden;">
+        <tr>
+          <td style="padding: 20px;">
+            <table role="presentation" style="width: 100%; border-collapse: collapse;">
+              ${buildAppointmentDetailsRows(appointment)}
+            </table>
+          </td>
+        </tr>
+      </table>
+      <p style="margin: 0; color: #718096; font-size: 14px; line-height: 1.6;">
+        Nếu bạn có thắc mắc, vui lòng liên hệ với chúng tôi để được hỗ trợ.
+      </p>
+    `,
+  });
+
+  return { subject, text, html };
+};
+
+const sendAppointmentCreatedEmail = async (contact, appointment) => {
+  const { subject, text, html } = buildAppointmentCreatedEmail(contact, appointment);
+  await sendMail({ to: contact.email, subject, text, html });
+};
+
+const sendAppointmentConfirmedEmail = async (contact, appointment) => {
+  const { subject, text, html } = buildAppointmentConfirmedEmail(contact, appointment);
+  await sendMail({ to: contact.email, subject, text, html });
+};
+
+const sendAppointmentCancelledEmail = async (contact, appointment) => {
+  const { subject, text, html } = buildAppointmentCancelledEmail(contact, appointment);
+  await sendMail({ to: contact.email, subject, text, html });
+};
+
 module.exports = {
   fireAndForget,
   sendWelcomeEmail,
@@ -899,7 +1213,13 @@ module.exports = {
   sendPasswordResetEmail,
   sendUnlockAccountEmail,
   sendOrderConfirmationEmail,
+  sendAppointmentCreatedEmail,
+  sendAppointmentConfirmedEmail,
+  sendAppointmentCancelledEmail,
   buildWelcomeEmail,
   buildVerificationEmail,
   buildOrderConfirmationEmail,
+  buildAppointmentCreatedEmail,
+  buildAppointmentConfirmedEmail,
+  buildAppointmentCancelledEmail,
 };

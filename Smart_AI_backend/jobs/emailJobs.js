@@ -34,6 +34,15 @@ async function processJob(job) {
       case 'email.order-confirmation':
         result = await processOrderConfirmation(job);
         break;
+      case 'email.appointment-created':
+        result = await processAppointmentCreated(job);
+        break;
+      case 'email.appointment-confirmed':
+        result = await processAppointmentConfirmed(job);
+        break;
+      case 'email.appointment-cancelled':
+        result = await processAppointmentCancelled(job);
+        break;
       default:
         throw new Error(`Unknown email job type: ${jobType}`);
     }
@@ -75,6 +84,24 @@ async function processOrderConfirmation(job) {
   const { to, name, order } = job.data;
   await emailService.sendOrderConfirmationEmail({ name, email: to }, order);
   return { sent: true, emailType: 'email.order-confirmation', to };
+}
+
+async function processAppointmentCreated(job) {
+  const { to, name, appointment } = job.data;
+  await emailService.sendAppointmentCreatedEmail({ name, email: to }, appointment);
+  return { sent: true, emailType: 'email.appointment-created', to };
+}
+
+async function processAppointmentConfirmed(job) {
+  const { to, name, appointment } = job.data;
+  await emailService.sendAppointmentConfirmedEmail({ name, email: to }, appointment);
+  return { sent: true, emailType: 'email.appointment-confirmed', to };
+}
+
+async function processAppointmentCancelled(job) {
+  const { to, name, appointment } = job.data;
+  await emailService.sendAppointmentCancelledEmail({ name, email: to }, appointment);
+  return { sent: true, emailType: 'email.appointment-cancelled', to };
 }
 
 module.exports = { processJob };

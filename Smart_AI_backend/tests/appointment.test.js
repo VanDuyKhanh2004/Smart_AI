@@ -14,8 +14,18 @@ const MISSING_ID = '507f191e810c19729de860ff';
 const USER_TOKEN = jwt.sign({ id: USER_ID, email: 'user@test.com', role: 'user' }, TEST_SECRET);
 const ADMIN_TOKEN = jwt.sign({ id: ADMIN_ID, email: 'admin@test.com', role: 'admin' }, TEST_SECRET);
 
-const mockUser = { _id: USER_ID, email: 'user@test.com', role: 'user', name: 'Test User' };
-const mockAdmin = { _id: ADMIN_ID, email: 'admin@test.com', role: 'admin', name: 'Admin' };
+const mockUser = { _id: USER_ID, id: USER_ID, email: 'user@test.com', role: 'user', name: 'Test User' };
+const mockAdmin = { _id: ADMIN_ID, id: ADMIN_ID, email: 'admin@test.com', role: 'admin', name: 'Admin' };
+
+const mockEnqueueAppointmentCreated = jest.fn();
+const mockEnqueueAppointmentConfirmed = jest.fn();
+const mockEnqueueAppointmentCancelled = jest.fn();
+
+jest.mock('../services/emailQueueService', () => ({
+  enqueueAppointmentCreatedEmail: (...args) => mockEnqueueAppointmentCreated(...args),
+  enqueueAppointmentConfirmedEmail: (...args) => mockEnqueueAppointmentConfirmed(...args),
+  enqueueAppointmentCancelledEmail: (...args) => mockEnqueueAppointmentCancelled(...args),
+}));
 
 jest.mock('../models/User', () => ({
   findById: jest.fn((id) => {
@@ -609,6 +619,160 @@ describe('Appointment Controller — centralized error handling', () => {
       const slots = generateTimeSlots(mockStore, date, existing);
       expect(slots.some(s => s.start === '08:00')).toBe(false);
       expect(slots.some(s => s.start === '08:30')).toBe(true);
+    });
+  });
+
+  describe('Appointment lifecycle email notifications', () => {
+    it('sends created email to guest info when a guest creates an appointment', async () => {
+      Store.findOne.mockResolvedValue(mockStore);
+      Appointment.findOne.mockResolvedValue(null);
+      mockEnqueueAppointmentCreated.mockClear();
+
+      const res = await request(app).post('/api/appointments').send({
+        storeId: STORE_ID,
+        date: '2099-12-25',
+        timeSlot: { start: '10:00', end: '10:30' },
+        purpose: 'consultation',
+        notes: 'Test note',
+        guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+      });
+
+      expect(res.status).toBe(201);
+      expect(mockEnqueueAppointmentCreated).toHaveBeenCalledTimes(1);
+      const [contact] = mockEnqueueAppointmentCreated.mock.calls[0];
+      expect(contact.email).toBe('guest@test.com');
+      expect(contact.name).toBe('Guest');
+    });
+
+    it('sends created email to the logged-in user email', async () => {
+      Store.findOne.mockResolvedValue(mockStore);
+      Appointment.findOne.mockResolvedValue(null);
+      mockEnqueueAppointmentCreated.mockClear();
+
+      const res = await request(app)
+        .post('/api/appointments')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({
+          storeId: STORE_ID,
+          date: '2099-12-25',
+          timeSlot: { start: '10:00', end: '10:30' },
+          purpose: 'consultation',
+          notes: 'Test note',
+          guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+        });
+
+      expect(res.status).toBe(201);
+      expect(mockEnqueueAppointmentCreated).toHaveBeenCalledTimes(1);
+      const [contact] = mockEnqueueAppointmentCreated.mock.calls[0];
+      expect(contact.email).toBe('user@test.com');
+      expect(contact.name).toBe('Test User');
+    });
+
+    it('still returns 201 when email enqueue throws (fail-open)', async () => {
+      Store.findOne.mockResolvedValue(mockStore);
+      Appointment.findOne.mockResolvedValue(null);
+      mockEnqueueAppointmentCreated.mockImplementationOnce(() => { throw new Error('queue down'); });
+
+      const res = await request(app).post('/api/appointments').send({
+        storeId: STORE_ID,
+        date: '2099-12-25',
+        timeSlot: { start: '10:00', end: '10:30' },
+        purpose: 'consultation',
+        guestInfo: { name: 'Guest', phone: '0987654321', email: 'guest@test.com' },
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+    });
+
+    it('sends confirmed email when admin confirms a pending appointment', async () => {
+      Appointment.findById.mockResolvedValue(
+        createMockAppointment({ user: { _id: USER_ID, name: 'Test User', email: 'user@test.com' } })
+      );
+      mockEnqueueAppointmentConfirmed.mockClear();
+
+      const res = await request(app)
+        .patch(`/api/appointments/admin/${APPOINTMENT_ID}/status`)
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`)
+        .send({ status: 'confirmed' });
+
+      expect(res.status).toBe(200);
+      expect(mockEnqueueAppointmentConfirmed).toHaveBeenCalledTimes(1);
+      const [contact] = mockEnqueueAppointmentConfirmed.mock.calls[0];
+      expect(contact.email).toBe('user@test.com');
+    });
+
+    it('sends cancelled email with cancel reason when admin cancels an appointment', async () => {
+      Appointment.findById.mockResolvedValue(
+        createMockAppointment({ user: { _id: USER_ID, name: 'Test User', email: 'user@test.com' } })
+      );
+      mockEnqueueAppointmentCancelled.mockClear();
+
+      const res = await request(app)
+        .patch(`/api/appointments/admin/${APPOINTMENT_ID}/status`)
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`)
+        .send({ status: 'cancelled', cancelReason: 'Cửa hàng bận việc đột xuất' });
+
+      expect(res.status).toBe(200);
+      expect(mockEnqueueAppointmentCancelled).toHaveBeenCalledTimes(1);
+      const [contact, appointment] = mockEnqueueAppointmentCancelled.mock.calls[0];
+      expect(contact.email).toBe('user@test.com');
+      expect(appointment.cancelReason).toBe('Cửa hàng bận việc đột xuất');
+    });
+
+    it('does not send an email when admin marks an appointment completed', async () => {
+      Appointment.findById.mockResolvedValue(
+        createMockAppointment({ user: { _id: USER_ID, name: 'Test User', email: 'user@test.com' } })
+      );
+      mockEnqueueAppointmentCreated.mockClear();
+      mockEnqueueAppointmentConfirmed.mockClear();
+      mockEnqueueAppointmentCancelled.mockClear();
+
+      const res = await request(app)
+        .patch(`/api/appointments/admin/${APPOINTMENT_ID}/status`)
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`)
+        .send({ status: 'completed' });
+
+      expect(res.status).toBe(200);
+      expect(mockEnqueueAppointmentCreated).not.toHaveBeenCalled();
+      expect(mockEnqueueAppointmentConfirmed).not.toHaveBeenCalled();
+      expect(mockEnqueueAppointmentCancelled).not.toHaveBeenCalled();
+    });
+
+    it('does not send an email when the user self-cancels their appointment', async () => {
+      Appointment.findOne.mockResolvedValue(
+        createMockAppointment({ user: { _id: USER_ID, name: 'Test User', email: 'user@test.com' } })
+      );
+      mockEnqueueAppointmentCreated.mockClear();
+      mockEnqueueAppointmentConfirmed.mockClear();
+      mockEnqueueAppointmentCancelled.mockClear();
+
+      const res = await request(app)
+        .patch(`/api/appointments/${APPOINTMENT_ID}/cancel`)
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ cancelReason: 'Đổi kế hoạch' });
+
+      expect(res.status).toBe(200);
+      expect(mockEnqueueAppointmentCreated).not.toHaveBeenCalled();
+      expect(mockEnqueueAppointmentConfirmed).not.toHaveBeenCalled();
+      expect(mockEnqueueAppointmentCancelled).not.toHaveBeenCalled();
+    });
+
+    it('skips the email and still succeeds when the appointment has no recipient email', async () => {
+      Appointment.findById.mockResolvedValue(
+        createMockAppointment({ user: null, guestInfo: null })
+      );
+      mockEnqueueAppointmentCreated.mockClear();
+      mockEnqueueAppointmentConfirmed.mockClear();
+      mockEnqueueAppointmentCancelled.mockClear();
+
+      const res = await request(app)
+        .patch(`/api/appointments/admin/${APPOINTMENT_ID}/status`)
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`)
+        .send({ status: 'confirmed' });
+
+      expect(res.status).toBe(200);
+      expect(mockEnqueueAppointmentConfirmed).not.toHaveBeenCalled();
     });
   });
 });

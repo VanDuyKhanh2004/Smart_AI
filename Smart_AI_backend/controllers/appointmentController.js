@@ -2,6 +2,12 @@ const Appointment = require('../models/Appointment');
 const Store = require('../models/Store');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
+const logger = require('../utils/logger');
+const {
+  enqueueAppointmentCreatedEmail,
+  enqueueAppointmentConfirmedEmail,
+  enqueueAppointmentCancelledEmail,
+} = require('../services/emailQueueService');
 
 const generateTimeSlots = (store, date, existingAppointments) => {
   const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -46,6 +52,53 @@ const generateTimeSlots = (store, date, existingAppointments) => {
   }
 
   return slots;
+};
+
+// Resolve the recipient contact (name + email) for appointment emails.
+// Prefers the populated user, then guest info, then the authenticated user.
+function resolveAppointmentContact(appointment, fallbackUser) {
+  const user = appointment && appointment.user;
+  if (user && user.email) {
+    return { name: user.name, email: user.email };
+  }
+  const guestInfo = appointment && appointment.guestInfo;
+  if (guestInfo && guestInfo.email) {
+    return { name: guestInfo.name, email: guestInfo.email };
+  }
+  if (fallbackUser && fallbackUser.email) {
+    return { name: fallbackUser.name, email: fallbackUser.email };
+  }
+  return null;
+}
+
+const sendAppointmentEmail = (jobType, contact, appointment, correlationId) => {
+  if (!contact || !contact.email) {
+    logger.warn(
+      { appointmentId: appointment && appointment._id, emailEvent: jobType },
+      'Appointment email skipped: no recipient email',
+    );
+    return;
+  }
+  try {
+    switch (jobType) {
+      case 'appointment-created':
+        enqueueAppointmentCreatedEmail(contact, appointment, correlationId);
+        break;
+      case 'appointment-confirmed':
+        enqueueAppointmentConfirmedEmail(contact, appointment, correlationId);
+        break;
+      case 'appointment-cancelled':
+        enqueueAppointmentCancelledEmail(contact, appointment, correlationId);
+        break;
+      default:
+        logger.warn({ emailEvent: jobType }, 'Unknown appointment email event');
+    }
+  } catch (err) {
+    logger.error(
+      { err: { message: err.message }, appointmentId: appointment && appointment._id, emailEvent: jobType },
+      'Appointment email enqueue failed',
+    );
+  }
 };
 
 const getAvailableSlots = async (req, res) => {
@@ -182,6 +235,9 @@ const createAppointment = async (req, res) => {
   const savedAppointment = await newAppointment.save();
 
   await savedAppointment.populate('store', 'name address phone');
+
+  const contact = resolveAppointmentContact(savedAppointment, req.user);
+  sendAppointmentEmail('appointment-created', contact, savedAppointment, req.requestId);
 
   res.status(201).json({
     success: true,
@@ -342,6 +398,13 @@ const updateAppointmentStatus = async (req, res) => {
   const updatedAppointment = await appointment.save();
   await updatedAppointment.populate('store', 'name address');
   await updatedAppointment.populate('user', 'name email phone');
+
+  const contact = resolveAppointmentContact(updatedAppointment);
+  if (status === 'confirmed') {
+    sendAppointmentEmail('appointment-confirmed', contact, updatedAppointment, req.requestId);
+  } else if (status === 'cancelled') {
+    sendAppointmentEmail('appointment-cancelled', contact, updatedAppointment, req.requestId);
+  }
 
   const statusMessages = {
     confirmed: 'Đã xác nhận lịch hẹn',
