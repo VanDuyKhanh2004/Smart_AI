@@ -13,6 +13,7 @@ import type { CompareTableRow } from '@/types/compare.type';
 import {
   buildCompareTableData,
   filterDifferentRows,
+  filterRowsWithValues,
   groupRowsByCategory,
   formatSpecValue,
 } from '../utils/compareUtils';
@@ -54,10 +55,17 @@ const CompareTable: React.FC<CompareTableProps> = ({
     return tableData;
   }, [tableData, showOnlyDifferences]);
 
+  // Drop rows where every compared product has a missing value so products
+  // without stored specs render compactly instead of a wall of "-" columns.
+  const rowsWithValues = useMemo(
+    () => filterRowsWithValues(filteredData),
+    [filteredData]
+  );
+
   // Group rows by category for organized display (Requirement 3.3)
   const groupedData = useMemo(() => {
-    return groupRowsByCategory(filteredData);
-  }, [filteredData]);
+    return groupRowsByCategory(rowsWithValues);
+  }, [rowsWithValues]);
 
 
   // Render a single spec value cell
@@ -138,6 +146,14 @@ const CompareTable: React.FC<CompareTableProps> = ({
     return (
       <div className="text-center py-8 text-gray-500">
         Tất cả thông số đều giống nhau giữa các sản phẩm
+      </div>
+    );
+  }
+
+  if (rowsWithValues.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        Chưa có thông số kỹ thuật để so sánh
       </div>
     );
   }

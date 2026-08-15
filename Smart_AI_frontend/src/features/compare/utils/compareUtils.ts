@@ -195,18 +195,6 @@ export function buildCompareTableData(products: Product[]): CompareTableRow[] {
 }
 
 /**
- * Filter comparison table rows to show only differences
- *
- * @param rows - All comparison table rows
- * @returns Rows where values differ between products
- *
- * Requirements: 4.2 - Hide rows where all products have identical values
- */
-export function filterDifferentRows(rows: CompareTableRow[]): CompareTableRow[] {
-  return rows.filter((row) => row.isDifferent);
-}
-
-/**
  * Group comparison table rows by category
  *
  * @param rows - Flat array of comparison table rows
@@ -222,4 +210,39 @@ export function groupRowsByCategory(rows: CompareTableRow[]): Map<string, Compar
   }
 
   return grouped;
+}
+
+/**
+ * Check whether a row carries at least one usable (non-null) value across all
+ * compared products. Rows where every product has a missing value are noise.
+ *
+ * @param row - A comparison table row
+ * @returns true when at least one product has a value for this attribute
+ */
+export function hasAnyValue(row: CompareTableRow): boolean {
+  return row.values.some((value) => value !== null && value !== undefined);
+}
+
+/**
+ * Filter rows to those that have at least one usable value. Combined with
+ * "hide empty categories", products without stored specs render compactly
+ * instead of a wall of "-".
+ *
+ * @param rows - All comparison table rows
+ * @returns Rows where at least one compared product has a value
+ */
+export function filterRowsWithValues(rows: CompareTableRow[]): CompareTableRow[] {
+  return rows.filter(hasAnyValue);
+}
+
+/**
+ * Filter comparison table rows to show only differences
+ *
+ * @param rows - All comparison table rows
+ * @returns Rows where values differ between products
+ *
+ * Requirements: 4.2 - Hide rows where all products have identical values
+ */
+export function filterDifferentRows(rows: CompareTableRow[]): CompareTableRow[] {
+  return rows.filter((row) => row.isDifferent);
 }

@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { ProductSpecsFields } from './ProductSpecsFields';
 import type {
   Product,
   ProductFormPayload,
   ProductImageSource,
+  ProductSpecs,
 } from '@/types/product.type';
 
 interface ProductFormProps {
@@ -42,6 +44,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
   const [tagsInput, setTagsInput] = useState(
     initialData?.tags ? initialData.tags.join(', ') : ''
   );
+  const [specs, setSpecs] = useState<ProductSpecs | undefined>(initialData?.specs);
 
   const [imageSource, setImageSource] = useState<ProductImageSource>(initialData ? 'url' : 'file');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -176,6 +179,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
       inStock: formData.inStock,
       colors,
       tags,
+      specs,
       imageSource,
       imageFile: imageSource === 'file' ? imageFile : null,
       imageUrl: isSameAsExisting ? '' : imageSource === 'url' ? imageUrl : '',
@@ -410,6 +414,12 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
           disabled={isLoading}
         />
       </div>
+
+      <ProductSpecsFields
+        initialSpecs={initialData?.specs}
+        disabled={isLoading}
+        onChange={setSpecs}
+      />
 
       <div className="flex justify-end gap-2 pt-4">
         <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>

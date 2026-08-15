@@ -21,6 +21,7 @@ const { matchesProductConstraints } = require("../utils/productValidator");
 const { rankProducts } = require("../utils/productRanking");
 const { classifyQuery, resolveFollowUpQuery, createContextFromParsed, sanitizeConversationContext } = require("../utils/conversationContext");
 const contextService = require("../services/contextService");
+const { resolveProductSpec } = require("../utils/productSpecResolver");
 
 /**
  * Best-effort extraction of an email/phone from a chat message. Used to enrich
@@ -1035,7 +1036,53 @@ class ChatController {
     throwIfCancelled(signal);
     let responseResult;
 
-    if (intentResult.intent === "small_talk") {
+    // Deterministic spec-resolution intercept: factual product-spec questions
+    // are answered directly from stored data without calling an LLM. When the
+    // resolver cannot confidently resolve the query, it returns null and we
+    // fall through to the existing recommendation/RAG pipeline unchanged.
+    if (intentResult.intent === "product_query") {
+      try {
+        const specResult = await resolveProductSpec(userQuery);
+        if (specResult) {
+          logger.info({ specType: specResult.type }, '[SpecResolver] Deterministic answer returned');
+          responseResult = {
+            fullResponse: specResult.answer,
+            provider: "deterministic",
+            responseType: "spec_answer",
+            relatedProducts: [],
+          };
+          // Emit streaming-compatible events for the spec answer
+          const start = {
+            sessionId,
+            clientMessageId,
+            timestamp: new Date().toISOString(),
+          };
+          if (generationId && generationId !== clientMessageId) start.generationId = generationId;
+          socket.emit("aiResponseStart", start);
+          socket.emit("aiResponseChunk", {
+            sessionId,
+            clientMessageId,
+            chunk: specResult.answer,
+            chunkIndex: 0,
+            timestamp: new Date().toISOString(),
+            ...(generationId && generationId !== clientMessageId ? { generationId } : {}),
+          });
+          socket.emit("aiResponseComplete", {
+            sessionId,
+            clientMessageId,
+            content: specResult.answer,
+            timestamp: new Date().toISOString(),
+            ...(generationId && generationId !== clientMessageId ? { generationId } : {}),
+          });
+        }
+      } catch (specError) {
+        logger.warn({ err: { message: specError.message } }, '[SpecResolver] Resolution failed, falling through');
+      }
+    }
+
+    if (responseResult) {
+      // Spec resolver returned a deterministic answer — skip the RAG pipeline.
+    } else if (intentResult.intent === "small_talk") {
       responseResult = await this.handleSmallTalk(
         socket,
         sessionId,

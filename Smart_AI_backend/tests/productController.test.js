@@ -105,6 +105,85 @@ function mockFindOneQuery(returnValue, options = {}) {
 }
 
 describe('createProduct', () => {
+  it('normalizes specs to the canonical shape on create', async () => {
+    const reqBody = {
+      name: 'Galaxy S24',
+      brand: 'Samsung',
+      price: 899,
+      description: 'Flagship phone',
+      specs: {
+        screen: { size: ' 6.2 inch ', brightness: '2000 nits' },
+        memory: { ram: '8 GB', expandable: 'true' },
+        junkField: 'should be dropped',
+      },
+    };
+
+    const savedProduct = {
+      _id: 'prod-norm',
+      name: 'Galaxy S24',
+      brand: 'samsung',
+      price: 899,
+      description: 'Flagship phone',
+      specs: { screen: { size: '6.2 inch' }, memory: { ram: '8 GB', expandable: true } },
+      colors: [],
+      inStock: 0,
+      tags: [],
+      image: '',
+      embeddingStatus: 'pending',
+    };
+
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = new Product({}).save;
+    mockSave.mockResolvedValue(savedProduct);
+
+    const req = mockReq(reqBody);
+    const res = mockRes();
+
+    mockBuildEmbeddingContent.mockReturnValue('canonical-text');
+
+    await createProduct(req, res);
+
+    expect(Product).toHaveBeenCalledWith(expect.objectContaining({
+      specs: { screen: { size: '6.2 inch' }, memory: { ram: '8 GB', expandable: true } },
+    }));
+  });
+
+  it('defaults specs to empty object when omitted on create', async () => {
+    const reqBody = {
+      name: 'Pixel 8',
+      brand: 'Google',
+      price: 699,
+      description: 'AI phone',
+    };
+
+    const savedProduct = {
+      _id: 'prod-empty',
+      name: 'Pixel 8',
+      brand: 'google',
+      price: 699,
+      description: 'AI phone',
+      specs: {},
+      colors: [],
+      inStock: 0,
+      tags: [],
+      image: '',
+      embeddingStatus: 'pending',
+    };
+
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = new Product({}).save;
+    mockSave.mockResolvedValue(savedProduct);
+
+    const req = mockReq(reqBody);
+    const res = mockRes();
+
+    mockBuildEmbeddingContent.mockReturnValue('canonical-text');
+
+    await createProduct(req, res);
+
+    expect(Product).toHaveBeenCalledWith(expect.objectContaining({ specs: {} }));
+  });
+
   it('builds canonical content from savedProduct, not req.body', async () => {
     const reqBody = {
       name: 'iPhone 15',
@@ -680,6 +759,32 @@ describe('updateProduct', () => {
       'specs-changed-text',
       'update',
       'test-cid',
+    );
+  });
+
+  it('normalizes specs to the canonical shape on update', async () => {
+    const reqBody = makeReqBody(
+      'MacBook Pro', 'apple', 1999, 'Powerful laptop',
+      { memory: { ram: ' 32 GB ', storage: '1 TB', expandable: 'true' }, extraJunk: 'x' },
+      ['Silver', 'Space Gray'], 10, ['laptop'], 'macbook.jpg',
+    );
+
+    Product.findById.mockResolvedValue({ ...existingProduct });
+    Product.findByIdAndUpdate.mockResolvedValue({ ...existingProduct, specs: { memory: { ram: '32 GB', storage: '1 TB', expandable: true } } });
+
+    const req = mockReq(reqBody, { id: 'prod-update-1' });
+    const res = mockRes();
+
+    await updateProduct(req, res);
+
+    expect(Product.findByIdAndUpdate).toHaveBeenCalledWith(
+      'prod-update-1',
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          specs: { memory: { ram: '32 GB', storage: '1 TB', expandable: true } },
+        }),
+      }),
+      expect.any(Object),
     );
   });
 
