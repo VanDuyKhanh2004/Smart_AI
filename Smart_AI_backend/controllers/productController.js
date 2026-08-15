@@ -4,6 +4,7 @@ const cache = require("../services/cacheService");
 const { search: semanticSearch } = require("../services/productSearchService");
 const { recommend: productRecommend } = require("../services/productRecommendationService");
 const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddingContent");
+const { normalizeProductSpecs } = require("../utils/productSpecs");
 const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
 const { uploadProductImageIfNeeded, uploadProductImageBuffer, deleteImageFromCloudinary, ProductImageValidationError } = require("../services/productImageService");
 const logger = require("../utils/logger");
@@ -137,7 +138,7 @@ const createProduct = asyncHandler(async (req, res) => {
     name,
     brand: brand.toLowerCase(),
     price,
-    specs: specs || {},
+    specs: normalizeProductSpecs(specs) || {},
     description,
     inStock: inStock || 0,
     colors: colors || [],
@@ -565,13 +566,19 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   }
 
+  // Normalize specs to the canonical shape. When `specs` is explicitly
+  // provided (even as an empty object) the update must apply that state,
+  // clearing any previously stored specs; when omitted, preserve existing.
+  const specsProvided = specs !== undefined;
+  const normalizedSpecs = specsProvided ? normalizeProductSpecs(specs) || {} : undefined;
+
   const $set = {
     name,
     brand: brand.toLowerCase(),
     price,
     description,
     inStock: inStock !== undefined ? inStock : existing.inStock,
-    ...(specs !== undefined && { specs }),
+    ...(specsProvided && { specs: normalizedSpecs }),
     ...(colors !== undefined && { colors }),
     ...(tags !== undefined && { tags }),
   };
@@ -592,7 +599,7 @@ const updateProduct = asyncHandler(async (req, res) => {
     brand.toLowerCase() !== existing.brand ||
     description !== existing.description ||
     price !== existing.price ||
-    (specs !== undefined && JSON.stringify(specs) !== JSON.stringify(existing.specs)) ||
+    (specsProvided && JSON.stringify(normalizedSpecs) !== JSON.stringify(existing.specs)) ||
     (colors !== undefined && JSON.stringify(colors) !== JSON.stringify(existing.colors));
 
   let shouldEnqueue = false;

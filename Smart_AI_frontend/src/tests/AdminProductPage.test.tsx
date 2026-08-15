@@ -164,6 +164,75 @@ describe('AdminProductPage', () => {
     expect(screen.getByLabelText(/Tên sản phẩm/)).toBeInTheDocument();
   });
 
+  it('submits specs entered in the grouped fields', async () => {
+    render(<AdminProductPage />);
+    await waitFor(() => expect(mockGetAllProducts).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /Thêm sản phẩm/ }));
+    await fillRequiredFields();
+
+    fireEvent.change(screen.getByLabelText(/Kích thước màn hình/), {
+      target: { value: '6.7 inch' },
+    });
+    fireEvent.change(screen.getByLabelText(/RAM/), {
+      target: { value: '8 GB' },
+    });
+    fireEvent.change(screen.getByLabelText(/Camera chính/), {
+      target: { value: '48 MP' },
+    });
+    fireEvent.change(screen.getByLabelText(/Dung lượng pin/), {
+      target: { value: '4422 mAh' },
+    });
+    fireEvent.click(screen.getByLabelText(/Hỗ trợ mở rộng bộ nhớ/));
+
+    clickFormSubmit('Thêm sản phẩm');
+
+    await waitFor(() => expect(mockCreateProduct).toHaveBeenCalled());
+    const [payload] = mockCreateProduct.mock.calls[0] as [ProductFormPayload];
+    expect(payload.specs).toEqual({
+      screen: { size: '6.7 inch' },
+      memory: { ram: '8 GB', expandable: true },
+      camera: { rear: { primary: '48 MP' } },
+      battery: { capacity: '4422 mAh' },
+    });
+  });
+
+  it('prefills spec fields when editing a product with specs', async () => {
+    const product = makeProduct({
+      specs: {
+        screen: { size: '6.7 inch' },
+        memory: { ram: '8 GB', storage: '256 GB', expandable: false },
+      },
+    });
+    mockGetAllProducts.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      data: {
+        products: [product],
+        pagination: {
+          currentPage: 1,
+          totalPages: 1,
+          totalCount: 1,
+          limit: 10,
+          hasNextPage: false,
+          hasPrevPage: false,
+          nextPage: null,
+          prevPage: null,
+        },
+      },
+    });
+
+    render(<AdminProductPage />);
+    await waitFor(() => expect(mockGetAllProducts).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /Sửa iPhone 14/ }));
+
+    await screen.findByLabelText('Kích thước màn hình');
+    expect((screen.getByLabelText('Kích thước màn hình') as HTMLInputElement).value).toBe('6.7 inch');
+    expect((screen.getByLabelText('Bộ nhớ trong') as HTMLInputElement).value).toBe('256 GB');
+    expect((screen.getByLabelText(/Hỗ trợ mở rộng bộ nhớ/) as HTMLInputElement).checked).toBe(false);
+  });
+
   it('submits the same payload shape regardless of image source mode', async () => {
     render(<AdminProductPage />);
     await waitFor(() => expect(mockGetAllProducts).toHaveBeenCalled());

@@ -14,6 +14,7 @@ export interface ProductSpecs {
   memory?: {
     ram?: string;
     storage?: string;
+    expandable?: boolean;
   };
   camera?: {
     rear?: {
