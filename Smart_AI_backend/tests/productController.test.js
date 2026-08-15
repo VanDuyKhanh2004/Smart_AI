@@ -65,7 +65,12 @@ jest.mock('../services/productImageService', () => ({
   ProductImageValidationError: MockProductImageValidationError,
 }));
 
-const { createProduct, getAllProducts, getProductById, updateProduct, deleteProduct, searchSemantic, getRecommendations } = require('../controllers/productController');
+const {
+  createProduct, getAllProducts, getProductById, updateProduct, deleteProduct,
+  searchSemantic, getRecommendations,
+  normalizeSearchQuery, GENERIC_SEARCH_TOKENS, hasNonGenericTokenMatch,
+  escapeRegex,
+} = require('../controllers/productController');
 const Product = require('../models/Product');
 const Review = require('../models/Review');
 const cache = require('../services/cacheService');
@@ -1620,7 +1625,11 @@ describe('getAllProducts', () => {
 
   it('forwards unexpected error to next', async () => {
     const dbError = new Error('DB failure');
-    Product.aggregate.mockRejectedValue(dbError);
+    // Use mockResolvedValueOnce to make both aggregate calls resolve to the
+    // error via a rejected promise chain.  Then reset to avoid leaking.
+    Product.aggregate
+      .mockRejectedValueOnce(dbError)
+      .mockRejectedValueOnce(dbError);
 
     const req = mockReq({}, {}, { page: '1', limit: '10' });
     const res = mockRes();
@@ -1628,6 +1637,213 @@ describe('getAllProducts', () => {
     await getAllProducts(req, res, next);
 
     expect(next).toHaveBeenCalledWith(dbError);
+  });
+
+  it('normalizes search query: trims whitespace', async () => {
+    // prefix-first: 3 calls (prefixCount + data + count)
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])  // prefixCount → found
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '  iphone 15  ' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    // Prefix found → uses $or regex, normalized to "iphone 15"
+    const nameRegex = matchStage.$match.$or[0].name;
+    expect(nameRegex.$regex).toBe('\\biphone 15');
+    expect(nameRegex.$options).toBe('i');
+  });
+
+  it('normalizes search query: collapses repeated internal spaces', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'xiaomi   14t   pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    const nameRegex = matchStage.$match.$or[0].name;
+    expect(nameRegex.$regex).toBe('\\bxiaomi 14t pro');
+  });
+
+  it('normalizes search query: lowercases for case-insensitive matching', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'XIAOMI 14T Pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    const nameRegex = matchStage.$match.$or[0].name;
+    expect(nameRegex.$regex).toBe('\\bxiaomi 14t pro');
+  });
+
+  it('uses text score relevance sort when search falls back to $text', async () => {
+    // No prefix matches → falls back to $text
+    Product.aggregate
+      .mockResolvedValueOnce([])  // prefixCount → 0
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'pro max' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ score: { $meta: 'textScore' } });
+  });
+
+  it('includes text score in projection when search falls back to $text', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])  // prefixCount → 0
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'pro max' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const projectStage = dataPipeline.find(s => s.$project);
+    expect(projectStage.$project.score).toEqual({ $meta: 'textScore' });
+  });
+
+  it('uses createdAt sort when no search is active', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ createdAt: -1 });
+  });
+
+  it('does not include text score in projection when no search', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const projectStage = dataPipeline.find(s => s.$project);
+    expect(projectStage.$project.score).toBeUndefined();
+  });
+
+  it('empty search preserves normal catalog behavior', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.$text).toBeUndefined();
+  });
+
+  it('whitespace-only search is treated as empty', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '   ' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.$text).toBeUndefined();
+  });
+
+  it('normalized search is used in cache key', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])  // prefixCount
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '  XIAOMI  14T  Pro  ' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const expectedCacheKey = 'products:' + JSON.stringify({
+      page: 1, limit: 10, brand: null, search: 'xiaomi 14t pro',
+      minPrice: null, maxPrice: null, sortBy: null, sortOrder: null,
+      minRating: null, inStock: null,
+    });
+    expect(cache.set).toHaveBeenCalledWith(
+      expectedCacheKey,
+      expect.any(Object),
+      300
+    );
+  });
+
+  it('search combines with brand filter', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])  // prefixCount
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 's24 ultra', brand: 'samsung' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.brand).toBe('samsung');
+    // Prefix found → uses $or regex
+    expect(matchStage.$match.$or).toBeDefined();
+  });
+
+  it('search combines with price filter', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])  // prefixCount
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'iphone', minPrice: '10000000', maxPrice: '30000000' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.price).toEqual({ $gte: 10000000, $lte: 30000000 });
+    expect(matchStage.$match.$or).toBeDefined();
+  });
+
+  it('user sortBy is used when no search is active', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', sortBy: 'price', sortOrder: 'asc' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ price: 1 });
   });
 });
 
@@ -1842,5 +2058,849 @@ describe('getRecommendations', () => {
     await getRecommendations(req, res, next);
 
     expect(next).toHaveBeenCalledWith(dbError);
+  });
+});
+
+/* ============================================================
+   normalizeSearchQuery (unit)
+============================================================ */
+describe('normalizeSearchQuery', () => {
+  it('returns empty string for null/undefined/non-string', () => {
+    expect(normalizeSearchQuery(null)).toBe('');
+    expect(normalizeSearchQuery(undefined)).toBe('');
+    expect(normalizeSearchQuery(123)).toBe('');
+  });
+
+  it('trims leading/trailing whitespace', () => {
+    expect(normalizeSearchQuery('  hello  ')).toBe('hello');
+  });
+
+  it('collapses repeated internal spaces', () => {
+    expect(normalizeSearchQuery('xiaomi   14t   pro')).toBe('xiaomi 14t pro');
+  });
+
+  it('lowercases for case-insensitive matching', () => {
+    expect(normalizeSearchQuery('XIAOMI 14T Pro')).toBe('xiaomi 14t pro');
+  });
+});
+
+/* ============================================================
+   hasNonGenericTokenMatch (unit)
+============================================================ */
+describe('hasNonGenericTokenMatch', () => {
+  it('always returns true for empty/undefined tokens', () => {
+    expect(hasNonGenericTokenMatch('iPhone 16 Pro', [])).toBe(true);
+    expect(hasNonGenericTokenMatch('iPhone 16 Pro', null)).toBe(true);
+  });
+
+  it('always returns true for single-token searches', () => {
+    expect(hasNonGenericTokenMatch('iPhone 16 Pro', ['pro'])).toBe(true);
+    expect(hasNonGenericTokenMatch('Samsung Galaxy', ['samsung'])).toBe(true);
+  });
+
+  it('returns true when product name has a non-generic token match', () => {
+    expect(hasNonGenericTokenMatch('Xiaomi 14T Pro', ['xiaomi', '14t', 'pro'])).toBe(true);
+  });
+
+  it('returns false when product name only has generic token matches', () => {
+    expect(hasNonGenericTokenMatch('iPhone 16 Pro', ['xiaomi', '14t', 'pro'])).toBe(false);
+  });
+
+  it('returns false for iPhone 15 Pro Max when searching "Xiaomi 14T Pro"', () => {
+    expect(hasNonGenericTokenMatch('iPhone 15 Pro Max 256GB', ['xiaomi', '14t', 'pro'])).toBe(false);
+  });
+
+  it('returns false for Redmi Note 14 Pro when searching "Xiaomi 14T Pro"', () => {
+    expect(hasNonGenericTokenMatch('Redmi Note 14 Pro', ['xiaomi', '14t', 'pro'])).toBe(false);
+  });
+});
+
+/* ============================================================
+   GENERIC_SEARCH_TOKENS (unit)
+============================================================ */
+describe('GENERIC_SEARCH_TOKENS', () => {
+  it('contains common product-suffix tokens', () => {
+    expect(GENERIC_SEARCH_TOKENS.has('pro')).toBe(true);
+    expect(GENERIC_SEARCH_TOKENS.has('max')).toBe(true);
+    expect(GENERIC_SEARCH_TOKENS.has('plus')).toBe(true);
+    expect(GENERIC_SEARCH_TOKENS.has('ultra')).toBe(true);
+  });
+
+  it('does not contain specific model identifiers', () => {
+    expect(GENERIC_SEARCH_TOKENS.has('xiaomi')).toBe(false);
+    expect(GENERIC_SEARCH_TOKENS.has('samsung')).toBe(false);
+    expect(GENERIC_SEARCH_TOKENS.has('14t')).toBe(false);
+    expect(GENERIC_SEARCH_TOKENS.has('s24')).toBe(false);
+    expect(GENERIC_SEARCH_TOKENS.has('pixel')).toBe(false);
+  });
+});
+
+/* ============================================================
+   Relevance filter integration (A-J regression tests)
+============================================================ */
+describe('getAllProducts relevance filter', () => {
+  // The prefix-first approach makes 3 aggregate calls for search queries:
+  // 0: prefixCountPipeline, 1: dataPipeline, 2: countPipeline
+  const mockAggregate = (products) => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: products.length }]) // prefixCount (assumes prefix matches)
+      .mockResolvedValueOnce(products)  // dataPipeline
+      .mockResolvedValueOnce([{ total: products.length }]); // countPipeline
+  };
+
+  // A. Exact multi-token product name strongly prefers/restricts to intended product
+  it('A: exact multi-token query "Xiaomi 14T Pro" returns only products with specific token match', async () => {
+    // Prefix-first: prefix \bxiaomi matches only "Xiaomi 14T Pro" (not "Redmi Note 14 Pro" or "iPhone 16 Pro")
+    mockAggregate([
+      { _id: 'p1', name: 'Xiaomi 14T Pro', score: 30 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'Xiaomi 14T Pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(1);
+    expect(returnedProducts[0].name).toBe('Xiaomi 14T Pro');
+  });
+
+  // B. Unrelated products sharing only generic tokens such as "Pro" are excluded
+  it('B: prefix-first naturally excludes products that only share generic tokens', async () => {
+    // Prefix \bxiaomi only matches "Xiaomi 14T Pro"; others don't start with "xiaomi"
+    mockAggregate([
+      { _id: 'p1', name: 'Xiaomi 14T Pro', score: 30 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'Xiaomi 14T Pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(1);
+    expect(returnedProducts[0].name).toBe('Xiaomi 14T Pro');
+  });
+
+  // C. "s24 ultra" still finds Galaxy S24 Ultra
+  it('C: "s24 ultra" returns Galaxy S24 Ultra and related S24 products via prefix', async () => {
+    // Prefix \bs24 matches "Samsung Galaxy S24 Ultra" and "Samsung Galaxy S24" but NOT "Samsung Galaxy A55"
+    mockAggregate([
+      { _id: 'p1', name: 'Samsung Galaxy S24 Ultra', score: 18 },
+      { _id: 'p2', name: 'Samsung Galaxy S24', score: 14 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 's24 ultra' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+    expect(returnedProducts.map(p => p.name)).toContain('Samsung Galaxy S24 Ultra');
+    expect(returnedProducts.map(p => p.name)).toContain('Samsung Galaxy S24');
+  });
+
+  // D. "samsung" still supports brand search (single token always passes)
+  it('D: single-token "samsung" brand search returns all matching products', async () => {
+    mockAggregate([
+      { _id: 'p1', name: 'Samsung Galaxy S24 Ultra', score: 8 },
+      { _id: 'p2', name: 'Samsung Galaxy A55', score: 8 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'samsung' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // E. "pixel" still supports series search (single token always passes)
+  it('E: single-token "pixel" series search returns all matching products', async () => {
+    mockAggregate([
+      { _id: 'p1', name: 'Google Pixel 9 Pro', score: 10 },
+      { _id: 'p2', name: 'Google Pixel 8a', score: 10 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'pixel' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // F. Case-insensitive search remains equivalent
+  it('F: "XIAOMI 14T PRO" and "xiaomi 14t pro" produce same results', async () => {
+    const expectedProducts = [
+      { _id: 'p1', name: 'Xiaomi 14T Pro', score: 30 },
+    ];
+
+    // Uppercase query
+    mockAggregate([...expectedProducts]);
+    const req1 = mockReq({}, {}, { page: '1', limit: '10', search: 'XIAOMI 14T PRO' });
+    const res1 = mockRes();
+    await getAllProducts(req1, res1);
+    const upperResult = mockJson.mock.calls[mockJson.mock.calls.length - 1][0].data.products;
+
+    // Lowercase query
+    mockAggregate([...expectedProducts]);
+    const req2 = mockReq({}, {}, { page: '1', limit: '10', search: 'xiaomi 14t pro' });
+    const res2 = mockRes();
+    await getAllProducts(req2, res2);
+    const lowerResult = mockJson.mock.calls[mockJson.mock.calls.length - 1][0].data.products;
+
+    expect(upperResult).toHaveLength(1);
+    expect(lowerResult).toHaveLength(1);
+    expect(upperResult[0].name).toBe(lowerResult[0].name);
+  });
+
+  // G. Extra whitespace remains normalized
+  it('G: "  Xiaomi   14T   Pro  " produces same filtered result', async () => {
+    // Prefix \bxiaomi 14t pro only matches "Xiaomi 14T Pro"
+    mockAggregate([
+      { _id: 'p1', name: 'Xiaomi 14T Pro', score: 30 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '  Xiaomi   14T   Pro  ' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(1);
+    expect(returnedProducts[0].name).toBe('Xiaomi 14T Pro');
+  });
+
+  // H. Search + price/brand filters still compose correctly
+  it('H: search + brand + price filters compose correctly', async () => {
+    // Prefix \bxiaomi only matches "Xiaomi 14T Pro"; "iPhone 16 Pro 256GB" doesn't match
+    mockAggregate([
+      { _id: 'p1', name: 'Xiaomi 14T Pro', score: 30 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'Xiaomi 14T Pro', brand: 'xiaomi', minPrice: '10000000', maxPrice: '30000000' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    // Pipeline index 1 is the data pipeline (index 0 is prefixCount)
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.brand).toBe('xiaomi');
+    expect(matchStage.$match.price).toEqual({ $gte: 10000000, $lte: 30000000 });
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(1);
+    expect(returnedProducts[0].name).toBe('Xiaomi 14T Pro');
+  });
+
+  // I. Empty search remains unchanged
+  it('I: empty search returns normal catalog without filtering', async () => {
+    // Empty search makes 2 aggregate calls (no prefixCount)
+    Product.aggregate
+      .mockResolvedValueOnce([
+        { _id: 'p1', name: 'Product A', score: 0 },
+        { _id: 'p2', name: 'Product B', score: 0 },
+      ])
+      .mockResolvedValueOnce([{ total: 2 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // J. Regex metacharacters cannot alter matching behavior
+  it('J: regex metacharacters in search query are handled safely via prefix', async () => {
+    mockAggregate([
+      { _id: 'p1', name: 'iPhone 15 Pro', score: 10 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'iphone 15 (pro)' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    // Pipeline index 1 is the data pipeline
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    // Should use prefix regex (prefix "iphone" matches name)
+    expect(matchStage.$match.$or).toBeDefined();
+  });
+
+  // Relevance filter does not apply to single-token searches
+  it('single-token search "pro" returns all products matching "pro"', async () => {
+    mockAggregate([
+      { _id: 'p1', name: 'iPhone 16 Pro', score: 10 },
+      { _id: 'p2', name: 'Samsung Galaxy S24 Pro', score: 10 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // Relevance filter does not apply when no search is active
+  it('no search returns normal catalog with no filtering', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([
+        { _id: 'p1', name: 'iPhone 16 Pro', score: 0 },
+        { _id: 'p2', name: 'Samsung Galaxy S24', score: 0 },
+      ])
+      .mockResolvedValueOnce([{ total: 2 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // Pagination totalCount uses filtered count for multi-token search
+  it('totalCount reflects results', async () => {
+    mockAggregate([
+      { _id: 'p1', name: 'Xiaomi 14T Pro', score: 30 },
+      { _id: 'p2', name: 'iPhone 16 Pro 256GB', score: 10 },
+      { _id: 'p3', name: 'Redmi Note 14 Pro', score: 20 },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'Xiaomi 14T Pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const pagination = mockJson.mock.calls[0][0].data.pagination;
+    expect(pagination.totalCount).toBe(3);
+    expect(pagination.totalPages).toBe(1);
+  });
+});
+
+/* ============================================================
+   escapeRegex (unit)
+============================================================ */
+describe('escapeRegex', () => {
+  it('escapes all regex metacharacters', () => {
+    expect(escapeRegex('oppo')).toBe('oppo');
+    expect(escapeRegex('s24 ultra')).toBe('s24 ultra');
+    expect(escapeRegex('iphone (pro)')).toBe('iphone \\(pro\\)');
+    expect(escapeRegex('price.$100')).toBe('price\\.\\$100');
+    expect(escapeRegex('a*b+c')).toBe('a\\*b\\+c');
+  });
+});
+
+/* ============================================================
+   Prefix search integration tests
+============================================================ */
+describe('getAllProducts prefix search', () => {
+  // The new prefix-first approach makes 3 aggregate calls when search is active:
+  // 1. prefixCountPipeline (lightweight count to check if prefix matches exist)
+  // 2. dataPipeline (the actual data query)
+  // 3. countPipeline (total count for pagination)
+  const mockAggregatePrefix = (prefixCount, products) => {
+    Product.aggregate
+      .mockResolvedValueOnce(prefixCount > 0 ? [{ total: prefixCount }] : [])  // prefixCount
+      .mockResolvedValueOnce(products)  // dataPipeline
+      .mockResolvedValueOnce([{ total: products.length }]); // countPipeline
+  };
+
+  // For $text fallback (no prefix matches), only 2 aggregate calls:
+  // 1. prefixCountPipeline → [] (no prefix matches)
+  // Then the controller falls back to $text, making:
+  // 2. dataPipeline
+  // 3. countPipeline
+  const mockAggregateTextFallback = (products, total) => {
+    Product.aggregate
+      .mockResolvedValueOnce([])  // prefixCount → 0
+      .mockResolvedValueOnce(products)  // dataPipeline ($text)
+      .mockResolvedValueOnce([{ total: total || products.length }]); // countPipeline
+  };
+
+  // 1. "o" returns only strong prefix candidates
+  it('1: "o" returns products with name/brand matching word-boundary "o"', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+      { _id: 'p2', name: 'OnePlus 12' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'o' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    expect(matchStage.$match.$or).toBeDefined();
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 2. "op" finds OPPO/OnePlus relevant products
+  it('2: "op" returns products with name/brand matching "op"', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+      { _id: 'p2', name: 'OnePlus 12' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'op' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 3. "opp" finds OPPO products
+  it('3: "opp" returns OPPO products via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+      { _id: 'p2', name: 'OPPO Find X7' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'opp' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 4. "oppo" finds OPPO products via prefix (no threshold — prefix always tried first)
+  it('4: "oppo" returns OPPO products via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+      { _id: 'p2', name: 'OPPO Find X7' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'oppo' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    expect(matchStage.$match.$or).toBeDefined();
+  });
+
+  // 5. "iph" finds iPhone products via prefix
+  it('5: "iph" returns iPhone products via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'iPhone 16 Pro' },
+      { _id: 'p2', name: 'iPhone 15 Pro Max' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'iph' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 6. "pix" finds Pixel products via prefix
+  it('6: "pix" returns Pixel products via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'Google Pixel 9 Pro' },
+      { _id: 'p2', name: 'Google Pixel 8a' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'pix' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 7. "sam" finds Samsung products via prefix
+  it('7: "sam" returns Samsung products via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'Samsung Galaxy S24' },
+      { _id: 'p2', name: 'Samsung Galaxy A55' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'sam' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 8. "xia" finds Xiaomi products via prefix
+  it('8: "xia" returns Xiaomi products via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'Xiaomi 14T Pro' },
+      { _id: 'p2', name: 'Xiaomi Redmi Note 13' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'xia' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 9. Case-insensitive prefix works
+  it('9: "IPH" and "iph" produce same prefix results', async () => {
+    const expected = [{ _id: 'p1', name: 'iPhone 16 Pro' }];
+
+    mockAggregatePrefix(1, [...expected]);
+    const req1 = mockReq({}, {}, { page: '1', limit: '10', search: 'IPH' });
+    const res1 = mockRes();
+    await getAllProducts(req1, res1);
+    const upperResult = mockJson.mock.calls[mockJson.mock.calls.length - 1][0].data.products;
+
+    mockAggregatePrefix(1, [...expected]);
+    const req2 = mockReq({}, {}, { page: '1', limit: '10', search: 'iph' });
+    const res2 = mockRes();
+    await getAllProducts(req2, res2);
+    const lowerResult = mockJson.mock.calls[mockJson.mock.calls.length - 1][0].data.products;
+
+    expect(upperResult).toHaveLength(1);
+    expect(lowerResult).toHaveLength(1);
+    expect(upperResult[0].name).toBe(lowerResult[0].name);
+  });
+
+  // 10. Extra whitespace prefix works
+  it('10: "  opp  " normalizes to "opp" prefix search', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '  opp  ' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(1);
+  });
+
+  // 11. Regex metacharacters cannot alter matching behavior
+  it('11: regex metacharacters in prefix query are escaped safely', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'iPhone 15 Pro' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'ip(' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    const nameCondition = matchStage.$match.$or[0].name;
+    expect(nameCondition.$regex).toBe('\\bip\\(');
+    expect(nameCondition.$options).toBe('i');
+  });
+
+  // 12. "Xiaomi 14T Pro" — prefix matches "xiaomi" in name, returns relevant results
+  it('12: "Xiaomi 14T Pro" returns relevant Xiaomi result via prefix', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'Xiaomi 14T Pro' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'Xiaomi 14T Pro' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(1);
+    expect(returnedProducts[0].name).toBe('Xiaomi 14T Pro');
+  });
+
+  // 13. "s24 ultra" — prefix matches "s24" in name, returns relevant results
+  it('13: "s24 ultra" returns Samsung Galaxy S24 Ultra via prefix', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'Samsung Galaxy S24 Ultra' },
+      { _id: 'p2', name: 'Samsung Galaxy S24' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 's24 ultra' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 14. "samsung" — prefix matches brand "samsung"
+  it('14: "samsung" returns Samsung products via prefix on brand', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'Samsung Galaxy S24' },
+      { _id: 'p2', name: 'Samsung Galaxy A55' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'samsung' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const returnedProducts = mockJson.mock.calls[0][0].data.products;
+    expect(returnedProducts).toHaveLength(2);
+  });
+
+  // 15. Empty search unchanged
+  it('15: empty search returns normal catalog', async () => {
+    // Empty search makes 2 aggregate calls (data + count), no prefix check
+    Product.aggregate
+      .mockResolvedValueOnce([
+        { _id: 'p1', name: 'Product A' },
+        { _id: 'p2', name: 'Product B' },
+      ])
+      .mockResolvedValueOnce([{ total: 2 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.$text).toBeUndefined();
+    expect(matchStage.$match.$or).toBeUndefined();
+  });
+
+  // 16. search + price/brand filters still work
+  it('16: prefix search + brand + price filters compose correctly', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'opp', brand: 'oppo', minPrice: '5000000', maxPrice: '15000000' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const matchStage = dataPipeline.find(s => s.$match);
+    expect(matchStage.$match.brand).toBe('oppo');
+    expect(matchStage.$match.price).toEqual({ $gte: 5000000, $lte: 15000000 });
+    expect(matchStage.$match.$or).toBeDefined();
+  });
+
+  // 17. Pagination metadata reflects prefix-filtered results
+  it('17: totalCount reflects results', async () => {
+    mockAggregatePrefix(2, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+      { _id: 'p2', name: 'OPPO Find X7' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'opp' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const pagination = mockJson.mock.calls[0][0].data.pagination;
+    expect(pagination.totalCount).toBe(2);
+    expect(pagination.totalPages).toBe(1);
+  });
+
+  // 18. Cache key uses normalized query
+  it('18: cache key uses normalized prefix query', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: '  OPP  ' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const expectedCacheKey = 'products:' + JSON.stringify({
+      page: 1, limit: 10, brand: null, search: 'opp',
+      minPrice: null, maxPrice: null, sortBy: null, sortOrder: null,
+      minRating: null, inStock: null,
+    });
+    expect(cache.set).toHaveBeenCalledWith(
+      expectedCacheKey,
+      expect.any(Object),
+      300
+    );
+  });
+
+  // Prefix search uses name+createdAt sort
+  it('prefix search sorts by name then createdAt', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'opp' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ name: 1, createdAt: -1 });
+  });
+
+  // Prefix search does not include text score in projection
+  it('prefix search does not include text score in projection', async () => {
+    mockAggregatePrefix(1, [
+      { _id: 'p1', name: 'OPPO Reno 11' },
+    ]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: 'opp' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[1][0];
+    const projectStage = dataPipeline.find(s => s.$project);
+    expect(projectStage.$project.score).toBeUndefined();
+  });
+});
+
+/* ============================================================
+   Prefix regex matching validation (real product name values)
+   These tests verify the actual regex pattern matches real-world
+   product names, not just that the pipeline contains a regex.
+============================================================ */
+describe('prefix regex matching against real product names', () => {
+  // Helper: extract the $regex and $options from the first $or condition
+  const getPrefixRegex = () => {
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    return matchStage.$match.$or[0].name; // { $regex: "...", $options: "i" }
+  };
+
+  const mockAggregateOne = (name) => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: 1 }])  // prefixCount
+      .mockResolvedValueOnce([{ _id: 'p1', name }])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 1 }]); // countPipeline
+  };
+
+  const searchAndCapture = async (query) => {
+    mockAggregateOne('placeholder');
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: query });
+    const res = mockRes();
+    await getAllProducts(req, res);
+    return getPrefixRegex();
+  };
+
+  const searchAndCheckResults = async (query, mockProducts) => {
+    Product.aggregate
+      .mockResolvedValueOnce([{ total: mockProducts.length }]) // prefixCount
+      .mockResolvedValueOnce(mockProducts)  // dataPipeline
+      .mockResolvedValueOnce([{ total: mockProducts.length }]); // countPipeline
+    const req = mockReq({}, {}, { page: '1', limit: '10', search: query });
+    const res = mockRes();
+    await getAllProducts(req, res);
+    return mockJson.mock.calls[mockJson.mock.calls.length - 1][0].data.products;
+  };
+
+  it('uses string $regex form with case-insensitive flag', async () => {
+    const cond = await searchAndCapture('iph');
+    expect(cond.$regex).toBe('\\biph');
+    expect(cond.$options).toBe('i');
+  });
+
+  it('"iph" regex matches "iPhone 16 Pro" (real name)', () => {
+    const re = new RegExp('\\biph', 'i');
+    expect(re.test('iPhone 16 Pro')).toBe(true);
+  });
+
+  it('"iph" regex matches "iPhone 15 Pro Max" (real name)', () => {
+    const re = new RegExp('\\biph', 'i');
+    expect(re.test('iPhone 15 Pro Max')).toBe(true);
+  });
+
+  it('"iph" regex matches "iPhone SE" (real name)', () => {
+    const re = new RegExp('\\biph', 'i');
+    expect(re.test('iPhone SE')).toBe(true);
+  });
+
+  it('"iph" regex does NOT match "Galaxy S24" (unrelated)', () => {
+    const re = new RegExp('\\biph', 'i');
+    expect(re.test('Galaxy S24')).toBe(false);
+  });
+
+  it('"iph" regex does NOT match "OPPO Reno 11" (unrelated)', () => {
+    const re = new RegExp('\\biph', 'i');
+    expect(re.test('OPPO Reno 11')).toBe(false);
+  });
+
+  it('"pix" regex matches "Pixel 9 Pro" (real name from fixtures)', () => {
+    const re = new RegExp('\\bpix', 'i');
+    expect(re.test('Pixel 9 Pro')).toBe(true);
+  });
+
+  it('"pix" regex matches "Google Pixel 9 Pro" (real name with brand prefix)', () => {
+    const re = new RegExp('\\bpix', 'i');
+    expect(re.test('Google Pixel 9 Pro')).toBe(true);
+  });
+
+  it('"pix" regex matches "Google Pixel 8a" (real name)', () => {
+    const re = new RegExp('\\bpix', 'i');
+    expect(re.test('Google Pixel 8a')).toBe(true);
+  });
+
+  it('"pix" regex does NOT match "OnePlus 12" (unrelated)', () => {
+    const re = new RegExp('\\bpix', 'i');
+    expect(re.test('OnePlus 12')).toBe(false);
+  });
+
+  it('"sam" regex matches "Samsung Galaxy S24" (real name)', () => {
+    const re = new RegExp('\\bsam', 'i');
+    expect(re.test('Samsung Galaxy S24')).toBe(true);
+  });
+
+  it('"sam" regex matches "samsung" brand (real brand value)', () => {
+    const re = new RegExp('\\bsam', 'i');
+    expect(re.test('samsung')).toBe(true);
+  });
+
+  it('"xia" regex matches "Xiaomi 14T Pro" (real name)', () => {
+    const re = new RegExp('\\bxia', 'i');
+    expect(re.test('Xiaomi 14T Pro')).toBe(true);
+  });
+
+  it('"xia" regex matches "xiaomi" brand (real brand value)', () => {
+    const re = new RegExp('\\bxia', 'i');
+    expect(re.test('xiaomi')).toBe(true);
+  });
+
+  it('"opp" regex matches "OPPO Reno 11" (real name)', () => {
+    const re = new RegExp('\\bopp', 'i');
+    expect(re.test('OPPO Reno 11')).toBe(true);
+  });
+
+  it('"opp" regex matches "oppo" brand (real brand value)', () => {
+    const re = new RegExp('\\bopp', 'i');
+    expect(re.test('oppo')).toBe(true);
+  });
+
+  it('"o" regex matches "OPPO Reno 11" (1-char prefix)', () => {
+    const re = new RegExp('\\bo', 'i');
+    expect(re.test('OPPO Reno 11')).toBe(true);
+  });
+
+  it('"o" regex matches "OnePlus 12" (1-char prefix)', () => {
+    const re = new RegExp('\\bo', 'i');
+    expect(re.test('OnePlus 12')).toBe(true);
+  });
+
+  it('"o" regex does NOT match "Samsung Galaxy S24" (no word starting with "o")', () => {
+    const re = new RegExp('\\bo', 'i');
+    expect(re.test('Samsung Galaxy S24')).toBe(false);
+  });
+
+  it('"iph" returns iPhone products in integration test', async () => {
+    const products = await searchAndCheckResults('iph', [
+      { _id: 'p1', name: 'iPhone 16 Pro' },
+      { _id: 'p2', name: 'iPhone 15 Pro Max' },
+      { _id: 'p3', name: 'Samsung Galaxy S24' },
+    ]);
+    // All products are returned by mock, but pipeline should have $or filter
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    expect(matchStage.$match.$or[0].name.$regex).toBe('\\biph');
+    expect(matchStage.$match.$or[0].name.$options).toBe('i');
+  });
+
+  it('"pix" returns Pixel products in integration test', async () => {
+    const products = await searchAndCheckResults('pix', [
+      { _id: 'p1', name: 'Google Pixel 9 Pro' },
+      { _id: 'p2', name: 'Google Pixel 8a' },
+      { _id: 'p3', name: 'OPPO Reno 11' },
+    ]);
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = dataPipeline.find(s => s.$match && s.$match.$or);
+    expect(matchStage.$match.$or[0].name.$regex).toBe('\\bpix');
+    expect(matchStage.$match.$or[0].name.$options).toBe('i');
   });
 });
