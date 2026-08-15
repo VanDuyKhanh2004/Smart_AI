@@ -12,6 +12,61 @@ const asyncHandler = require("../utils/asyncHandler");
 const { AppError, BadRequestError, NotFoundError } = require("../utils/errors");
 
 /**
+ * Normalize a user search query for consistent text matching.
+ * - Trims leading/trailing whitespace
+ * - Collapses repeated internal whitespace
+ * - Lowercases for case-insensitive matching
+ *
+ * Does NOT strip punctuation or hyphens that may be part of real model names
+ * (e.g., "Galaxy S24-Ultra" or "iPhone 15 Pro Max").
+ */
+function normalizeSearchQuery(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  return raw.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Common product-suffix tokens that appear across many unrelated products.
+ * When a multi-token search has only these generic tokens matching a product
+ * name, that product is too weakly related and should be filtered out.
+ */
+const GENERIC_SEARCH_TOKENS = new Set([
+  "pro",
+  "max",
+  "plus",
+  "ultra",
+  "lite",
+  "mini",
+  "se",
+  "note",
+  "air",
+  "s",
+  "t",
+  "r",
+  "x",
+]);
+
+/**
+ * Returns true if the product name contains at least one non-generic search
+ * token. Single-token searches always pass (the token itself is specific
+ * enough to have been the user's intent). Empty/whitespace-only searches pass.
+ */
+function hasNonGenericTokenMatch(productName, searchTokens) {
+  if (!searchTokens || searchTokens.length === 0) return true;
+  if (searchTokens.length === 1) return true;
+  const name = productName.toLowerCase();
+  return searchTokens.some((t) => !GENERIC_SEARCH_TOKENS.has(t) && name.includes(t));
+}
+
+/**
+ * Escape all regex metacharacters in a user-supplied string so it can be
+ * safely embedded in a RegExp constructor.
+ */
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * Multipart text fields arrive as strings. Coerce the known product fields to
  * their JSON types only when a file upload is present; JSON bodies pass through
  * untouched so the existing API contract is preserved.
@@ -184,11 +239,14 @@ const getAllProducts = asyncHandler(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
 
+  // Normalize search query for consistent matching and caching
+  const normalizedSearch = normalizeSearchQuery(req.query.search);
+
   const cacheParams = {
     page,
     limit,
     brand: req.query.brand || null,
-    search: req.query.search || null,
+    search: normalizedSearch || null,
     minPrice: req.query.minPrice || null,
     maxPrice: req.query.maxPrice || null,
     sortBy: req.query.sortBy || null,
@@ -212,6 +270,7 @@ const getAllProducts = asyncHandler(async (req, res) => {
     : null;
 
   let filter = { isActive: true };
+  let sort = {};
 
   if (req.query.brand) {
     filter.brand = req.query.brand.toLowerCase();
@@ -235,12 +294,41 @@ const getAllProducts = asyncHandler(async (req, res) => {
     }
   }
 
-  if (req.query.search) {
-    filter.$text = { $search: req.query.search };
-  }
+  // Use normalized search for $text query
+  const useTextSearch = normalizedSearch.length > 0;
 
-  let sort = {};
-  if (req.query.sortBy) {
+  if (useTextSearch) {
+    // Always try prefix matching first.  Prefix regex handles any query length
+    // ("iph", "ipho", "iphone") and provides progressive incremental-search UX.
+    // We query with prefix first; if it yields results we are done.
+    // If prefix returns nothing, we fall back to $text for multi-word / generic
+    // queries that don't match a product-name prefix (e.g. "pro max", "14t pro").
+    const prefixPattern = "\\b" + escapeRegex(normalizedSearch);
+    const prefixFilter = {
+      $or: [
+        { name: { $regex: prefixPattern, $options: "i" } },
+        { brand: { $regex: prefixPattern, $options: "i" } },
+      ],
+    };
+
+    // Run a lightweight count to decide whether prefix matches exist.
+    const prefixCountPipeline = [
+      { $match: { ...filter, ...prefixFilter } },
+      { $count: "total" },
+    ];
+    const prefixCountResult = await Product.aggregate(prefixCountPipeline);
+    const prefixCount = prefixCountResult.length > 0 ? prefixCountResult[0].total : 0;
+
+    if (prefixCount > 0) {
+      // Strong prefix matches found — use them exclusively.
+      filter.$or = prefixFilter.$or;
+      sort = { name: 1, createdAt: -1 };
+    } else {
+      // No prefix matches — fall back to $text full-text search.
+      filter.$text = { $search: normalizedSearch };
+      sort = { score: { $meta: "textScore" } };
+    }
+  } else if (req.query.sortBy) {
     const sortField = req.query.sortBy;
     const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
     sort[sortField] = sortOrder;
@@ -291,6 +379,8 @@ const getAllProducts = asyncHandler(async (req, res) => {
         embedding_vector: 0,
         embeddingError: 0,
         reviews: 0,
+        // Include text relevance score when $text search is active (prefix uses alphabetical sort)
+        ...(filter.$text ? { score: { $meta: "textScore" } } : {}),
       },
     },
   ];
@@ -317,8 +407,25 @@ const getAllProducts = asyncHandler(async (req, res) => {
     Product.aggregate(countPipeline),
   ]);
 
+  // Post-query relevance filter: when falling back to $text search (no prefix
+  // matches), exclude products that only match on generic tokens (e.g. "Pro",
+  // "Max").  This prevents unrelated products from polluting multi-token queries
+  // like "Xiaomi 14T Pro" where "Pro" alone is not a meaningful match signal.
+  // Prefix search already constrains by name/brand prefix, so no filter needed.
+  const searchTokens = useTextSearch ? normalizedSearch.split(/\s+/) : [];
+  const usedPrefix = useTextSearch && !filter.$text;
+  const filteredProducts = !usedPrefix && searchTokens.length > 1
+    ? products.filter((p) => hasNonGenericTokenMatch(p.name, searchTokens))
+    : products;
+
+  const filteredCount = filteredProducts.length;
   const totalCount = countResult.length > 0 ? countResult[0].total : 0;
-  const totalPages = Math.ceil(totalCount / limit);
+  // For text-search fallback with generic-token filtering, use the actual
+  // filtered count since the MongoDB $count pipeline does not apply post-filters.
+  const displayTotal = (!usedPrefix && searchTokens.length > 1)
+    ? filteredCount
+    : totalCount;
+  const totalPages = Math.ceil(displayTotal / limit);
   const hasNextPage = page < totalPages;
   const hasPrevPage = page > 1;
 
@@ -326,11 +433,11 @@ const getAllProducts = asyncHandler(async (req, res) => {
     success: true,
     message: "Lấy danh sách sản phẩm thành công",
     data: {
-      products,
+      products: filteredProducts,
       pagination: {
         currentPage: page,
         totalPages,
-        totalCount,
+        totalCount: displayTotal,
         limit,
         hasNextPage,
         hasPrevPage,
@@ -677,4 +784,9 @@ module.exports = {
   getRecommendations,
   updateProduct,
   deleteProduct,
+  // exported for unit testing only
+  normalizeSearchQuery,
+  GENERIC_SEARCH_TOKENS,
+  hasNonGenericTokenMatch,
+  escapeRegex,
 };
