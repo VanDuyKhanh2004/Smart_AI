@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { ChatbotEvaluator } = require('../evaluation/chatbot/evaluator');
 const { calculateConstraintMetrics } = require('../evaluation/chatbot/metrics');
+const { parseArgs } = require('../evaluation/chatbot/runEvaluation');
 
 const RESULTS_DIR = path.join(__dirname, '..', 'evaluation-results');
 
@@ -54,10 +55,22 @@ describe('ChatbotEvaluator', () => {
   it('invalid threshold rejected', () => {
     const invalidValues = [-0.1, 1.5, 'abc', NaN];
     for (const val of invalidValues) {
-      if (typeof val === 'number' && (isNaN(val) || val < 0 || val > 1)) {
-        expect(true).toBe(true); // validation catches it
-      }
+      const opts = parseArgs(['--fail-under=' + val]);
+      expect(opts._exitEarly).toBe(true);
+      expect(process.exitCode).toBe(1);
     }
+  });
+
+  it('valid threshold accepted', () => {
+    const opts = parseArgs(['--fail-under=0.90']);
+    expect(opts._exitEarly).toBeUndefined();
+    expect(opts.failUnder).toBe(0.9);
+  });
+
+  it('unknown option rejected', () => {
+    const opts = parseArgs(['--nope']);
+    expect(opts._exitEarly).toBe(true);
+    expect(process.exitCode).toBe(1);
   });
 
   it('generated report does not contain sensitive data', async () => {

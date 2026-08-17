@@ -18,11 +18,11 @@ Examples:
   node evaluation/chatbot/runEvaluation.js --fail-under=0.85 --output=./my-report.json
 `;
 
-function parseArgs() {
-  const args = process.argv.slice(2);
+function parseArgs(args) {
+  const argv = Array.isArray(args) ? args : process.argv.slice(2);
   const opts = { failUnder: null, output: null };
 
-  for (const arg of args) {
+  for (const arg of argv) {
     if (arg === '--help') {
       console.log(USAGE);
       opts._exitEarly = true;
@@ -51,6 +51,8 @@ function parseArgs() {
   return opts;
 }
 
+const pct = v => (typeof v === 'number' && isFinite(v) ? `${(v * 100).toFixed(2)}%` : 'N/A');
+
 async function main() {
   const opts = parseArgs();
   if (opts._exitEarly) return;
@@ -76,30 +78,31 @@ async function main() {
   console.log(`  Pass rate:   ${(report.summary.overallPassRate * 100).toFixed(2)}%`);
 
   console.log('\n=== Constraint Metrics ===');
-  console.log(`  Case accuracy:            ${(report.constraints.caseAccuracy * 100).toFixed(2)}%`);
-  console.log(`  Product precision:        ${(report.constraints.productPrecision * 100).toFixed(2)}%`);
+  console.log(`  Case accuracy:            ${pct(report.constraints.caseAccuracy)}`);
+  console.log(`  Product precision:        ${pct(report.constraints.productPrecision)}`);
   console.log(`  Violating products:       ${report.constraints.violatingProductCount}`);
-  console.log(`  No-result honesty rate:   ${(report.constraints.noResultHonestyRate * 100).toFixed(2)}%`);
-  console.log(`  Parser norm. accuracy:    ${(report.parserNormalization.accuracy * 100).toFixed(2)}%`);
+  console.log(`  No-result honesty rate:   ${pct(report.constraints.noResultHonestyRate)}`);
+  console.log(`  Parser norm. accuracy:    ${pct(report.parserNormalization.accuracy)}`);
 
   console.log('\n=== Ranking Metrics ===');
-  console.log(`  Top-1 accuracy:           ${(report.ranking.top1Accuracy * 100).toFixed(2)}%`);
-  console.log(`  Mean reciprocal rank:     ${(report.ranking.meanReciprocalRank * 100).toFixed(2)}%`);
-  console.log(`  Pairwise accuracy:        ${(report.ranking.pairwiseRankingAccuracy * 100).toFixed(2)}%`);
-  console.log(`  Stable ranking rate:      ${(report.ranking.stableRankingRate * 100).toFixed(2)}%`);
+  console.log(`  Top-1 accuracy:           ${pct(report.ranking.top1Accuracy)}`);
+  console.log(`  Mean reciprocal rank:     ${pct(report.ranking.meanReciprocalRank)}`);
+  console.log(`  Pairwise accuracy:        ${pct(report.ranking.pairwiseRankingAccuracy)}`);
+  console.log(`  Stable ranking rate:      ${pct(report.ranking.stableRankingRate)}`);
 
   console.log('\n=== Context Metrics ===');
-  console.log(`  Retention accuracy:       ${(report.context.retentionAccuracy * 100).toFixed(2)}%`);
-  console.log(`  Replacement accuracy:     ${(report.context.replacementAccuracy * 100).toFixed(2)}%`);
-  console.log(`  Reset accuracy:           ${(report.context.resetAccuracy * 100).toFixed(2)}%`);
-  console.log(`  Isolation accuracy:       ${(report.context.isolationAccuracy * 100).toFixed(2)}%`);
-  console.log(`  Failure preserve:         ${(report.context.failedTurnPreservationAccuracy * 100).toFixed(2)}%`);
+  console.log(`  Retention accuracy:       ${pct(report.context.retentionAccuracy)}`);
+  console.log(`  Replacement accuracy:     ${pct(report.context.replacementAccuracy)}`);
+  console.log(`  Reset accuracy:           ${pct(report.context.resetAccuracy)}`);
+  console.log(`  Isolation accuracy:       ${pct(report.context.isolationAccuracy)}`);
+  console.log(`  Failure preserve:         ${pct(report.context.failedTurnPreservationAccuracy)}`);
 
   console.log('\n=== Fallback Metrics ===');
-  console.log(`  Valid response rate:      ${(report.fallback.validResponseRate * 100).toFixed(2)}%`);
-  console.log(`  Deterministic success:    ${(report.fallback.deterministicFallbackSuccessRate * 100).toFixed(2)}%`);
-  console.log(`  Context save on valid:    ${(report.fallback.contextSaveOnValidResponseRate * 100).toFixed(2)}%`);
-  console.log(`  Context not saved on fail: ${(report.fallback.contextNotSavedOnFailureRate * 100).toFixed(2)}%`);
+  console.log(`  Valid response rate:      ${pct(report.fallback.validResponseRate)}`);
+  console.log(`  Deterministic success:    ${pct(report.fallback.deterministicFallbackSuccessRate)}`);
+  console.log(`  Constraint safety:        ${pct(report.fallback.constraintSafetyUnderFallback)}`);
+  console.log(`  Context save on valid:    ${pct(report.fallback.contextSaveOnValidResponseRate)}`);
+  console.log(`  Context not saved on fail: ${pct(report.fallback.contextNotSavedOnFailureRate)}`);
 
   console.log(`\n=== Latency (${report.latency.label}) ===`);
   console.log(`  Average: ${report.latency.averageMs} ms`);
@@ -124,3 +127,5 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
+
+module.exports = { parseArgs };
