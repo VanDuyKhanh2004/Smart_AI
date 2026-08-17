@@ -91,8 +91,8 @@ describe("productRecommendationService — recommend()", () => {
           $vectorSearch: expect.objectContaining({
             index: "vector_index",
             path: "embedding_vector",
-            limit: 6,
-            numCandidates: 50,
+            limit: 15,
+            numCandidates: 150,
           }),
         }),
       ]),
@@ -205,7 +205,7 @@ describe("productRecommendationService — recommend()", () => {
     expect(Product.aggregate).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
-          $vectorSearch: expect.objectContaining({ limit: 6 }),
+          $vectorSearch: expect.objectContaining({ limit: 15 }),
         }),
       ]),
     );
@@ -230,10 +230,10 @@ describe("productRecommendationService — recommend()", () => {
 
     const pipeline = Product.aggregate.mock.calls[0][0];
     const vs = pipeline.find((s) => s.$vectorSearch);
-    // limit in vector search = safeLimit + 1 = 20 + 1 = 21
-    expect(vs.$vectorSearch.limit).toBe(21);
-    // numCandidates = max(20*10, 50) = 200
-    expect(vs.$vectorSearch.numCandidates).toBe(200);
+    // limit in vector search = W = min(max(20*3, 12), 30) = 30
+    expect(vs.$vectorSearch.limit).toBe(30);
+    // numCandidates = max(W*10, 50) = max(30*10, 50) = 300
+    expect(vs.$vectorSearch.numCandidates).toBe(300);
   });
 
   it("clamps limit to minimum of 1", async () => {
@@ -245,7 +245,9 @@ describe("productRecommendationService — recommend()", () => {
 
     const pipeline = Product.aggregate.mock.calls[0][0];
     const vs = pipeline.find((s) => s.$vectorSearch);
-    expect(vs.$vectorSearch.limit).toBe(2);
+    // K=1 -> W = min(max(3, 12), 30) = 12; numCandidates = max(120, 50) = 120
+    expect(vs.$vectorSearch.limit).toBe(12);
+    expect(vs.$vectorSearch.numCandidates).toBe(120);
   });
 
   it("clamps invalid numeric limit to default 5", async () => {
@@ -257,7 +259,8 @@ describe("productRecommendationService — recommend()", () => {
 
     const pipeline = Product.aggregate.mock.calls[0][0];
     const vs = pipeline.find((s) => s.$vectorSearch);
-    expect(vs.$vectorSearch.limit).toBe(6);
+    // NaN -> default limit 5 -> W = 15
+    expect(vs.$vectorSearch.limit).toBe(15);
   });
 
   /* ----------- fallback: no embedding ----------- */
@@ -649,7 +652,8 @@ describe("productRecommendationService — constraints", () => {
     const projectStage = pipeline.find((s) => s.$project);
     expect(projectStage.$project.score).toEqual({ $meta: "vectorSearchScore" });
     const vs = pipeline.find((s) => s.$vectorSearch);
-    expect(vs.$vectorSearch.numCandidates).toBe(50);
+    // K=5 -> numCandidates = max(15*10, 50) = 150
+    expect(vs.$vectorSearch.numCandidates).toBe(150);
   });
 
   it("brand-price fallback respects brand constraint (overrides source brand)", async () => {
@@ -777,6 +781,364 @@ describe("productRecommendationService — constraints", () => {
     expect(query.price.$lte).toBe(15000000);
     // priorities parsed but preserved for future ranking (not yet ranked on)
     expect(result.constraints.priorities).toEqual(["camera"]);
+  });
+});
+
+/* ============================================================
+   v2: stock constraint, preference ranking & diversity
+   ============================================================ */
+describe("productRecommendationService — v2: stock, ranking & diversity", () => {
+  let Product;
+  let recommend;
+
+  const validId = new mongoose.Types.ObjectId().toString();
+
+  const makeProduct = (overrides = {}) => ({
+    _id: validId,
+    name: "iPhone 15",
+    brand: "apple",
+    price: 20000000,
+    inStock: 10,
+    isActive: true,
+    embedding_vector: new Array(1536).fill(0.1),
+    ...overrides,
+  });
+
+  const sourceProduct = makeProduct();
+
+  const mockFindById = (result) => ({
+    lean: jest.fn().mockResolvedValue(result),
+  });
+
+  const mockFindChain = (result) => ({
+    sort: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(result),
+  });
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.doMock("../models/Product", () => ({
+      findById: jest.fn(),
+      aggregate: jest.fn(),
+      find: jest.fn(),
+    }));
+    Product = require("../models/Product");
+    recommend = require("../services/productRecommendationService").recommend;
+  });
+
+  /* ----------- hard stock constraint ----------- */
+
+  it("adds inStock > 0 to the vector-path $match", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([]);
+    Product.find.mockReturnValue(mockFindChain([]));
+
+    await recommend(validId, 5);
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.inStock).toEqual({ $gt: 0 });
+  });
+
+  it("does not add inStock to $vectorSearch.filter", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([]);
+    Product.find.mockReturnValue(mockFindChain([]));
+
+    await recommend(validId, 5, { brand: "samsung" });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.inStock).toBeUndefined();
+  });
+
+  it("excludes out-of-stock products from results", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "in-stock",
+        name: "In Stock Phone",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        score: 0.9,
+      },
+      {
+        _id: "out-of-stock",
+        name: "Out of Stock Phone",
+        brand: "samsung",
+        price: 20000000,
+        inStock: 0,
+        isActive: true,
+        score: 0.8,
+      },
+    ]);
+
+    const result = await recommend(validId, 5);
+
+    expect(result.products.map((p) => p._id)).toEqual(["in-stock"]);
+  });
+
+  it("brand-price fallback requires inStock > 0", async () => {
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    Product.find.mockReturnValue(mockFindChain([]));
+
+    await recommend(validId, 5);
+
+    const query = Product.find.mock.calls[0][0];
+    expect(query.inStock).toEqual({ $gt: 0 });
+  });
+
+  it("latest fallback requires inStock > 0", async () => {
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    const emptyMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    };
+    Product.find.mockReturnValueOnce(emptyMock).mockReturnValueOnce(emptyMock);
+
+    await recommend(validId, 5);
+
+    const latestQuery = Product.find.mock.calls[1][0];
+    expect(latestQuery.inStock).toEqual({ $gt: 0 });
+  });
+
+  /* ----------- preference-aware ranking ----------- */
+
+  it('priorities ["camera"] changes the ranking order', async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "p-cam-weak",
+        name: "Camera Weak",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        specs: { camera: { rear: { primary: "12 MP" }, front: "12 MP", features: [] } },
+        score: 0.95,
+      },
+      {
+        _id: "p-cam-strong",
+        name: "Camera Strong",
+        brand: "samsung",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        specs: {
+          camera: {
+            rear: { primary: "200 MP", secondary: "12 MP", tertiary: "12 MP" },
+            front: "50 MP",
+            features: ["OIS", "Night mode", "4K video"],
+          },
+        },
+        score: 0.8,
+      },
+    ]);
+
+    const result = await recommend(validId, 5, { priorities: ["camera"] });
+
+    expect(result.products[0]._id).toBe("p-cam-strong");
+    expect(result.products[1]._id).toBe("p-cam-weak");
+  });
+
+  it('priorities ["battery"] changes the ranking order', async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "p-bat-small",
+        name: "Battery Small",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        specs: { battery: { capacity: "3000 mAh", charging: { wired: "15W" } } },
+        score: 0.95,
+      },
+      {
+        _id: "p-bat-big",
+        name: "Battery Big",
+        brand: "samsung",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        specs: {
+          battery: { capacity: "6000 mAh", charging: { wired: "120W", wireless: "50W" } },
+        },
+        score: 0.8,
+      },
+    ]);
+
+    const result = await recommend(validId, 5, { priorities: ["battery"] });
+
+    expect(result.products[0]._id).toBe("p-bat-big");
+    expect(result.products[1]._id).toBe("p-bat-small");
+  });
+
+  it('priorities ["gaming"] maps to performance ranking', async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "p-low-perf",
+        name: "Low Perf",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        specs: { memory: { ram: "4 GB", storage: "64 GB" } },
+        score: 0.95,
+      },
+      {
+        _id: "p-high-perf",
+        name: "High Perf",
+        brand: "samsung",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        specs: {
+          memory: { ram: "12 GB", storage: "512 GB" },
+          processor: { chipset: "Snapdragon 8 Gen 3", cpu: "8-core", gpu: "Adreno 750" },
+        },
+        score: 0.8,
+      },
+    ]);
+
+    const result = await recommend(validId, 5, { priorities: ["gaming"] });
+
+    expect(result.products[0]._id).toBe("p-high-perf");
+    expect(result.products[1]._id).toBe("p-low-perf");
+  });
+
+  it("no priorities preserves the existing ranking order", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "p1",
+        name: "Alpha",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        score: 0.9,
+      },
+      {
+        _id: "p2",
+        name: "Beta",
+        brand: "samsung",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        score: 0.7,
+      },
+    ]);
+
+    const result = await recommend(validId, 5);
+
+    expect(result.products.map((p) => p._id)).toEqual(["p1", "p2"]);
+  });
+
+  /* ----------- diversity / deduplication ----------- */
+
+  it("removes duplicate product names", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "p1",
+        name: "iPhone 15",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        score: 0.9,
+      },
+      {
+        _id: "p2",
+        name: "iPhone 15",
+        brand: "apple",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        score: 0.8,
+      },
+      {
+        _id: "p3",
+        name: "Galaxy S24",
+        brand: "samsung",
+        price: 20000000,
+        inStock: 5,
+        isActive: true,
+        score: 0.7,
+      },
+    ]);
+
+    const result = await recommend(validId, 5);
+
+    expect(result.products.map((p) => p._id)).toEqual(["p1", "p3"]);
+  });
+
+  it("caps products per brand at Math.ceil(K / 2)", async () => {
+    const appleProducts = [1, 2, 3, 4].map((n) => ({
+      _id: `apple-${n}`,
+      name: `Apple Phone ${n}`,
+      brand: "apple",
+      price: 20000000,
+      inStock: 5,
+      isActive: true,
+      score: 1 - n / 100,
+    }));
+    const samsungProducts = [1, 2].map((n) => ({
+      _id: `samsung-${n}`,
+      name: `Samsung Phone ${n}`,
+      brand: "samsung",
+      price: 20000000,
+      inStock: 5,
+      isActive: true,
+      score: 0.5 - n / 100,
+    }));
+
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue([...appleProducts, ...samsungProducts]);
+
+    const result = await recommend(validId, 5);
+
+    const appleCount = result.products.filter((p) => p.brand === "apple").length;
+    const samsungCount = result.products.filter((p) => p.brand === "samsung").length;
+    expect(appleCount).toBe(3); // Math.ceil(5 / 2)
+    expect(samsungCount).toBe(2);
+    expect(result.products).toHaveLength(5);
+  });
+
+  it("returns at most K products", async () => {
+    const products = Array.from({ length: 10 }, (_, i) => ({
+      _id: `p${i}`,
+      name: `Product ${i}`,
+      brand: `brand-${i % 3}`,
+      price: 20000000,
+      inStock: 5,
+      isActive: true,
+      score: 1 - i / 100,
+    }));
+
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(products);
+
+    const resultK5 = await recommend(validId, 5);
+    expect(resultK5.products.length).toBe(5);
+
+    // K=20 -> W=30; only 10 candidates available -> all 10 returned (<= 20)
+    const resultK20 = await recommend(validId, 20);
+    expect(resultK20.products.length).toBe(10);
   });
 });
 

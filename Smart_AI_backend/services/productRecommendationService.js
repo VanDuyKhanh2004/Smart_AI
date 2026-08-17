@@ -1,6 +1,7 @@
 const Product = require("../models/Product");
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
+const { rankProducts } = require("../utils/productRanking");
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 20;
@@ -9,6 +10,103 @@ const sanitizeLimit = (limit) => {
   const n = Number(limit);
   if (isNaN(n) || !isFinite(n)) return DEFAULT_LIMIT;
   return Math.min(Math.max(Math.floor(n), 1), MAX_LIMIT);
+};
+
+/**
+ * Widened candidate window for vector retrieval.
+ *
+ * W is used as the $vectorSearch limit so post-retrieval hard filtering,
+ * preference ranking and diversity/deduplication still have headroom to
+ * produce K final results. numCandidates follows W so Atlas examines
+ * enough candidates to fill the window.
+ */
+const candidateWindow = (K) => {
+  const W = Math.min(Math.max(3 * K, 12), 30);
+  return { W, numCandidates: Math.max(W * 10, 50) };
+};
+
+/**
+ * Map parsed priority keywords onto the rankProducts preference keys.
+ *
+ *   camera     -> camera
+ *   battery    -> battery
+ *   performance -> performance
+ *   gaming     -> performance  (no separate gaming ranking dimension)
+ *
+ * Returns null when no priority maps to a known preference so callers can
+ * skip ranking entirely.
+ */
+const mapPrioritiesToPreferences = (priorities) => {
+  if (!Array.isArray(priorities) || priorities.length === 0) return null;
+  const preferences = {
+    camera: false,
+    battery: false,
+    performance: false,
+    compact: false,
+  };
+  for (const priority of priorities) {
+    const key = String(priority).toLowerCase();
+    if (key === "camera") preferences.camera = true;
+    else if (key === "battery") preferences.battery = true;
+    else if (key === "performance" || key === "gaming") {
+      preferences.performance = true;
+    }
+  }
+  const hasAny =
+    preferences.camera ||
+    preferences.battery ||
+    preferences.performance ||
+    preferences.compact;
+  return hasAny ? preferences : null;
+};
+
+/**
+ * Enforce diversity on a ranked candidate list.
+ *
+ * 1. Deduplicate by normalized product name (name.toLowerCase().trim()).
+ * 2. Cap the number of products per brand at Math.ceil(K / 2).
+ * 3. Return at most K products.
+ *
+ * Preserves the incoming ranking order.
+ */
+const applyDiversity = (products, K) => {
+  const maxPerBrand = Math.ceil(K / 2);
+  const seenNames = new Set();
+  const brandCounts = new Map();
+  const diverse = [];
+
+  for (const product of products) {
+    if (!product) continue;
+
+    const nameKey = String(product.name || "").toLowerCase().trim();
+    if (seenNames.has(nameKey)) continue;
+    seenNames.add(nameKey);
+
+    const brand = product.brand;
+    const count = brandCounts.get(brand) || 0;
+    if (count >= maxPerBrand) continue;
+    brandCounts.set(brand, count + 1);
+
+    diverse.push(product);
+    if (diverse.length >= K) break;
+  }
+
+  return diverse;
+};
+
+/**
+ * Finalize a candidate list before it is returned to the client:
+ * drop out-of-stock items (defense-in-depth on top of the Mongo $match),
+ * apply preference ranking when priorities exist, then enforce diversity
+ * and slice to K. Preserves the existing order when no priorities exist.
+ */
+const finalizeRecommendations = (products, safeLimit, priorities) => {
+  const available = products.filter((p) => p && p.inStock > 0);
+  const preferences = mapPrioritiesToPreferences(priorities);
+  const ranked = preferences
+    ? rankProducts(available, preferences).ranked
+    : available;
+  return applyDiversity(ranked, safeLimit);
 };
 
 const hasValidEmbedding = (product) => {
@@ -89,14 +187,18 @@ const recommendByVector = async (sourceProduct, safeLimit, constraints) => {
   // Hard constraints (isActive, brand, price range) are applied by MongoDB
   // Vector Search itself via $vectorSearch.filter, pre-filtering candidates
   // during retrieval instead of post-filtering retrieved results.
+  // NOTE: inStock is intentionally NOT added to $vectorSearch.filter because
+  // the Atlas vector_index may not declare inStock as a filter field; it is
+  // enforced via the regular $match stage below instead.
   const constraintFilter = buildConstraintMatch(constraints);
+  const { W, numCandidates } = candidateWindow(safeLimit);
 
   const vectorSearch = {
     index: "vector_index",
     path: "embedding_vector",
     queryVector: sourceProduct.embedding_vector,
-    numCandidates: Math.max(safeLimit * 10, 50),
-    limit: safeLimit + 1,
+    numCandidates,
+    limit: W,
   };
   if (Object.keys(constraintFilter).length > 0) {
     vectorSearch.filter = constraintFilter;
@@ -108,6 +210,7 @@ const recommendByVector = async (sourceProduct, safeLimit, constraints) => {
       $match: {
         _id: { $ne: sourceProduct._id },
         isActive: true,
+        inStock: { $gt: 0 },
       },
     },
     {
@@ -118,7 +221,7 @@ const recommendByVector = async (sourceProduct, safeLimit, constraints) => {
       },
     },
     { $sort: { inStock: -1, score: -1 } },
-    { $limit: safeLimit },
+    { $limit: W },
   ];
 
   const products = await Product.aggregate(pipeline);
@@ -147,6 +250,7 @@ const recommendByBrandPrice = async (sourceProduct, safeLimit, constraints) => {
     brand,
     _id: { $ne: sourceProduct._id },
     isActive: true,
+    inStock: { $gt: 0 },
     price: { $gte: gte, $lte: lte },
   })
     .sort({ inStock: -1, createdAt: -1 })
@@ -161,6 +265,7 @@ const recommendLatest = async (sourceProduct, safeLimit, constraints) => {
   return Product.find({
     _id: { $ne: sourceProduct._id },
     isActive: true,
+    inStock: { $gt: 0 },
     ...constraintMatch,
   })
     .sort({ inStock: -1, createdAt: -1 })
@@ -172,6 +277,7 @@ const recommendLatest = async (sourceProduct, safeLimit, constraints) => {
 const recommend = async (productId, limit = DEFAULT_LIMIT, constraints = null) => {
   const safeLimit = sanitizeLimit(limit);
   const sanitizedConstraints = sanitizeConstraints(constraints);
+  const priorities = sanitizedConstraints ? sanitizedConstraints.priorities : [];
 
   const sourceResult = await findSourceProduct(productId);
   if (sourceResult.error) {
@@ -193,7 +299,7 @@ const recommend = async (productId, limit = DEFAULT_LIMIT, constraints = null) =
       if (products.length > 0) {
         return {
           sourceProduct: { _id: sourceProduct._id, name: sourceProduct.name },
-          products,
+          products: finalizeRecommendations(products, safeLimit, priorities),
           recommendationMode: "vector",
           constraints: sanitizedConstraints,
         };
@@ -213,7 +319,7 @@ const recommend = async (productId, limit = DEFAULT_LIMIT, constraints = null) =
   if (brandPriceProducts.length > 0) {
     return {
       sourceProduct: { _id: sourceProduct._id, name: sourceProduct.name },
-      products: brandPriceProducts,
+      products: finalizeRecommendations(brandPriceProducts, safeLimit, priorities),
       recommendationMode: "brand_price",
       constraints: sanitizedConstraints,
     };
@@ -224,7 +330,7 @@ const recommend = async (productId, limit = DEFAULT_LIMIT, constraints = null) =
 
   return {
     sourceProduct: { _id: sourceProduct._id, name: sourceProduct.name },
-    products: latestProducts,
+    products: finalizeRecommendations(latestProducts, safeLimit, priorities),
     recommendationMode: "fallback",
     constraints: sanitizedConstraints,
   };
