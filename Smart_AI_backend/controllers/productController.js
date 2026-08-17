@@ -3,6 +3,7 @@ const Review = require("../models/Review");
 const cache = require("../services/cacheService");
 const { search: semanticSearch } = require("../services/productSearchService");
 const { recommend: productRecommend } = require("../services/productRecommendationService");
+const { parseRecommendationConstraints } = require("../utils/recommendationConstraintParser");
 const { buildEmbeddingContent, computeContentHash } = require("../utils/embeddingContent");
 const { normalizeProductSpecs } = require("../utils/productSpecs");
 const { enqueueProductEmbedding } = require("../services/embeddingQueueService");
@@ -566,12 +567,26 @@ const getProductById = asyncHandler(async (req, res) => {
 
 /**
  * Product Recommendations
+ *
+ * Optional `query` query-string param: a Vietnamese natural-language phrase
+ * (e.g. "Samsung dưới 15 triệu") that is parsed into hard brand/budget
+ * constraints by recommendationConstraintParser and enforced by the
+ * recommendation service in every path (vector, brand-price, latest).
  */
 const getRecommendations = asyncHandler(async (req, res) => {
   const productId = req.params.id;
   const limit = req.query.limit;
 
-  const result = await productRecommend(productId, limit);
+  const rawQuery = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+
+  let result;
+  if (rawQuery) {
+    // Natural-language query -> deterministic brand/budget constraints.
+    const constraints = parseRecommendationConstraints(rawQuery);
+    result = await productRecommend(productId, limit, constraints);
+  } else {
+    result = await productRecommend(productId, limit);
+  }
 
   if (result.error === "INVALID_ID") {
     throw new BadRequestError("ID sản phẩm không hợp lệ");

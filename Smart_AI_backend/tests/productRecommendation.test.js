@@ -416,6 +416,271 @@ describe("productRecommendationService — recommend()", () => {
 });
 
 /* ============================================================
+   Constraint tests
+   ============================================================ */
+describe("productRecommendationService — constraints", () => {
+  let Product;
+  let recommend;
+
+  const validId = new mongoose.Types.ObjectId().toString();
+  const anotherId = new mongoose.Types.ObjectId().toString();
+
+  const makeProduct = (overrides = {}) => ({
+    _id: validId,
+    name: "iPhone 15",
+    brand: "apple",
+    price: 20000000,
+    inStock: 10,
+    isActive: true,
+    embedding_vector: new Array(1536).fill(0.1),
+    ...overrides,
+  });
+
+  const sourceProduct = makeProduct();
+
+  const mockProducts = [
+    { _id: anotherId, name: "iPhone 14", brand: "apple", price: 16000000, inStock: 5, isActive: true },
+    { _id: "p3", name: "iPhone 15 Pro", brand: "apple", price: 25000000, inStock: 3, isActive: true },
+  ];
+
+  const mockFindById = (result) => ({
+    lean: jest.fn().mockResolvedValue(result),
+  });
+
+  const mockFindChain = (result) => ({
+    sort: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(result),
+  });
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.doMock("../models/Product", () => ({
+      findById: jest.fn(),
+      aggregate: jest.fn(),
+      find: jest.fn(),
+    }));
+    Product = require("../models/Product");
+    recommend = require("../services/productRecommendationService").recommend;
+  });
+
+  it("no constraints -> existing behavior preserved", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+    );
+
+    const result = await recommend(validId, 5);
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.brand).toBeUndefined();
+    expect(matchStage.$match.price).toBeUndefined();
+    expect(result.recommendationMode).toBe("vector");
+    expect(result.constraints).toBeNull();
+  });
+
+  it("brand constraint filters vector candidates", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+    );
+
+    const result = await recommend(validId, 5, {
+      brand: "samsung",
+      budgetMin: null,
+      budgetMax: null,
+      priorities: [],
+    });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.brand).toBe("samsung");
+    expect(result.constraints).toEqual({
+      brand: "samsung",
+      budgetMin: null,
+      budgetMax: null,
+      priorities: [],
+    });
+  });
+
+  it("budgetMin constraint filters vector candidates", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+    );
+
+    await recommend(validId, 5, { budgetMin: 15000000 });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.price.$gte).toBe(15000000);
+  });
+
+  it("budgetMax constraint filters vector candidates", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+    );
+
+    await recommend(validId, 5, { budgetMax: 25000000 });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.price.$lte).toBe(25000000);
+  });
+
+  it("budget range (min + max) filters vector candidates", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+    );
+
+    await recommend(validId, 5, { budgetMin: 10000000, budgetMax: 20000000 });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.price).toEqual({ $gte: 10000000, $lte: 20000000 });
+  });
+
+  it("brand + budget constraints both applied in vector path", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+    );
+
+    await recommend(validId, 5, { brand: "apple", budgetMax: 20000000 });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const matchStage = pipeline.find((s) => s.$match);
+    expect(matchStage.$match.brand).toBe("apple");
+    expect(matchStage.$match.price.$lte).toBe(20000000);
+  });
+
+  it("brand-price fallback respects brand constraint (overrides source brand)", async () => {
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    const findMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(mockProducts),
+    };
+    Product.find.mockReturnValue(findMock);
+
+    await recommend(validId, 5, { brand: "samsung" });
+
+    const query = Product.find.mock.calls[0][0];
+    expect(query.brand).toBe("samsung");
+  });
+
+  it("brand-price fallback respects budget constraint (intersects price band)", async () => {
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    const findMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(mockProducts),
+    };
+    Product.find.mockReturnValue(findMock);
+
+    // source price 20M -> band [16M, 24M]; budgetMax 18M -> band [16M, 18M]
+    await recommend(validId, 5, { budgetMax: 18000000 });
+
+    const query = Product.find.mock.calls[0][0];
+    expect(query.price.$gte).toBe(16000000);
+    expect(query.price.$lte).toBe(18000000);
+  });
+
+  it("latest fallback respects brand + budget constraints", async () => {
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    const emptyMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    };
+    const latestMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(mockProducts),
+    };
+    Product.find
+      .mockReturnValueOnce(emptyMock)
+      .mockReturnValueOnce(latestMock);
+
+    const result = await recommend(validId, 5, { brand: "samsung", budgetMax: 15000000 });
+
+    // brand-price band [16M, 24M] intersected with <= 15M is empty, so the
+    // brand-price path returns [] without calling Product.find; the latest
+    // fallback is therefore the first (and only) find call.
+    const latestQuery = Product.find.mock.calls[0][0];
+    expect(latestQuery.brand).toBe("samsung");
+    expect(latestQuery.price.$lte).toBe(15000000);
+    expect(result.recommendationMode).toBe("fallback");
+  });
+
+  it("empty constrained candidates -> empty products (no silent constraint drop)", async () => {
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    const emptyMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    };
+    Product.find
+      .mockReturnValueOnce(emptyMock)
+      .mockReturnValueOnce(emptyMock);
+
+    const result = await recommend(validId, 5, { brand: "nokia", budgetMax: 1000000 });
+
+    expect(result.products).toEqual([]);
+    expect(result.recommendationMode).toBe("fallback");
+    // the constraint must still be present in the final query
+    expect(Product.find.mock.calls[0][0].brand).toBe("nokia");
+    expect(Product.find.mock.calls[0][0].price.$lte).toBe(1000000);
+  });
+
+  it("parser output is correctly consumed as constraints", async () => {
+    const { parseRecommendationConstraints } = require("../utils/recommendationConstraintParser");
+    const constraints = parseRecommendationConstraints("Samsung dưới 15 triệu chụp ảnh đẹp");
+
+    const noEmbed = { ...sourceProduct };
+    delete noEmbed.embedding_vector;
+    Product.findById.mockReturnValue(mockFindById(noEmbed));
+
+    const findMock = {
+      sort: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(mockProducts),
+    };
+    Product.find.mockReturnValue(findMock);
+
+    const result = await recommend(validId, 5, constraints);
+
+    const query = Product.find.mock.calls[0][0];
+    expect(query.brand).toBe("samsung");
+    expect(query.price.$lte).toBe(15000000);
+    // priorities parsed but preserved for future ranking (not yet ranked on)
+    expect(result.constraints.priorities).toEqual(["camera"]);
+  });
+});
+
+/* ============================================================
    Controller tests
    ============================================================ */
 describe("productController — getRecommendations()", () => {
@@ -486,6 +751,49 @@ describe("productController — getRecommendations()", () => {
         recommendationMode: "vector",
       },
     });
+  });
+
+  it("passes parsed constraints when query param is provided", async () => {
+    mockRecommend.mockResolvedValue({
+      sourceProduct: { _id: validId, name: "iPhone 15" },
+      products: [],
+      recommendationMode: "fallback",
+    });
+
+    const req = mockReq({
+      params: { id: validId },
+      query: { limit: "5", query: "Samsung dưới 15 triệu" },
+    });
+    const res = mockRes();
+
+    await getRecommendations(req, res);
+
+    expect(mockRecommend).toHaveBeenCalledWith(
+      validId,
+      "5",
+      expect.objectContaining({
+        brand: "samsung",
+        budgetMax: 15000000,
+      }),
+    );
+  });
+
+  it("does not pass constraints when no query param is provided", async () => {
+    mockRecommend.mockResolvedValue({
+      sourceProduct: { _id: validId, name: "iPhone 15" },
+      products: [],
+      recommendationMode: "fallback",
+    });
+
+    const req = mockReq({
+      params: { id: validId },
+      query: { limit: "5" },
+    });
+    const res = mockRes();
+
+    await getRecommendations(req, res);
+
+    expect(mockRecommend).toHaveBeenCalledWith(validId, "5");
   });
 
   it("returns 400 for invalid product ID", async () => {
