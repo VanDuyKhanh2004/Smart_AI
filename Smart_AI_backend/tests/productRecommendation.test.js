@@ -24,8 +24,22 @@ describe("productRecommendationService — recommend()", () => {
   const sourceProduct = makeProduct();
 
   const mockProducts = [
-    { _id: anotherId, name: "iPhone 14", brand: "apple", price: 16000000, inStock: 5, isActive: true },
-    { _id: "p3", name: "iPhone 15 Pro", brand: "apple", price: 25000000, inStock: 3, isActive: true },
+    {
+      _id: anotherId,
+      name: "iPhone 14",
+      brand: "apple",
+      price: 16000000,
+      inStock: 5,
+      isActive: true,
+    },
+    {
+      _id: "p3",
+      name: "iPhone 15 Pro",
+      brand: "apple",
+      price: 25000000,
+      inStock: 3,
+      isActive: true,
+    },
   ];
 
   const mockFindById = (result) => ({
@@ -66,7 +80,7 @@ describe("productRecommendationService — recommend()", () => {
   it("returns vector recommendations when source has valid embedding", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     const result = await recommend(validId, 5);
@@ -81,7 +95,7 @@ describe("productRecommendationService — recommend()", () => {
             numCandidates: 50,
           }),
         }),
-      ])
+      ]),
     );
     expect(result.recommendationMode).toBe("vector");
     expect(result.sourceProduct).toEqual({
@@ -94,7 +108,7 @@ describe("productRecommendationService — recommend()", () => {
   it("excludes the source product from results", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     const result = await recommend(validId, 5);
@@ -108,7 +122,7 @@ describe("productRecommendationService — recommend()", () => {
   it("excludes embedding_vector from response", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     const result = await recommend(validId, 5);
@@ -125,7 +139,7 @@ describe("productRecommendationService — recommend()", () => {
   it("includes vectorSearchScore as score", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.95 }))
+      mockProducts.map((p) => ({ ...p, score: 0.95 })),
     );
 
     const result = await recommend(validId, 5);
@@ -138,7 +152,7 @@ describe("productRecommendationService — recommend()", () => {
   it("filters by isActive in vector search", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     await recommend(validId, 5);
@@ -148,17 +162,36 @@ describe("productRecommendationService — recommend()", () => {
     expect(matchStage.$match.isActive).toBe(true);
   });
 
-  it("prefers in-stock products by sort order", async () => {
+  it("prioritizes vector similarity score before stock availability", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
-    Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
-    );
 
-    await recommend(validId, 5);
+    Product.aggregate.mockResolvedValue([
+      {
+        _id: "high-similarity",
+        name: "Highly Similar Product",
+        score: 0.95,
+        inStock: 2,
+      },
+      {
+        _id: "high-stock",
+        name: "High Stock Product",
+        score: 0.8,
+        inStock: 100,
+      },
+    ]);
+
+    const result = await recommend(validId, 5);
 
     const pipeline = Product.aggregate.mock.calls[0][0];
     const sortStage = pipeline.find((s) => s.$sort);
-    expect(sortStage.$sort.inStock).toBe(-1);
+
+    expect(sortStage.$sort).toEqual({
+      score: -1,
+      inStock: -1,
+    });
+
+    expect(result.products[0]._id).toBe("high-similarity");
+    expect(result.products[1]._id).toBe("high-stock");
   });
 
   /* ----------- limit handling ----------- */
@@ -174,14 +207,14 @@ describe("productRecommendationService — recommend()", () => {
         expect.objectContaining({
           $vectorSearch: expect.objectContaining({ limit: 6 }),
         }),
-      ])
+      ]),
     );
   });
 
   it("applies a limit of 5 when called with valid limit", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     const result = await recommend(validId, 5);
@@ -342,9 +375,7 @@ describe("productRecommendationService — recommend()", () => {
       limit: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue(mockProducts),
     };
-    Product.find
-      .mockReturnValueOnce(emptyMock)
-      .mockReturnValueOnce(latestMock);
+    Product.find.mockReturnValueOnce(emptyMock).mockReturnValueOnce(latestMock);
 
     const result = await recommend(validId, 5);
 
@@ -369,9 +400,7 @@ describe("productRecommendationService — recommend()", () => {
       limit: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue(mockProducts),
     };
-    Product.find
-      .mockReturnValueOnce(emptyMock)
-      .mockReturnValueOnce(latestMock);
+    Product.find.mockReturnValueOnce(emptyMock).mockReturnValueOnce(latestMock);
 
     await recommend(validId, 5);
 
@@ -439,8 +468,22 @@ describe("productRecommendationService — constraints", () => {
   const sourceProduct = makeProduct();
 
   const mockProducts = [
-    { _id: anotherId, name: "iPhone 14", brand: "apple", price: 16000000, inStock: 5, isActive: true },
-    { _id: "p3", name: "iPhone 15 Pro", brand: "apple", price: 25000000, inStock: 3, isActive: true },
+    {
+      _id: anotherId,
+      name: "iPhone 14",
+      brand: "apple",
+      price: 16000000,
+      inStock: 5,
+      isActive: true,
+    },
+    {
+      _id: "p3",
+      name: "iPhone 15 Pro",
+      brand: "apple",
+      price: 25000000,
+      inStock: 3,
+      isActive: true,
+    },
   ];
 
   const mockFindById = (result) => ({
@@ -465,15 +508,17 @@ describe("productRecommendationService — constraints", () => {
     recommend = require("../services/productRecommendationService").recommend;
   });
 
-  it("no constraints -> existing behavior preserved", async () => {
+  it("no constraints -> no filter added, existing behavior preserved", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     const result = await recommend(validId, 5);
 
     const pipeline = Product.aggregate.mock.calls[0][0];
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter).toBeUndefined();
     const matchStage = pipeline.find((s) => s.$match);
     expect(matchStage.$match.brand).toBeUndefined();
     expect(matchStage.$match.price).toBeUndefined();
@@ -481,10 +526,10 @@ describe("productRecommendationService — constraints", () => {
     expect(result.constraints).toBeNull();
   });
 
-  it("brand constraint filters vector candidates", async () => {
+  it("brand constraint pre-filters vector candidates", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     const result = await recommend(validId, 5, {
@@ -495,8 +540,11 @@ describe("productRecommendationService — constraints", () => {
     });
 
     const pipeline = Product.aggregate.mock.calls[0][0];
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.brand).toBe("samsung");
+    // hard constraints are applied by the vector pre-filter, not post-$match
     const matchStage = pipeline.find((s) => s.$match);
-    expect(matchStage.$match.brand).toBe("samsung");
+    expect(matchStage.$match.brand).toBeUndefined();
     expect(result.constraints).toEqual({
       brand: "samsung",
       budgetMin: null,
@@ -505,57 +553,103 @@ describe("productRecommendationService — constraints", () => {
     });
   });
 
-  it("budgetMin constraint filters vector candidates", async () => {
+  it("budgetMin constraint pre-filters vector candidates", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     await recommend(validId, 5, { budgetMin: 15000000 });
 
     const pipeline = Product.aggregate.mock.calls[0][0];
-    const matchStage = pipeline.find((s) => s.$match);
-    expect(matchStage.$match.price.$gte).toBe(15000000);
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.price.$gte).toBe(15000000);
   });
 
-  it("budgetMax constraint filters vector candidates", async () => {
+  it("budgetMax constraint pre-filters vector candidates", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     await recommend(validId, 5, { budgetMax: 25000000 });
 
     const pipeline = Product.aggregate.mock.calls[0][0];
-    const matchStage = pipeline.find((s) => s.$match);
-    expect(matchStage.$match.price.$lte).toBe(25000000);
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.price.$lte).toBe(25000000);
   });
 
-  it("budget range (min + max) filters vector candidates", async () => {
+  it("budget range (min + max) pre-filters vector candidates", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     await recommend(validId, 5, { budgetMin: 10000000, budgetMax: 20000000 });
 
     const pipeline = Product.aggregate.mock.calls[0][0];
-    const matchStage = pipeline.find((s) => s.$match);
-    expect(matchStage.$match.price).toEqual({ $gte: 10000000, $lte: 20000000 });
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.price).toEqual({
+      $gte: 10000000,
+      $lte: 20000000,
+    });
   });
 
-  it("brand + budget constraints both applied in vector path", async () => {
+  it("brand + budget constraints both pre-filter vector candidates", async () => {
     Product.findById.mockReturnValue(mockFindById(sourceProduct));
     Product.aggregate.mockResolvedValue(
-      mockProducts.map((p) => ({ ...p, score: 0.9 }))
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
     );
 
     await recommend(validId, 5, { brand: "apple", budgetMax: 20000000 });
 
     const pipeline = Product.aggregate.mock.calls[0][0];
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.brand).toBe("apple");
+    expect(vs.$vectorSearch.filter.price.$lte).toBe(20000000);
+  });
+
+  it("isActive is enforced in the vector search pre-filter", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
+    );
+
+    await recommend(validId, 5, { brand: "samsung" });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.filter.isActive).toBe(true);
+  });
+
+  it("source-product exclusion stays in the post-vector $match", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
+    );
+
+    await recommend(validId, 5, { brand: "samsung" });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
     const matchStage = pipeline.find((s) => s.$match);
-    expect(matchStage.$match.brand).toBe("apple");
-    expect(matchStage.$match.price.$lte).toBe(20000000);
+    expect(matchStage.$match._id.$ne.toString()).toBe(validId);
+  });
+
+  it("ranking behavior is preserved with a pre-filter present", async () => {
+    Product.findById.mockReturnValue(mockFindById(sourceProduct));
+    Product.aggregate.mockResolvedValue(
+      mockProducts.map((p) => ({ ...p, score: 0.9 })),
+    );
+
+    await recommend(validId, 5, { brand: "samsung" });
+
+    const pipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = pipeline.find((s) => s.$sort);
+    expect(sortStage.$sort).toEqual({ score: -1, inStock: -1 });
+    const projectStage = pipeline.find((s) => s.$project);
+    expect(projectStage.$project.score).toEqual({ $meta: "vectorSearchScore" });
+    const vs = pipeline.find((s) => s.$vectorSearch);
+    expect(vs.$vectorSearch.numCandidates).toBe(50);
   });
 
   it("brand-price fallback respects brand constraint (overrides source brand)", async () => {
@@ -615,11 +709,12 @@ describe("productRecommendationService — constraints", () => {
       limit: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue(mockProducts),
     };
-    Product.find
-      .mockReturnValueOnce(emptyMock)
-      .mockReturnValueOnce(latestMock);
+    Product.find.mockReturnValueOnce(emptyMock).mockReturnValueOnce(latestMock);
 
-    const result = await recommend(validId, 5, { brand: "samsung", budgetMax: 15000000 });
+    const result = await recommend(validId, 5, {
+      brand: "samsung",
+      budgetMax: 15000000,
+    });
 
     // brand-price band [16M, 24M] intersected with <= 15M is empty, so the
     // brand-price path returns [] without calling Product.find; the latest
@@ -641,11 +736,12 @@ describe("productRecommendationService — constraints", () => {
       limit: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue([]),
     };
-    Product.find
-      .mockReturnValueOnce(emptyMock)
-      .mockReturnValueOnce(emptyMock);
+    Product.find.mockReturnValueOnce(emptyMock).mockReturnValueOnce(emptyMock);
 
-    const result = await recommend(validId, 5, { brand: "nokia", budgetMax: 1000000 });
+    const result = await recommend(validId, 5, {
+      brand: "nokia",
+      budgetMax: 1000000,
+    });
 
     expect(result.products).toEqual([]);
     expect(result.recommendationMode).toBe("fallback");
@@ -655,8 +751,12 @@ describe("productRecommendationService — constraints", () => {
   });
 
   it("parser output is correctly consumed as constraints", async () => {
-    const { parseRecommendationConstraints } = require("../utils/recommendationConstraintParser");
-    const constraints = parseRecommendationConstraints("Samsung dưới 15 triệu chụp ảnh đẹp");
+    const {
+      parseRecommendationConstraints,
+    } = require("../utils/recommendationConstraintParser");
+    const constraints = parseRecommendationConstraints(
+      "Samsung dưới 15 triệu chụp ảnh đẹp",
+    );
 
     const noEmbed = { ...sourceProduct };
     delete noEmbed.embedding_vector;
@@ -806,7 +906,11 @@ describe("productController — getRecommendations()", () => {
     await getRecommendations(req, res, next);
 
     expect(next).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR", message: "ID sản phẩm không hợp lệ" }),
+      expect.objectContaining({
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+        message: "ID sản phẩm không hợp lệ",
+      }),
     );
   });
 
@@ -820,7 +924,11 @@ describe("productController — getRecommendations()", () => {
     await getRecommendations(req, res, next);
 
     expect(next).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 404, code: "NOT_FOUND", message: "Không tìm thấy sản phẩm" }),
+      expect.objectContaining({
+        statusCode: 404,
+        code: "NOT_FOUND",
+        message: "Không tìm thấy sản phẩm",
+      }),
     );
   });
 

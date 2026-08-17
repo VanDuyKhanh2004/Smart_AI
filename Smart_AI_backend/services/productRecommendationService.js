@@ -56,12 +56,16 @@ const sanitizeConstraints = (constraints) => {
 
 /**
  * Build a Mongo match/filter object from sanitized constraints.
- * Used as a HARD filter in every recommendation path so an explicitly
- * requested brand/budget is never silently ignored.
+ * Used as a HARD pre-filter in every recommendation path so an explicitly
+ * requested brand/budget is never silently ignored. When constraints exist
+ * it always enforces isActive so MongoDB Vector Search can pre-filter
+ * against the `vector_index` filter fields (brand, price, isActive).
+ * Returns {} when no hard constraints are supplied so an empty
+ * `$vectorSearch.filter` is never emitted.
  */
 const buildConstraintMatch = (constraints) => {
   if (!constraints) return {};
-  const match = {};
+  const match = { isActive: true };
   if (constraints.brand) match.brand = constraints.brand;
   const price = {};
   if (constraints.budgetMin != null) price.$gte = constraints.budgetMin;
@@ -82,22 +86,28 @@ const findSourceProduct = async (productId) => {
 };
 
 const recommendByVector = async (sourceProduct, safeLimit, constraints) => {
-  const constraintMatch = buildConstraintMatch(constraints);
+  // Hard constraints (isActive, brand, price range) are applied by MongoDB
+  // Vector Search itself via $vectorSearch.filter, pre-filtering candidates
+  // during retrieval instead of post-filtering retrieved results.
+  const constraintFilter = buildConstraintMatch(constraints);
+
+  const vectorSearch = {
+    index: "vector_index",
+    path: "embedding_vector",
+    queryVector: sourceProduct.embedding_vector,
+    numCandidates: Math.max(safeLimit * 10, 50),
+    limit: safeLimit + 1,
+  };
+  if (Object.keys(constraintFilter).length > 0) {
+    vectorSearch.filter = constraintFilter;
+  }
+
   const pipeline = [
-    {
-      $vectorSearch: {
-        index: "vector_index",
-        path: "embedding_vector",
-        queryVector: sourceProduct.embedding_vector,
-        numCandidates: Math.max(safeLimit * 10, 50),
-        limit: safeLimit + 1,
-      },
-    },
+    { $vectorSearch: vectorSearch },
     {
       $match: {
         _id: { $ne: sourceProduct._id },
         isActive: true,
-        ...constraintMatch,
       },
     },
     {
