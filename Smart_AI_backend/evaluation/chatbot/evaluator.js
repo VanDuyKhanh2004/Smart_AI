@@ -63,15 +63,33 @@ class ChatbotEvaluator {
     return { text: 'Deterministic fallback response', provider: 'deterministic' };
   }
 
+  /**
+   * Deterministic stand-in for services/productSearchService.search().
+   * Mirrors the real cascade's derived searchMode:
+   *   vector -> (empty/throw) -> text -> (empty) -> latest(filters + inStock>0)
+   * The requested tier drives which searchMode is reported; products are the
+   * fixture catalog filtered by the parsed constraints (and stock on the
+   * latest tier), matching what the real tiers would return offline.
+   */
   _simulateSearch(query, searchMode = 'vector') {
     const { cleanedQuery, filters } = parseProductConstraints(query);
-    let products = EVAL_PRODUCTS.filter(p => p.isActive !== false);
+    const active = EVAL_PRODUCTS.filter(p => p.isActive !== false);
+    const matches = (p) => !filters || matchesProductConstraints(p, filters);
+    const filtered = active.filter(matches);
 
-    if (filters) {
-      products = products.filter(p => matchesProductConstraints(p, filters));
+    let products = filtered;
+    let effectiveMode = 'vector';
+
+    if (searchMode === 'vector_empty' || searchMode === 'vector_throw') {
+      // vector tier yielded nothing / threw -> text tier (no stock filter)
+      effectiveMode = 'text';
+    } else if (searchMode === 'all_empty') {
+      // vector and text both empty -> latest-products fallback (with filters)
+      effectiveMode = 'fallback';
+      products = filtered.filter(p => p.inStock > 0);
     }
 
-    return { products, searchMode };
+    return { products, searchMode: effectiveMode };
   }
 
   async evaluateAll() {
@@ -371,9 +389,18 @@ class ChatbotEvaluator {
       constraintSafe: true,
     };
 
+    // Every returned product must satisfy the query's parsed hard constraints.
+    const { filters } = parseProductConstraints(fixture.query);
+    for (const p of products) {
+      if (filters && !matchesProductConstraints(p, filters)) {
+        result.constraintSafe = false;
+        break;
+      }
+    }
+
     if (fixture.expectBrand) {
       const allMatchBrand = products.every(p => p.brand === fixture.expectBrand);
-      result.constraintSafe = allMatchBrand;
+      result.constraintSafe = result.constraintSafe && allMatchBrand;
       result.passed = products.length > 0 && allMatchBrand;
     } else if (fixture.expectProducts) {
       result.passed = products.length > 0;

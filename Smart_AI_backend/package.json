@@ -15,6 +15,7 @@
     "test": "jest --detectOpenHandles",
     "test:watch": "jest --watch --detectOpenHandles",
     "evaluate:chatbot": "node evaluation/chatbot/runEvaluation.js",
+    "evaluate:recommendation": "node evaluation/recommendation/runRecommendationEvaluation.js",
     "migrate:product-images:dry-run": "node scripts/migrateProductImagesToCloudinary.js --dry-run",
     "migrate:product-images": "node scripts/migrateProductImagesToCloudinary.js",
     "migrate:conversation-ownership-index:dry-run": "node scripts/migrateConversationOwnershipIndex.js --dry-run",

@@ -1,6 +1,6 @@
 function calculateConstraintMetrics(results) {
   if (!Array.isArray(results) || results.length === 0) {
-    return { caseAccuracy: 0, productPrecision: 1, violatingProductCount: 0, noResultHonestyRate: 1, totalCases: 0 };
+    return { caseAccuracy: 0, productPrecision: null, violatingProductCount: 0, noResultHonestyRate: null, totalCases: 0 };
   }
 
   let passed = 0;
@@ -19,13 +19,13 @@ function calculateConstraintMetrics(results) {
 
   const caseAccuracy = results.length > 0 ? passed / results.length : 0;
   const productPrecision = calculatePrecision(results);
-  const noResultHonestyRate = noResultCases > 0 ? honestNoResults / noResultCases : 1;
+  const noResultHonestyRate = noResultCases > 0 ? honestNoResults / noResultCases : null;
 
   return {
     caseAccuracy: clamp01(caseAccuracy),
-    productPrecision: clamp01(productPrecision),
+    productPrecision: productPrecision === null ? null : clamp01(productPrecision),
     violatingProductCount: totalViolatingProducts,
-    noResultHonestyRate: clamp01(noResultHonestyRate),
+    noResultHonestyRate: noResultHonestyRate === null ? null : clamp01(noResultHonestyRate),
     totalCases: results.length,
     passed,
   };
@@ -40,12 +40,14 @@ function calculatePrecision(results) {
       validCount += (r.returnedProductIds.length - (r.violatingProducts || 0));
     }
   }
-  return totalCount > 0 ? validCount / totalCount : 1;
+  // null (not 0, not 1) when nothing was returned: the metric is unmeasured,
+  // and an empty result set must never be reported as "perfect precision".
+  return totalCount > 0 ? validCount / totalCount : null;
 }
 
 function calculateRankingMetrics(results) {
   if (!Array.isArray(results) || results.length === 0) {
-    return { top1Accuracy: 0, meanReciprocalRank: 0, pairwiseRankingAccuracy: 0, stableRankingRate: 1, totalCases: 0 };
+    return { top1Accuracy: 0, meanReciprocalRank: 0, pairwiseRankingAccuracy: 0, stableRankingRate: 0, totalCases: 0 };
   }
 
   let top1Hits = 0;
@@ -77,13 +79,13 @@ function calculateRankingMetrics(results) {
   const mrr = reciprocalRanks.length > 0
     ? reciprocalRanks.reduce((a, b) => a + b, 0) / reciprocalRanks.length
     : 0;
-  const pairwiseRankingAccuracy = pairwiseTotal > 0 ? pairwiseHits / pairwiseTotal : 1;
-  const stableRankingRate = results.length > 0 ? stableCount / results.length : 1;
+  const pairwiseRankingAccuracy = pairwiseTotal > 0 ? pairwiseHits / pairwiseTotal : null;
+  const stableRankingRate = results.length > 0 ? stableCount / results.length : 0;
 
   return {
     top1Accuracy: clamp01(top1Accuracy),
     meanReciprocalRank: clamp01(mrr),
-    pairwiseRankingAccuracy: clamp01(pairwiseRankingAccuracy),
+    pairwiseRankingAccuracy: pairwiseRankingAccuracy === null ? null : clamp01(pairwiseRankingAccuracy),
     stableRankingRate: clamp01(stableRankingRate),
     totalCases: results.length,
   };
@@ -125,24 +127,25 @@ function calculateContextMetrics(results) {
   }
 
   return {
-    retentionAccuracy: retentionCases > 0 ? clamp01(retentionHits / retentionCases) : 1,
-    replacementAccuracy: replacementCases > 0 ? clamp01(replacementHits / replacementCases) : 1,
-    resetAccuracy: resetCases > 0 ? clamp01(resetHits / resetCases) : 1,
-    isolationAccuracy: isolationCases > 0 ? clamp01(isolationHits / isolationCases) : 1,
-    failedTurnPreservationAccuracy: failurePreserveCases > 0 ? clamp01(failurePreserveHits / failurePreserveCases) : 1,
+    retentionAccuracy: retentionCases > 0 ? clamp01(retentionHits / retentionCases) : null,
+    replacementAccuracy: replacementCases > 0 ? clamp01(replacementHits / replacementCases) : null,
+    resetAccuracy: resetCases > 0 ? clamp01(resetHits / resetCases) : null,
+    isolationAccuracy: isolationCases > 0 ? clamp01(isolationHits / isolationCases) : null,
+    failedTurnPreservationAccuracy: failurePreserveCases > 0 ? clamp01(failurePreserveHits / failurePreserveCases) : null,
     totalCases: results.length,
   };
 }
 
 function calculateFallbackMetrics(results) {
   if (!Array.isArray(results) || results.length === 0) {
-    return { validResponseRate: 0, deterministicFallbackSuccessRate: 1, constraintSafetyUnderFallback: 1, contextSaveOnValidResponseRate: 1, contextNotSavedOnFailureRate: 1, totalCases: 0 };
+    return { validResponseRate: 0, deterministicFallbackSuccessRate: null, constraintSafetyUnderFallback: null, contextSaveOnValidResponseRate: null, contextNotSavedOnFailureRate: null, totalCases: 0 };
   }
 
   let validCount = 0;
   let deterministicCount = 0;
   let deterministicTotal = 0;
   let constraintSafeCount = 0;
+  let constraintSafeTotal = 0;
   let contextSaveValidCount = 0;
   let contextSaveValidTotal = 0;
   let contextNotSavedFailCount = 0;
@@ -157,6 +160,7 @@ function calculateFallbackMetrics(results) {
     }
 
     if (r.constraintSafe !== undefined) {
+      constraintSafeTotal++;
       if (r.constraintSafe) constraintSafeCount++;
     }
 
@@ -170,12 +174,19 @@ function calculateFallbackMetrics(results) {
     }
   }
 
+  // Metrics are null (unmeasured) when no data supports them; a fabricated 1.0
+  // used to hide the absence of evidence and made the report look perfect.
+  const deterministicRate = deterministicTotal > 0 ? clamp01(deterministicCount / deterministicTotal) : null;
+  const constraintSafetyRate = constraintSafeTotal > 0 ? clamp01(constraintSafeCount / constraintSafeTotal) : null;
+  const contextSaveRate = contextSaveValidTotal > 0 ? clamp01(contextSaveValidCount / contextSaveValidTotal) : null;
+  const contextNotSavedRate = contextNotSavedFailTotal > 0 ? clamp01(contextNotSavedFailCount / contextNotSavedFailTotal) : null;
+
   return {
     validResponseRate: results.length > 0 ? clamp01(validCount / results.length) : 0,
-    deterministicFallbackSuccessRate: deterministicTotal > 0 ? clamp01(deterministicCount / deterministicTotal) : 1,
-    constraintSafetyUnderFallback: 1,
-    contextSaveOnValidResponseRate: contextSaveValidTotal > 0 ? clamp01(contextSaveValidCount / contextSaveValidTotal) : 1,
-    contextNotSavedOnFailureRate: contextNotSavedFailTotal > 0 ? clamp01(contextNotSavedFailCount / contextNotSavedFailTotal) : 1,
+    deterministicFallbackSuccessRate: deterministicRate,
+    constraintSafetyUnderFallback: constraintSafetyRate,
+    contextSaveOnValidResponseRate: contextSaveRate,
+    contextNotSavedOnFailureRate: contextNotSavedRate,
     totalCases: results.length,
   };
 }
@@ -237,6 +248,154 @@ function calculateParserNormalizationMetrics(constraintResults) {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Recommendation evaluation metrics (Evaluation v2)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Precision@K for one recommendation case.
+ * K is the number of products actually returned (min(requested, returned)).
+ * Returns null when there is no relevance ground truth or nothing returned.
+ */
+function precisionAtK(result) {
+  if (!result || !Array.isArray(result.returnedIds) || result.returnedIds.length === 0) return null;
+  if (!Array.isArray(result.relevantIds) || result.relevantIds.length === 0) return null;
+  const k = Math.min(result.limit || result.returnedIds.length, result.returnedIds.length);
+  const relevant = new Set(result.relevantIds);
+  let hits = 0;
+  for (let i = 0; i < k; i++) {
+    if (relevant.has(result.returnedIds[i])) hits++;
+  }
+  return k > 0 ? hits / k : null;
+}
+
+/**
+ * Recall@K: fraction of the hand-authored relevance set present in the
+ * returned list. Returns null without ground truth.
+ */
+function recallAtK(result) {
+  if (!result || !Array.isArray(result.returnedIds) || result.returnedIds.length === 0) return null;
+  if (!Array.isArray(result.relevantIds) || result.relevantIds.length === 0) return null;
+  const relevant = new Set(result.relevantIds);
+  let hits = 0;
+  for (const id of result.returnedIds) {
+    if (relevant.has(id)) hits++;
+  }
+  return relevant.size > 0 ? hits / relevant.size : null;
+}
+
+/**
+ * Reciprocal rank: 1 / (1-indexed rank of the first relevant product).
+ * Returns null without ground truth; 0 when no relevant product is returned.
+ */
+function reciprocalRank(result) {
+  if (!result || !Array.isArray(result.returnedIds) || result.returnedIds.length === 0) return null;
+  if (!Array.isArray(result.relevantIds) || result.relevantIds.length === 0) return null;
+  const relevant = new Set(result.relevantIds);
+  for (let i = 0; i < result.returnedIds.length; i++) {
+    if (relevant.has(result.returnedIds[i])) return 1 / (i + 1);
+  }
+  return 0;
+}
+
+/**
+ * NDCG@K with binary relevance derived from the hand-authored relevantIds.
+ * Returns null without ground truth.
+ */
+function ndcgAtK(result) {
+  if (!result || !Array.isArray(result.returnedIds) || result.returnedIds.length === 0) return null;
+  if (!Array.isArray(result.relevantIds) || result.relevantIds.length === 0) return null;
+  const k = Math.min(result.limit || result.returnedIds.length, result.returnedIds.length);
+  const relevant = new Set(result.relevantIds);
+  const idealCount = Math.min(k, relevant.size);
+  if (idealCount === 0) return 0;
+
+  let dcg = 0;
+  for (let i = 0; i < k; i++) {
+    const gain = relevant.has(result.returnedIds[i]) ? 1 : 0;
+    dcg += gain / Math.log2(i + 2);
+  }
+
+  let idcg = 0;
+  for (let i = 0; i < idealCount; i++) {
+    idcg += 1 / Math.log2(i + 2);
+  }
+
+  return idcg > 0 ? dcg / idcg : 0;
+}
+
+/**
+ * Brand diversity of the returned list: distinct brands / min(K, returned).
+ * Returns null when nothing is returned or brand metadata is missing.
+ */
+function distinctBrandRatio(result) {
+  if (!result || !Array.isArray(result.returnedIds) || result.returnedIds.length === 0) return null;
+  if (!Array.isArray(result.returnedProducts) || result.returnedProducts.length === 0) return null;
+  const k = Math.min(result.limit || result.returnedIds.length, result.returnedIds.length);
+  const top = result.returnedProducts.slice(0, k);
+  const brands = new Set(
+    top.map(p => (p && p.brand ? String(p.brand).toLowerCase() : '')).filter(Boolean)
+  );
+  return top.length > 0 ? brands.size / top.length : null;
+}
+
+function avg(values) {
+  const nums = values.filter(v => typeof v === 'number' && isFinite(v));
+  return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+}
+
+/**
+ * Aggregate recommendation metrics over all recommendation cases.
+ *
+ * result entries (produced by the recommendation evaluation engine):
+ *   { caseId, limit, recommendationMode, constraintSafe, outOfStockReturned,
+ *     stable, returnedIds, returnedProducts, relevantIds?, passed? }
+ */
+function calculateRecommendationMetrics(results) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return {
+      totalCases: 0,
+      passed: 0,
+      modeCounts: { vector: 0, brand_price: 0, fallback: 0 },
+      hardConstraintSatisfaction: null,
+      outOfStockReturned: 0,
+      determinismRate: null,
+      meanPrecisionAtK: null,
+      meanRecallAtK: null,
+      mrr: null,
+      meanNdcgAtK: null,
+      meanDistinctBrandRatio: null,
+    };
+  }
+
+  const passed = results.filter(r => r.passed === true).length;
+  const safeTotal = results.filter(r => r.constraintSafe !== undefined).length;
+  const safeCount = results.filter(r => r.constraintSafe === true).length;
+  const outOfStockReturned = results.reduce((a, r) => a + (r.outOfStockReturned || 0), 0);
+  const stableCount = results.filter(r => r.stable === true).length;
+
+  const modeCounts = { vector: 0, brand_price: 0, fallback: 0 };
+  for (const r of results) {
+    if (r.recommendationMode in modeCounts) modeCounts[r.recommendationMode]++;
+  }
+
+  const withGt = results.filter(r => Array.isArray(r.relevantIds) && r.relevantIds.length > 0);
+
+  return {
+    totalCases: results.length,
+    passed,
+    modeCounts,
+    hardConstraintSatisfaction: safeTotal > 0 ? clamp01(safeCount / safeTotal) : null,
+    outOfStockReturned,
+    determinismRate: results.length > 0 ? clamp01(stableCount / results.length) : null,
+    meanPrecisionAtK: avg(withGt.map(precisionAtK)),
+    meanRecallAtK: avg(withGt.map(recallAtK)),
+    mrr: avg(withGt.map(reciprocalRank)),
+    meanNdcgAtK: avg(withGt.map(ndcgAtK)),
+    meanDistinctBrandRatio: avg(results.map(distinctBrandRatio)),
+  };
+}
+
 module.exports = {
   calculateConstraintMetrics,
   calculateRankingMetrics,
@@ -244,6 +403,12 @@ module.exports = {
   calculateFallbackMetrics,
   calculateLatencyMetrics,
   calculateParserNormalizationMetrics,
+  calculateRecommendationMetrics,
+  precisionAtK,
+  recallAtK,
+  reciprocalRank,
+  ndcgAtK,
+  distinctBrandRatio,
   clamp01,
   round2,
 };
