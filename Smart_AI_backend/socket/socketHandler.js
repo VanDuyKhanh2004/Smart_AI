@@ -295,6 +295,18 @@ const handleSendMessage = async (socket, data, ack) => {
       }
     }
 
+    // Non-streaming branches (small talk, complaint, spec, buffered fallback)
+    // never mark the active entry completed, so it would linger until the TTL
+    // sweep and make a late stopGeneration ack 'stopped' after delivery.
+    // remove() is idempotent and never aborts; for a live streamed success the
+    // entry was already removed by markCompleted, so this is a no-op.
+    try {
+      const chatActiveStreams = require('../services/chatActiveStreams');
+      chatActiveStreams.remove({ userId, sessionId, clientMessageId });
+    } catch (_err) {
+      // registry cleanup must never mask a successful generation
+    }
+
     // NO second ack here: the 'accepted' ack was already delivered and the final
     // success is signaled via aiResponse + messageProcessing 'completed'.
 
@@ -496,6 +508,10 @@ const handleRetryMessage = async (socket, data, ack) => {
       catch (_storeErr) { /* ignore */ }
     }
     chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+    // Remove the active registry entry on the non-streaming success path (the
+    // streamed path already removed it via markCompleted). Idempotent, never
+    // aborts; prevents a stale entry from acks 'stopped' after delivery.
+    chatActiveStreams.remove({ userId, sessionId, clientMessageId, generationId });
   } catch (error) {
     const { throwIfCancelled, isCancellationError } = require('../utils/chatCancellation');
     const isCancellation = isCancellationError(error);
@@ -664,6 +680,9 @@ const handleRegenerateMessage = async (socket, data, ack) => {
       catch (_storeErr) { /* ignore */ }
     }
     chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+    // Non-streaming success path: remove the active entry (idempotent, never
+    // aborts) so a late stopGeneration does not ack 'stopped' after delivery.
+    chatActiveStreams.remove({ userId, sessionId, clientMessageId, generationId });
   } catch (error) {
     const { isCancellationError } = require('../utils/chatCancellation');
     const isCancellation = isCancellationError(error);

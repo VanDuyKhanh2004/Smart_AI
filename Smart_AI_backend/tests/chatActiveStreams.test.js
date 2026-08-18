@@ -158,4 +158,83 @@ describe('chatActiveStreams', () => {
     registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, controller: makeController(), socketId: SOCKET_A });
     expect(registry.isCompleted({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID })).toBe(false);
   });
+
+  it('abort resolves a REGENERATE entry by clientMessageId when no generationId is known', () => {
+    const controller = makeController();
+    const GEN_ID = '11111111-2222-3333-4444-555555555555';
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID, controller, socketId: SOCKET_A });
+
+    // The socket boundary only knows the logical clientMessageId.
+    const res = registry.abort({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID });
+    expect(res.found).toBe(true);
+    expect(controller.signal.aborted).toBe(true);
+    expect(registry._getActiveSize()).toBe(0);
+  });
+
+  it('clientMessageId fallback is scoped: never aborts another user or session', () => {
+    const c1 = makeController();
+    const c2 = makeController();
+    const c3 = makeController();
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: '11111111-2222-3333-4444-555555555555', controller: c1, socketId: SOCKET_A });
+    registry.register({ userId: USER_B, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: '11111111-2222-3333-4444-555555555556', controller: c2, socketId: SOCKET_B });
+    registry.register({ userId: USER, sessionId: SESSION_OTHER, clientMessageId: CLIENT_ID, generationId: '11111111-2222-3333-4444-555555555557', controller: c3, socketId: SOCKET_A });
+
+    // Only the same-user+same-session entry is matched.
+    expect(registry.abort({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID }).found).toBe(true);
+    expect(c1.signal.aborted).toBe(true);
+    expect(c2.signal.aborted).toBe(false);
+    expect(c3.signal.aborted).toBe(false);
+    expect(registry._getActiveSize()).toBe(2);
+  });
+
+  it('isCompleted resolves a completed REGENERATE by clientMessageId', () => {
+    const controller = makeController();
+    const GEN_ID = '11111111-2222-3333-4444-555555555555';
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID, controller, socketId: SOCKET_A });
+    registry.markCompleted({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID });
+
+    expect(registry.isCompleted({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID })).toBe(true);
+    expect(registry._getCompletedSize()).toBe(1);
+  });
+
+  it('expired logical entries are swept away', () => {
+    const controller = makeController();
+    const GEN_ID = '11111111-2222-3333-4444-555555555555';
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID, controller, socketId: SOCKET_A });
+    registry.claimLogical({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID });
+    registry._forceExpireLogical();
+    // A sweep triggered by any op drops the expired logical claim.
+    registry.register({ userId: USER, sessionId: SESSION_OTHER, clientMessageId: '6ba7b810-9dad-11d1-80b4-00c04fd430cd', controller: makeController(), socketId: SOCKET_B });
+    expect(registry.isLogicalActive({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID })).toBe(false);
+  });
+
+  it('a live logical claim is NOT evicted by a sweep', () => {
+    const controller = makeController();
+    const GEN_ID = '11111111-2222-3333-4444-555555555555';
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID, controller, socketId: SOCKET_A });
+    registry.claimLogical({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID });
+    // Sweep triggered by another op must leave the fresh logical claim intact.
+    registry.register({ userId: USER, sessionId: SESSION_OTHER, clientMessageId: '6ba7b810-9dad-11d1-80b4-00c04fd430cd', controller: makeController(), socketId: SOCKET_B });
+    expect(registry.isLogicalActive({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID })).toBe(true);
+  });
+
+  it('a live active entry is NOT removed by a sweep triggered by another op', () => {
+    const controller = makeController();
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, controller, socketId: SOCKET_A });
+    registry.register({ userId: USER, sessionId: SESSION_OTHER, clientMessageId: '6ba7b810-9dad-11d1-80b4-00c04fd430cd', controller: makeController(), socketId: SOCKET_B });
+    expect(registry._getActiveSize()).toBe(2);
+    expect(registry.get({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID })).not.toBeNull();
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it('an expired logical entry does not permanently block Retry/Regenerate', () => {
+    const controller = makeController();
+    const GEN_ID = '11111111-2222-3333-4444-555555555555';
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID, controller, socketId: SOCKET_A });
+    registry.claimLogical({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: GEN_ID });
+    registry._forceExpireLogical();
+    // Swept on the next op: a new attempt for the same logical turn is allowed.
+    registry.register({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: '11111111-2222-3333-4444-555555555558', controller: makeController(), socketId: SOCKET_A });
+    expect(registry.claimLogical({ userId: USER, sessionId: SESSION, clientMessageId: CLIENT_ID, generationId: '11111111-2222-3333-4444-555555555558' })).toBe(true);
+  });
 });

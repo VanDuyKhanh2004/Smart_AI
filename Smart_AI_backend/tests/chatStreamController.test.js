@@ -239,6 +239,38 @@ mockStreamImpl.mockImplementation(({ onDelta }) => {
     expect(names.filter((n) => n === 'aiResponseComplete')).toHaveLength(0);
   });
 
+  it('streaming success marks the active entry completed so a late stop acks already_completed', async () => {
+    const registry = require('../services/chatActiveStreams');
+    registry._resetLocal();
+    try {
+      const controller = new AbortController();
+      registry.register({
+        userId: 'user-123',
+        sessionId: SESSION_ID,
+        clientMessageId: CLIENT_ID,
+        controller,
+        socketId: 'socket-1',
+      });
+      expect(registry._getActiveSize()).toBe(1);
+
+      mockStreamImpl.mockResolvedValue({
+        fullResponse: 'done',
+        provider: 'openai',
+        finishReason: 'stop',
+        streamed: true,
+      });
+      const events = await runStream();
+      expect(events.some((e) => e.event === 'aiResponseComplete')).toBe(true);
+
+      // generateResponse's success path moves the entry from active to
+      // completed; the active entry is gone and the turn is already_completed.
+      expect(registry._getActiveSize()).toBe(0);
+      expect(registry.isCompleted({ userId: 'user-123', sessionId: SESSION_ID, clientMessageId: CLIENT_ID })).toBe(true);
+    } finally {
+      registry._resetLocal();
+    }
+  });
+
   it('throws (no terminal aiResponse) when the stream function rejects before any chunk', async () => {
     mockStreamImpl.mockRejectedValue(new Error('provider down'));
     const socket = fakeSocket();

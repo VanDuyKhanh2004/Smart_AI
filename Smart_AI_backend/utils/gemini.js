@@ -2,13 +2,21 @@ const OpenAI = require("openai");
 require("dotenv").config();
 const logger = require("../utils/logger");
 
+// Explicit, environment-configurable client-level timeouts. The OpenAI SDK
+// defaults to ~10 minutes; the @google/genai SDK has no default at all. Without
+// these a provider stall would pin socket/HTTP requests for minutes. Streaming
+// gets its own, more generous bound so a legitimate multi-chunk generation is
+// never cut off by the non-streaming ceiling.
+const LLM_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 90000;
+const LLM_STREAM_TIMEOUT_MS = parseInt(process.env.LLM_STREAM_TIMEOUT_MS, 10) || 180000;
+
 // Lazy provider initialization: the module loads even when no key is present so
 // the deterministic/Gemini paths can still serve a degraded experience. Calls
 // that need OpenAI throw a clear "not configured" error which the callers'
 // fallback chains convert into Gemini/deterministic behavior.
 let openai = null;
 if (process.env.OPENAI_API_KEY) {
-  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: LLM_TIMEOUT_MS });
 }
 const MODEL_NAME = process.env.OPENAI_MODEL || "gpt-4o";
 
@@ -23,7 +31,10 @@ const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash";
 if (process.env.GEMINI_API_KEY) {
   try {
     const { GoogleGenAI } = require("@google/genai");
-    googleGenAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    googleGenAI = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: { timeout: LLM_TIMEOUT_MS },
+    });
   } catch (e) {
     logger.warn({ err: { message: e.message } }, "Gemini SDK not available for chat fallback");
   }
@@ -668,7 +679,7 @@ const streamOpenAICompatible = async ({ messages, signal, onDelta, maxTokens = 6
     messages,
     stream: true,
     ...(signal ? { signal } : {}),
-  });
+  }, { timeout: LLM_STREAM_TIMEOUT_MS });
 
   let text = "";
   let finishReason = "stop";
@@ -720,6 +731,7 @@ const streamGeminiChat = async ({ systemPrompt, chatHistory, userMessage, signal
     config: {
       temperature,
       maxOutputTokens,
+      httpOptions: { timeout: LLM_STREAM_TIMEOUT_MS },
     },
   });
 

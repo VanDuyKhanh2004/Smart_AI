@@ -92,6 +92,34 @@ describe('generateChatResponseStream()', () => {
     expect(createArgs.stream).toBe(true);
   });
 
+  it('passes an explicit streaming timeout to the OpenAI provider request', async () => {
+    delete process.env.LLM_STREAM_TIMEOUT_MS;
+    delete process.env.LLM_TIMEOUT_MS;
+    mockCreate.mockReturnValueOnce(asyncIterable(openAiChunks(['a'])));
+    await generateChatResponseStream({
+      userMessage: 'x',
+      messages: [],
+      onDelta: () => {},
+    });
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    // Per-request timeout override: generous enough for multi-chunk streams.
+    expect(mockCreate.mock.calls[0][1]).toEqual({ timeout: 180000 });
+  });
+
+  it('passes an explicit streaming timeout to the Gemini provider request', async () => {
+    delete process.env.LLM_STREAM_TIMEOUT_MS;
+    delete process.env.LLM_TIMEOUT_MS;
+    mockCreate.mockRejectedValueOnce(new Error('openai down'));
+    mockStreamGemini.mockReturnValueOnce(geminiChunks(['a']));
+    await generateChatResponseStream({
+      userMessage: 'x',
+      productContext: mockProducts,
+      onDelta: () => {},
+    });
+    expect(mockStreamGemini).toHaveBeenCalledTimes(1);
+    expect(mockStreamGemini.mock.calls[0][0].config.httpOptions).toEqual({ timeout: 180000 });
+  });
+
   it('falls back to Gemini when OpenAI fails before any delta', async () => {
     mockCreate.mockRejectedValueOnce(new Error('openai down'));
     mockStreamGemini.mockReturnValueOnce(geminiChunks(['Tôi ', 'gợi ý ', 'iPhone.']));

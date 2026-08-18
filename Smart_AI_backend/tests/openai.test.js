@@ -207,6 +207,53 @@ describe('calculateSimilarity', () => {
   });
 });
 
+describe('client timeout configuration', () => {
+  it('constructs the GoogleGenAI client with an explicit HTTP timeout', async () => {
+    delete process.env.LLM_TIMEOUT_MS;
+    let GoogleGenAI;
+    jest.doMock('@google/genai', () => {
+      GoogleGenAI = jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({
+            embeddings: [{ values: new Array(1536).fill(0.1) }],
+          }),
+        },
+      }));
+      return { GoogleGenAI };
+    });
+
+    const { generateEmbedding } = require('../utils/openai');
+    await generateEmbedding('some text');
+
+    expect(GoogleGenAI).toHaveBeenCalledTimes(1);
+    expect(GoogleGenAI.mock.calls[0][0]).toMatchObject({
+      apiKey: 'test-gemini-key',
+      httpOptions: { timeout: 90000 },
+    });
+  });
+
+  it('honors the LLM_TIMEOUT_MS environment override', async () => {
+    process.env.LLM_TIMEOUT_MS = '45000';
+    let GoogleGenAI;
+    jest.doMock('@google/genai', () => {
+      GoogleGenAI = jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({
+            embeddings: [{ values: new Array(1536).fill(0.1) }],
+          }),
+        },
+      }));
+      return { GoogleGenAI };
+    });
+
+    const { generateEmbedding } = require('../utils/openai');
+    await generateEmbedding('some text');
+
+    expect(GoogleGenAI.mock.calls[0][0].httpOptions.timeout).toBe(45000);
+    delete process.env.LLM_TIMEOUT_MS;
+  });
+});
+
 describe('cleanText warning', () => {
   it('logs truncation warning with logger.warn for long text', async () => {
     jest.doMock('@google/genai', () => ({
