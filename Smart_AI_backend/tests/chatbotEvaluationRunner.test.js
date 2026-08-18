@@ -9,6 +9,12 @@ const RESULTS_DIR = path.join(__dirname, '..', 'evaluation-results');
 describe('ChatbotEvaluator', () => {
   let evaluator;
 
+  const originalExitCode = process.exitCode;
+
+  afterEach(() => {
+    process.exitCode = originalExitCode;
+  });
+
   beforeEach(() => {
     evaluator = new ChatbotEvaluator();
   });
