@@ -2,8 +2,11 @@ const OpenAI = require('openai');
 require('dotenv').config();
 const logger = require('../utils/logger');
 
+const LLM_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 90000;
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: LLM_TIMEOUT_MS,
 });
 
 const MODEL_NAME = process.env.OPENAI_MODEL || 'gpt-4o';

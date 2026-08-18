@@ -5,7 +5,15 @@ if (!process.env.GEMINI_API_KEY) {
   throw new Error('GEMINI_API_KEY không được định nghĩa trong file .env');
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Explicit, environment-configurable client-level timeout. The @google/genai
+// SDK has no default request timeout, so without this an embedding call can
+// hang indefinitely on a stalled provider.
+const LLM_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 90000;
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: { timeout: LLM_TIMEOUT_MS },
+});
 const EMBEDDING_MODEL = 'gemini-embedding-001';
 const TARGET_DIM = 1536;
 

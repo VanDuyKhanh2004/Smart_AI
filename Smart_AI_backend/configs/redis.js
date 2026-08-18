@@ -12,6 +12,11 @@ let shuttingDown = false;
 let status = 'disconnected';
 let connectPromise = null;
 
+// Per-command socket timeout: bounds a single command so a connected-but-stalled
+// Redis cannot pin requests indefinitely (default 5s, within the audit's 3-5s
+// range). Each caller applies its existing failure policy on the rejection.
+const REDIS_SOCKET_TIMEOUT_MS = parseInt(process.env.REDIS_SOCKET_TIMEOUT_MS, 10) || 5000;
+
 const calculateReconnectDelay = (attemptIndex) => {
   return Math.min(500 * Math.pow(2, attemptIndex), 30000);
 };
@@ -48,7 +53,14 @@ const connectRedis = async () => {
 
   redisClient = createClient({
     url: process.env.REDIS_URL,
-    socket: { reconnectStrategy },
+    socket: {
+      reconnectStrategy,
+      // Bound a single command so a connected-but-stalled Redis cannot pin
+      // requests indefinitely: after this much time without a response the
+      // command rejects and each caller applies its existing failure policy
+      // (fail-open cache, local dedup fallback, or fail-closed 503).
+      socketTimeout: REDIS_SOCKET_TIMEOUT_MS,
+    },
     // Do not buffer commands in memory while reconnecting: with the waiters on
     // isReady they would otherwise sit in the offline queue and hang requests
     // indefinitely. Fail fast instead and let each caller apply its failure

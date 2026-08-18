@@ -45,6 +45,8 @@ jest.mock('../models/User', () => ({
 
 jest.mock('../controllers/chatController', () => ({
   processMessage: jest.fn(),
+  verifyRegenerateTarget: jest.fn(),
+  regenerateMessage: jest.fn(),
 }));
 
 const User = require('../models/User');
@@ -146,6 +148,16 @@ function stopGeneration(socket, payload) {
   });
 }
 
+function regenerateMessage(socket, payload) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timeout waiting for regenerate ack')), 3000);
+    socket.emit('regenerateMessage', payload, (ack) => {
+      clearTimeout(timer);
+      resolve(ack);
+    });
+  });
+}
+
 /** A promise that resolves the next messageProcessing 'cancelled' event. */
 function nextCancelled(socket) {
   return new Promise((resolve, reject) => {
@@ -207,6 +219,8 @@ beforeEach(() => {
   User.findById.mockReset();
   User.findById.mockResolvedValue(mockUser);
   chatController.processMessage.mockReset();
+  chatController.verifyRegenerateTarget.mockReset();
+  chatController.regenerateMessage.mockReset();
 });
 
 describe('Socket-level stopGeneration', () => {
@@ -553,5 +567,114 @@ describe('Socket-level stopGeneration', () => {
       status: 'accepted',
       clientMessageId: CLIENT_ID,
     });
+  });
+
+  it('stops a REGENERATED stream using only clientMessageId (fresh generationId)', async () => {
+    const socket = await connectClient();
+    chatController.verifyRegenerateTarget.mockResolvedValue({ status: 'ready' });
+    chatController.regenerateMessage.mockImplementation(async (s, sessionId, userId, clientMessageId, generationId, signal) => {
+      return new Promise((_resolve, reject) => {
+        if (signal && signal.aborted) {
+          const err = new Error('Stream aborted');
+          err.cancelled = true;
+          err.code = 'STREAM_CANCELLED';
+          reject(err);
+          return;
+        }
+        signal.addEventListener('abort', () => {
+          const err = new Error('Stream aborted');
+          err.cancelled = true;
+          err.code = 'STREAM_CANCELLED';
+          reject(err);
+        });
+      });
+    });
+
+    const cancelled = nextCancelled(socket);
+    const ack = await regenerateMessage(socket, {
+      sessionId: VALID_SESSION_ID,
+      clientMessageId: CLIENT_ID,
+    });
+    expect(ack.accepted).toBe(true);
+    expect(typeof ack.generationId).toBe('string');
+    expect(ack.generationId).not.toBe(CLIENT_ID);
+
+    // The active entry is keyed by the fresh generationId; stopGeneration only
+    // knows the logical clientMessageId and must still resolve it.
+    expect(registry._getActiveSize()).toBe(1);
+
+    const stopAck = await stopGeneration(socket, {
+      sessionId: VALID_SESSION_ID,
+      clientMessageId: CLIENT_ID,
+    });
+    expect(stopAck).toEqual({ stopped: true, status: 'stopped', clientMessageId: CLIENT_ID });
+
+    const cancelledEvent = await cancelled;
+    expect(cancelledEvent).toMatchObject({
+      sessionId: VALID_SESSION_ID,
+      clientMessageId: CLIENT_ID,
+      status: 'cancelled',
+      reason: 'user_cancelled',
+    });
+    expect(registry._getActiveSize()).toBe(0);
+  });
+
+  it('acks already_completed when a REGENERATED stream already finished', async () => {
+    const socket = await connectClient();
+    chatController.verifyRegenerateTarget.mockResolvedValue({ status: 'ready' });
+    chatController.regenerateMessage.mockImplementation(async (s, sessionId, userId, clientMessageId, generationId) => {
+      // Real controller marks the generation completed on streaming success.
+      registry.markCompleted({ userId, sessionId, clientMessageId, generationId });
+      return {
+        status: 'accepted',
+        result: {
+          processingTime: 4,
+          aiPayload: { sessionId, clientMessageId, message: 'new', timestamp: new Date().toISOString() },
+        },
+      };
+    });
+
+    const completed = nextCompleted(socket);
+    const ack = await regenerateMessage(socket, {
+      sessionId: VALID_SESSION_ID,
+      clientMessageId: CLIENT_ID,
+    });
+    expect(ack.accepted).toBe(true);
+    await completed;
+
+    const stopAck = await stopGeneration(socket, {
+      sessionId: VALID_SESSION_ID,
+      clientMessageId: CLIENT_ID,
+    });
+    expect(stopAck).toEqual({ stopped: false, status: 'already_completed', clientMessageId: CLIENT_ID });
+  });
+
+  it('a non-streaming success removes the active entry (no stale stopped ack after delivery)', async () => {
+    const socket = await connectClient();
+    // Small talk / complaint / buffered branches resolve WITHOUT markCompleted;
+    // the socket boundary must still clear the active entry.
+    chatController.processMessage.mockImplementation(async (s, data) => ({
+      processingTime: 6,
+      aiPayload: {
+        sessionId: data.sessionId,
+        clientMessageId: data.clientMessageId,
+        message: 'hi',
+        timestamp: new Date().toISOString(),
+      },
+    }));
+
+    const completed = nextCompleted(socket);
+    await sendMessage(socket, {
+      sessionId: VALID_SESSION_ID,
+      message: 'hello',
+      clientMessageId: CLIENT_ID,
+    });
+    await completed;
+    await tick();
+
+    expect(registry._getActiveSize()).toBe(0);
+    // A late stop on a delivered turn must NOT ack 'stopped'.
+    const stopAck = await stopGeneration(socket, { sessionId: VALID_SESSION_ID, clientMessageId: CLIENT_ID });
+    expect(stopAck.status).toBe('not_found');
   });
 });

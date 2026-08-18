@@ -320,6 +320,33 @@ describe('Status transitions', () => {
     );
   });
 
+  it('creates the shared client with a socket timeout so a stalled Redis cannot hang requests', async () => {
+    delete process.env.REDIS_SOCKET_TIMEOUT_MS;
+    jest.resetModules();
+    const freshRedis = require('../configs/redis');
+    await freshRedis.connectRedis();
+    const { createClient } = require('redis');
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        socket: expect.objectContaining({ socketTimeout: 5000 }),
+      })
+    );
+  });
+
+  it('honors the REDIS_SOCKET_TIMEOUT_MS environment override', async () => {
+    process.env.REDIS_SOCKET_TIMEOUT_MS = '3000';
+    jest.resetModules();
+    const freshRedis = require('../configs/redis');
+    await freshRedis.connectRedis();
+    const { createClient } = require('redis');
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        socket: expect.objectContaining({ socketTimeout: 3000 }),
+      })
+    );
+    delete process.env.REDIS_SOCKET_TIMEOUT_MS;
+  });
+
   it('isShuttingDown returns true after setShuttingDown', () => {
     redis.setShuttingDown();
     expect(redis.isShuttingDown()).toBe(true);
