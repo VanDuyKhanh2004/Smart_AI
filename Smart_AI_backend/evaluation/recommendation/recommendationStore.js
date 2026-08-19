@@ -182,7 +182,14 @@ function cosine(a, b) {
 function matchesFilter(p, filter) {
   if (!filter) return true;
   if (filter.isActive !== undefined && p.isActive !== filter.isActive) return false;
-  if (filter.brand !== undefined && String(p.brand).toLowerCase() !== String(filter.brand).toLowerCase()) return false;
+  if (filter.brand !== undefined) {
+    const pBrand = String(p.brand || '').toLowerCase();
+    if (typeof filter.brand === 'string') {
+      if (pBrand !== String(filter.brand).toLowerCase()) return false;
+    } else if (Array.isArray(filter.brand.$in)) {
+      if (!filter.brand.$in.some(b => pBrand === String(b).toLowerCase())) return false;
+    }
+  }
   if (filter.price) {
     if (filter.price.$gte !== undefined && p.price < filter.price.$gte) return false;
     if (filter.price.$lte !== undefined && p.price > filter.price.$lte) return false;
@@ -192,10 +199,25 @@ function matchesFilter(p, filter) {
 
 function matchesMatch(p, match) {
   if (!match) return true;
+  if (Array.isArray(match.$and)) {
+    for (const cond of match.$and) {
+      if (!matchesMatch(p, cond)) return false;
+    }
+  }
   if (match._id && match._id.$ne !== undefined && String(p._id) === String(match._id.$ne)) return false;
   if (match.isActive !== undefined && p.isActive !== match.isActive) return false;
-  if (match.brand !== undefined && String(p.brand).toLowerCase() !== String(match.brand).toLowerCase()) return false;
+  if (match.brand !== undefined) {
+    const pBrand = String(p.brand || '').toLowerCase();
+    if (Array.isArray(match.brand.$in)) {
+      if (!match.brand.$in.some(b => pBrand === String(b).toLowerCase())) return false;
+    } else if (Array.isArray(match.brand.$nin)) {
+      if (match.brand.$nin.some(b => pBrand === String(b).toLowerCase())) return false;
+    } else if (typeof match.brand === 'string') {
+      if (pBrand !== String(match.brand).toLowerCase()) return false;
+    }
+  }
   if (match.inStock && match.inStock.$gt !== undefined && !(p.inStock > match.inStock.$gt)) return false;
+  if (match.inStock && match.inStock.$lte !== undefined && !(p.inStock <= match.inStock.$lte)) return false;
   if (match.price) {
     if (match.price.$gte !== undefined && p.price < match.price.$gte) return false;
     if (match.price.$lte !== undefined && p.price > match.price.$lte) return false;
@@ -217,6 +239,34 @@ function stableSort(items, sortSpec) {
       return a.idx - b.idx;
     })
     .map(x => x.it);
+}
+
+/**
+ * Deterministic tokenizer for the simulated $text tier: lowercase and split on
+ * non-letter/non-digit boundaries, keeping Vietnamese diacritics intact — the
+ * word-token behavior Mongo's text index applies to real queries.
+ */
+function tokenize(text) {
+  return String(text || '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(t => t.length > 0);
+}
+
+/**
+ * Deterministic text score for the simulated $text tier: number of query tokens
+ * that appear as whole words in the product's searchable fields. Mirrors Mongo
+ * $text word matching (no substring false positives). Same searchable surface
+ * as the production text index: name, brand, description.
+ */
+function computeTextScore(p, tokens) {
+  const haystack = [
+    String(p.name || ''),
+    String(p.brand || ''),
+    String(p.description || ''),
+  ].join(' ').toLowerCase();
+  const words = new Set(tokenize(haystack));
+  return tokens.filter(t => words.has(t)).length;
 }
 
 function createRecommendationStore() {
@@ -274,7 +324,7 @@ function createRecommendationStore() {
       return items;
     },
 
-    find(query) {
+    find(query, projection) {
       const chain = {};
       let sortSpec = null;
       let limitN = null;
@@ -289,12 +339,30 @@ function createRecommendationStore() {
       };
       chain.lean = async () => {
         let list = products.filter(p => matchesMatch(p, query));
+
+        // Simulated $text tier: keyword-match and score when the production
+        // search emits { $text: { $search: ... } } with a textScore projection.
+        const wantsTextScore =
+          projection &&
+          projection.score &&
+          projection.score.$meta === 'textScore';
+        if (query && query.$text && query.$text.$search) {
+          const tokens = tokenize(query.$text.$search);
+          list = list.map(p => {
+            const copy = { ...p };
+            copy.score = computeTextScore(p, tokens);
+            return copy;
+          });
+          if (tokens.length > 0) list = list.filter(p => p.score > 0);
+        }
+
         if (sortSpec) list = stableSort(list, sortSpec);
         if (limitN) list = list.slice(0, limitN);
         return list.map(p => {
           const out = JSON.parse(JSON.stringify(p));
           delete out.embedding_vector;
           delete out.embeddingError;
+          if (!wantsTextScore) delete out.score;
           return out;
         });
       };
