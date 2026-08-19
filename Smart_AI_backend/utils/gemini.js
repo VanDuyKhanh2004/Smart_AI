@@ -760,6 +760,7 @@ const streamGeminiChat = async ({ systemPrompt, chatHistory, userMessage, signal
 const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta }) => {
   const systemPrompt = createSystemPrompt(productContext, chatHistory);
   const messages = [
+    { role: "system", content: systemPrompt },
     ...(Array.isArray(chatHistory) ? chatHistory.map((msg) => ({ role: msg.role, content: msg.content })) : []),
     { role: "user", content: userMessage },
   ];
