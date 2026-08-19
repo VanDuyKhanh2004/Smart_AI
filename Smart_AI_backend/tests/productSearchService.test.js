@@ -13,7 +13,7 @@ jest.mock('../utils/openai', () => ({
   testOpenAIConnection: jest.fn(),
 }));
 
-const { search } = require('../services/productSearchService');
+const { search, buildVectorPreFilter, buildVectorPostFilter, candidateWindow } = require('../services/productSearchService');
 const Product = require('../models/Product');
 const { generateEmbedding } = require('../utils/openai');
 
@@ -232,6 +232,223 @@ describe('productSearchService.search()', () => {
 
       expect(result.products).toHaveLength(1);
       expect(result.searchMode).toBe('vector');
+    });
+  });
+
+  describe('vector search pre-filter ($vectorSearch.filter)', () => {
+    beforeEach(() => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+    });
+
+    it('A. pushes supported constraints (brand, price, isActive) into $vectorSearch.filter', async () => {
+      Product.aggregate.mockResolvedValue(mockProducts);
+
+      await search('samsung duoi 15 trieu', 5, {
+        brands: ['samsung'],
+        maxPrice: 15_000_000,
+      });
+
+      const pipeline = Product.aggregate.mock.calls[0][0];
+      const vs = pipeline.find((s) => s.$vectorSearch);
+      expect(vs.$vectorSearch.filter).toEqual({
+        brand: 'samsung',
+        price: { $lte: 15_000_000 },
+        isActive: true,
+      });
+    });
+
+    it('A2. uses $in form when multiple brands are constrained', async () => {
+      Product.aggregate.mockResolvedValue(mockProducts);
+
+      await search('samsung hoac apple', 5, {
+        brands: ['samsung', 'apple'],
+      });
+
+      const pipeline = Product.aggregate.mock.calls[0][0];
+      const vs = pipeline.find((s) => s.$vectorSearch);
+      expect(vs.$vectorSearch.filter.brand).toEqual({ $in: ['samsung', 'apple'] });
+      expect(vs.$vectorSearch.filter.isActive).toBe(true);
+    });
+
+    it('B. keeps unsupported constraints (inStock, excludedBrands) in post-$match', async () => {
+      Product.aggregate.mockResolvedValue(mockProducts);
+
+      await search('samsung con hang', 5, {
+        brands: ['samsung'],
+        excludedBrands: ['apple'],
+        inStock: true,
+      });
+
+      const pipeline = Product.aggregate.mock.calls[0][0];
+      const vs = pipeline.find((s) => s.$vectorSearch);
+
+      // inStock and excludedBrands are NOT declared as Atlas filter fields:
+      // they must stay out of $vectorSearch.filter.
+      expect(vs.$vectorSearch.filter.inStock).toBeUndefined();
+      expect(vs.$vectorSearch.filter.brand).toBe('samsung');
+
+      // They remain as a post-retrieval $match (multi-condition $and form).
+      const matchStages = pipeline.filter((s) => s.$match);
+      const postMatch = matchStages[matchStages.length - 1];
+      expect(postMatch.$match).toEqual({
+        $and: [
+          { brand: { $nin: ['apple'] } },
+          { inStock: { $gt: 0 } },
+        ],
+      });
+    });
+
+    it('B2. does not emit an empty filter when no supported constraint applies', async () => {
+      Product.aggregate.mockResolvedValue(mockProducts);
+
+      // inStock-only constraint: no Atlas filter field is involved.
+      await search('con hang', 5, { inStock: true });
+
+      const pipeline = Product.aggregate.mock.calls[0][0];
+      const vs = pipeline.find((s) => s.$vectorSearch);
+      expect(vs.$vectorSearch.filter).toBeUndefined();
+    });
+
+    it('C. stock safety remains intact in the vector post-$match', async () => {
+      Product.aggregate.mockResolvedValue(mockProducts);
+
+      await search('con hang', 5, { inStock: true });
+
+      const pipeline = Product.aggregate.mock.calls[0][0];
+      const matchStages = pipeline.filter((s) => s.$match);
+      const postMatch = matchStages[matchStages.length - 1];
+      expect(postMatch.$match.inStock).toEqual({ $gt: 0 });
+      // isActive defense-in-depth stays in the pipeline.
+      expect(matchStages.some((s) => s.$match.isActive === true)).toBe(true);
+    });
+
+    it('D. keeps brand/price in the text and latest fallback filters', async () => {
+      Product.aggregate.mockResolvedValue([]);
+      const textFind = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([]),
+      });
+      Product.find.mockImplementationOnce(() => textFind());
+      Product.find.mockImplementationOnce(() => ({
+        sort: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(mockProducts),
+      }));
+
+      await search('samsung duoi 15 trieu', 5, {
+        brands: ['samsung'],
+        maxPrice: 15_000_000,
+      });
+
+      expect(Product.find).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          isActive: true,
+          inStock: { $gt: 0 },
+          $and: expect.arrayContaining([
+            { brand: { $in: ['samsung'] } },
+            { price: { $lte: 15_000_000 } },
+          ]),
+        })
+      );
+    });
+
+    it('E. constrained query whose candidates all satisfy the constraint does not fall back', async () => {
+      // Simulate Atlas applying the pre-filter: it returns only samsung products.
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'Galaxy S24', brand: 'samsung', price: 12_000_000, isActive: true, inStock: 10 },
+      ]);
+
+      const result = await search('samsung duoi 15 trieu', 5, {
+        brands: ['samsung'],
+        maxPrice: 15_000_000,
+      });
+
+      expect(result.searchMode).toBe('vector');
+      expect(result.products).toHaveLength(1);
+    });
+
+    it('F. numCandidates is deterministic and bounded by the request size', async () => {
+      Product.aggregate.mockResolvedValue(mockProducts);
+
+      // K=10 -> W = min(max(30,12),50)=30 -> numCandidates = max(300,100)=300
+      await search('test', 10, { brands: ['samsung'] });
+      let pipeline = Product.aggregate.mock.calls[0][0];
+      let vs = pipeline.find((s) => s.$vectorSearch);
+      expect(vs.$vectorSearch.limit).toBe(30);
+      expect(vs.$vectorSearch.numCandidates).toBe(300);
+
+      // K=50 -> W = min(max(150,12),50)=50 -> numCandidates = max(500,100)=500
+      await search('test', 50, { brands: ['samsung'] });
+      pipeline = Product.aggregate.mock.calls[1][0];
+      vs = pipeline.find((s) => s.$vectorSearch);
+      expect(vs.$vectorSearch.limit).toBe(50);
+      expect(vs.$vectorSearch.numCandidates).toBe(500);
+
+      // Direct helper: bounded, deterministic.
+      expect(candidateWindow(1)).toEqual({ W: 12, numCandidates: 120 });
+      expect(candidateWindow(5)).toEqual({ W: 15, numCandidates: 150 });
+      expect(candidateWindow(100)).toEqual({ W: 50, numCandidates: 500 });
+    });
+
+    it('G. fallback still triggers when the vector tier genuinely returns nothing', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([]);
+      Product.find.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(mockProducts),
+      });
+
+      const result = await search('samsung duoi 15 trieu', 5, {
+        brands: ['samsung'],
+        maxPrice: 15_000_000,
+      });
+
+      expect(result.searchMode).toBe('text');
+      expect(result.products).toEqual(mockProducts);
+    });
+  });
+
+  describe('buildVectorPreFilter / buildVectorPostFilter unit behavior', () => {
+    it('pre-filter returns null when only unsupported fields apply', () => {
+      expect(buildVectorPreFilter({ inStock: true })).toBeNull();
+      expect(buildVectorPreFilter({ excludedBrands: ['apple'] })).toBeNull();
+      expect(buildVectorPreFilter(null)).toBeNull();
+      expect(buildVectorPreFilter({})).toBeNull();
+    });
+
+    it('pre-filter maps single brand to exact equality', () => {
+      expect(buildVectorPreFilter({ brands: ['samsung'] })).toEqual({
+        brand: 'samsung',
+        isActive: true,
+      });
+    });
+
+    it('pre-filter maps price range', () => {
+      expect(buildVectorPreFilter({ minPrice: 5_000_000, maxPrice: 15_000_000 })).toEqual({
+        price: { $gte: 5_000_000, $lte: 15_000_000 },
+        isActive: true,
+      });
+    });
+
+    it('post-filter keeps only inStock and excludedBrands', () => {
+      expect(buildVectorPostFilter({
+        brands: ['samsung'],
+        maxPrice: 15_000_000,
+        excludedBrands: ['apple'],
+        inStock: true,
+      })).toEqual({
+        $and: [
+          { brand: { $nin: ['apple'] } },
+          { inStock: { $gt: 0 } },
+        ],
+      });
+      expect(buildVectorPostFilter({ brands: ['samsung'], maxPrice: 15_000_000 })).toBeNull();
+      expect(buildVectorPostFilter(null)).toBeNull();
     });
   });
 });

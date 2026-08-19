@@ -41,6 +41,80 @@ function buildMongoFilter(filters) {
   return conditions.length === 1 ? conditions[0] : { $and: conditions };
 }
 
+/**
+ * Build the `$vectorSearch.filter` object from the supported hard constraints.
+ *
+ * Only fields verified as declared filter fields on the Atlas `vector_index`
+ * are emitted: `isActive`, `brand` and `price` (the same set already used by
+ * `productRecommendationService.buildConstraintMatch` against this index).
+ * `inStock` is explicitly NOT a filter field there, so it is left for
+ * `buildVectorPostFilter`. RAM/storage/color are string-parsed in JS
+ * (`productValidator`) and never appear here.
+ *
+ * Returns null when no supported filter field applies, so an empty filter is
+ * never emitted (mirrors `productRecommendationService.buildConstraintMatch`).
+ * Brand uses the exact-equality form for a single brand (the proven shape used
+ * by the recommendation service) and `$in` for multiple brands.
+ */
+function buildVectorPreFilter(filters) {
+  if (!filters) return null;
+
+  const filter = {};
+
+  const price = {};
+  if (filters.minPrice != null) price.$gte = filters.minPrice;
+  if (filters.maxPrice != null) price.$lte = filters.maxPrice;
+  if (Object.keys(price).length > 0) filter.price = price;
+
+  if (Array.isArray(filters.brands) && filters.brands.length > 0) {
+    filter.brand = filters.brands.length === 1
+      ? filters.brands[0]
+      : { $in: filters.brands };
+  }
+
+  if (Object.keys(filter).length === 0) return null;
+  filter.isActive = true;
+  return filter;
+}
+
+/**
+ * Build the vector-tier post-retrieval $match from constraints that are NOT
+ * supported as Atlas filter fields: `inStock` (explicitly documented as not a
+ * filter field) and `excludedBrands`. Returns null when nothing applies.
+ */
+function buildVectorPostFilter(filters) {
+  if (!filters) return null;
+
+  const conditions = [];
+
+  if (Array.isArray(filters.excludedBrands) && filters.excludedBrands.length > 0) {
+    conditions.push({ brand: { $nin: filters.excludedBrands } });
+  }
+
+  if (filters.inStock === true) {
+    conditions.push({ inStock: { $gt: 0 } });
+  } else if (filters.inStock === false) {
+    conditions.push({ inStock: { $lte: 0 } });
+  }
+
+  if (conditions.length === 0) return null;
+  return conditions.length === 1 ? conditions[0] : { $and: conditions };
+}
+
+/**
+ * Bounded, deterministic candidate window for a constrained vector search.
+ *
+ * W is the `$vectorSearch.limit` widened over the requested K so post-retrieval
+ * filtering (inStock / excludedBrands) still has headroom to produce K final
+ * results. numCandidates follows W so Atlas examines enough candidates to fill
+ * the window. W is always >= K and capped at MAX_LIMIT; numCandidates is capped
+ * at MAX_LIMIT * 10. Mirrors `productRecommendationService.candidateWindow`.
+ */
+const candidateWindow = (K) => {
+  const W = Math.min(Math.max(3 * K, 12), MAX_LIMIT);
+  return { W, numCandidates: Math.max(W * 10, 100) };
+};
+
 const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
   const safeLimit = Math.min(Math.max(1, Math.floor(limit)), MAX_LIMIT);
 
@@ -51,6 +125,8 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
   }
 
   const mongoFilter = buildMongoFilter(filters);
+  const vectorPreFilter = buildVectorPreFilter(filters);
+  const vectorPostFilter = buildVectorPostFilter(filters);
 
   try {
     const queryVector = await generateEmbedding(queryText);
@@ -59,16 +135,21 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
 
     logger.debug('[Semantic Search] Executing $vectorSearch on index "vector_index"');
 
+    const { W, numCandidates } = vectorPreFilter ? candidateWindow(safeLimit) : { W: safeLimit, numCandidates: 100 };
+
+    const vectorSearch = {
+      index: 'vector_index',
+      path: 'embedding_vector',
+      queryVector: queryVector,
+      numCandidates: numCandidates,
+      limit: W,
+    };
+    if (vectorPreFilter) {
+      vectorSearch.filter = vectorPreFilter;
+    }
+
     const pipeline = [
-      {
-        $vectorSearch: {
-          index: 'vector_index',
-          path: 'embedding_vector',
-          queryVector: queryVector,
-          numCandidates: 100,
-          limit: safeLimit,
-        },
-      },
+      { $vectorSearch: vectorSearch },
       {
         $project: {
           embedding_vector: 0,
@@ -79,8 +160,13 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
       { $match: { isActive: true } },
     ];
 
-    if (mongoFilter) {
-      pipeline.push({ $match: mongoFilter });
+    if (vectorPostFilter) {
+      pipeline.push({ $match: vectorPostFilter });
+    }
+
+    // With a widened candidate window, cap the returned result at the requested K.
+    if (W > safeLimit) {
+      pipeline.push({ $limit: safeLimit });
     }
 
     let products = await Product.aggregate(pipeline);
@@ -176,4 +262,4 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
   }
 };
 
-module.exports = { search, buildMongoFilter };
+module.exports = { search, buildMongoFilter, buildVectorPreFilter, buildVectorPostFilter, candidateWindow };
