@@ -40,9 +40,6 @@ jobs:
       - name: Run backend tests
         run: npm test -- --runInBand
 
-      - name: Run chatbot offline evaluation (regression gate)
-        run: npm run evaluate:chatbot -- --fail-under=0.90
-
       - name: Run recommendation offline evaluation (regression gate)
         run: npm run evaluate:recommendation -- --fail-under=1.0
 
@@ -51,6 +48,9 @@ jobs:
 
       - name: Run constraint pipeline offline evaluation (regression gate)
         run: npm run evaluate:pipeline -- --fail-under=1.0
+
+      - name: Run chatbot offline evaluation (regression gate)
+        run: npm run evaluate:chatbot -- --fail-under=1.0
 
   frontend-typecheck-lint-tests-build:
     name: Frontend Type Check, Lint, Tests & Build
