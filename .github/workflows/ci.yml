@@ -49,6 +49,9 @@ jobs:
       - name: Run RAG offline evaluation (regression gate)
         run: npm run evaluate:rag -- --fail-under=0.90
 
+      - name: Run constraint pipeline offline evaluation (regression gate)
+        run: npm run evaluate:pipeline -- --fail-under=1.0
+
   frontend-typecheck-lint-tests-build:
     name: Frontend Type Check, Lint, Tests & Build
     runs-on: ubuntu-latest
