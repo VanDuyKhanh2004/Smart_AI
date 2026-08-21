@@ -162,16 +162,6 @@ const mockSummaryRow = {
   preview: { content: 'Hello' },
 };
 
-const mockProduct = {
-  _id: VALID_PRODUCT_ID,
-  name: 'iPhone 15 Pro Max',
-  brand: 'apple',
-  price: 20000000,
-  image: '/images/iphone15.jpg',
-  inStock: 50,
-  isActive: true,
-};
-
 const mockRecProduct = {
   _id: OTHER_PRODUCT_ID,
   name: 'Samsung Galaxy S24',
@@ -229,7 +219,7 @@ describe('Chat REST API — conversation history', () => {
       expect(res.body.data.nextCursor).toBeUndefined();
     });
 
-    it('returns 401 when no auth token is provided', async () => {
+    it('route responds with mocked auth when no token is provided', async () => {
       // The auth middleware mock is applied globally via jest.mock, so we
       // verify the auth contract by testing that unauthenticated requests
       // reach the mock. Real auth is tested in auth.test.js and
@@ -484,11 +474,11 @@ describe('Chat Socket.IO — sendMessage integration', () => {
   let port;
   const clientSockets = [];
 
-  const mockUser = { id: USER_ID, email: 'test@example.com', role: 'user' };
+  const socketTestUser = { id: USER_ID, email: 'test@example.com', role: 'user' };
   const CLIENT_MSG_ID = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 
   const validToken = () =>
-    jwt.sign({ id: mockUser.id, email: mockUser.email }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    jwt.sign({ id: socketTestUser.id, email: socketTestUser.email }, process.env.JWT_SECRET, { expiresIn: '15m' });
 
   function connectClient() {
     return new Promise((resolve, reject) => {
@@ -551,7 +541,7 @@ describe('Chat Socket.IO — sendMessage integration', () => {
     dedup._resetLocal();
     registry._resetLocal();
     User.findById.mockReset();
-    User.findById.mockResolvedValue(mockUser);
+    User.findById.mockResolvedValue(socketTestUser);
     const chatController = require('../controllers/chatController');
     chatController.processMessage.mockReset();
     chatController.processMessage.mockImplementation(async (socket, data) => ({
