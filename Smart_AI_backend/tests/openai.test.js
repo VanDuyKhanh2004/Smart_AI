@@ -108,6 +108,125 @@ describe('generateEmbedding', () => {
   });
 });
 
+describe('generateEmbedding input validation', () => {
+  it('throws on null input', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: { embedContent: jest.fn() },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding(null)).rejects.toThrow('Text input không hợp lệ');
+  });
+
+  it('throws on empty string', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: { embedContent: jest.fn() },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('')).rejects.toThrow('Text input không hợp lệ');
+  });
+
+  it('throws on whitespace-only input after clean', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: { embedContent: jest.fn() },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('   \n\t  ')).rejects.toThrow('Text không thể rỗng sau khi clean');
+  });
+});
+
+describe('generateEmbedding response validation', () => {
+  it('throws on invalid API response (embeddings null)', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({ embeddings: null }),
+        },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('some text')).rejects.toThrow('Gemini API trả về response không hợp lệ');
+  });
+
+  it('throws on wrong embedding dimensions', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({
+            embeddings: [{ values: [1, 2, 3] }],
+          }),
+        },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('some text')).rejects.toThrow(/Embedding dimensions không đúng/);
+  });
+});
+
+describe('generateEmbedding error classification', () => {
+  it('classifies API key error to Vietnamese message', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockRejectedValue(new Error('Invalid API key provided')),
+        },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('text')).rejects.toThrow('Gemini API key không hợp lệ hoặc đã hết hạn');
+  });
+
+  it('classifies quota error to Vietnamese message', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockRejectedValue(new Error('quota exceeded for this project')),
+        },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('text')).rejects.toThrow('Gemini API quota đã hết, vui lòng kiểm tra billing');
+  });
+
+  it('classifies rate limit error to Vietnamese message', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockRejectedValue(new Error('rate limit exceeded, try again later')),
+        },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('text')).rejects.toThrow('Gemini API rate limit, vui lòng thử lại sau');
+  });
+
+  it('wraps generic error with Lỗi Gemini API prefix', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockRejectedValue(new Error('something went wrong')),
+        },
+      })),
+    }));
+
+    const { generateEmbedding } = require('../utils/openai');
+    await expect(generateEmbedding('text')).rejects.toThrow('Lỗi Gemini API: something went wrong');
+  });
+});
+
 describe('generateEmbeddingsBatch', () => {
   it('logs safe metadata only', async () => {
     jest.doMock('@google/genai', () => ({
@@ -185,6 +304,69 @@ describe('generateEmbeddingsBatch', () => {
       'Batch embedding generation failed',
     );
   });
+
+  it('throws on non-array input', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: { embedContent: jest.fn() },
+      })),
+    }));
+
+    const { generateEmbeddingsBatch } = require('../utils/openai');
+    await expect(generateEmbeddingsBatch('not an array')).rejects.toThrow('Texts phải là array không rỗng');
+  });
+
+  it('throws on empty array', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: { embedContent: jest.fn() },
+      })),
+    }));
+
+    const { generateEmbeddingsBatch } = require('../utils/openai');
+    await expect(generateEmbeddingsBatch([])).rejects.toThrow('Texts phải là array không rỗng');
+  });
+
+  it('throws on invalid element in array', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: { embedContent: jest.fn() },
+      })),
+    }));
+
+    const { generateEmbeddingsBatch } = require('../utils/openai');
+    await expect(generateEmbeddingsBatch([null])).rejects.toThrow('Text tại index 0 không hợp lệ');
+  });
+
+  it('throws on response count mismatch', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({
+            embeddings: [{ values: new Array(1536).fill(0.1) }],
+          }),
+        },
+      })),
+    }));
+
+    const { generateEmbeddingsBatch } = require('../utils/openai');
+    await expect(generateEmbeddingsBatch(['text1', 'text2'])).rejects.toThrow('Gemini API trả về số lượng embeddings không đúng');
+  });
+
+  it('throws on invalid embedding dimensions in batch', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({
+            embeddings: [{ values: [1, 2, 3] }],
+          }),
+        },
+      })),
+    }));
+
+    const { generateEmbeddingsBatch } = require('../utils/openai');
+    await expect(generateEmbeddingsBatch(['text'])).rejects.toThrow('Embedding không hợp lệ trong batch response');
+  });
 });
 
 describe('calculateSimilarity', () => {
@@ -204,6 +386,54 @@ describe('calculateSimilarity', () => {
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+
+  it('returns approximately 1.0 for identical vectors', () => {
+    const { calculateSimilarity } = require('../utils/openai');
+    const result = calculateSimilarity([1, 1], [1, 1]);
+    expect(result).toBeCloseTo(1.0, 10);
+  });
+
+  it('throws on non-array input', () => {
+    const { calculateSimilarity } = require('../utils/openai');
+    expect(() => calculateSimilarity('not an array', [1, 2])).toThrow('Vectors phải là arrays');
+  });
+
+  it('throws on dimension mismatch', () => {
+    const { calculateSimilarity } = require('../utils/openai');
+    expect(() => calculateSimilarity([1, 2], [1, 2, 3])).toThrow('Vectors phải có cùng dimensions');
+  });
+});
+
+describe('testOpenAIConnection', () => {
+  it('returns true on valid embedding', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockResolvedValue({
+            embeddings: [{ values: new Array(1536).fill(0.1) }],
+          }),
+        },
+      })),
+    }));
+
+    const { testOpenAIConnection } = require('../utils/openai');
+    const result = await testOpenAIConnection();
+    expect(result).toBe(true);
+  });
+
+  it('returns false on API failure', async () => {
+    jest.doMock('@google/genai', () => ({
+      GoogleGenAI: jest.fn(() => ({
+        models: {
+          embedContent: jest.fn().mockRejectedValue(new Error('connection refused')),
+        },
+      })),
+    }));
+
+    const { testOpenAIConnection } = require('../utils/openai');
+    const result = await testOpenAIConnection();
+    expect(result).toBe(false);
   });
 });
 
