@@ -7,6 +7,9 @@ export { default as UserActions } from './UserActions';
 export { default as MiniCartPreview } from './MiniCartPreview';
 export { default as UserDropdown } from './UserDropdown';
 
+// Footer component
+export { default as Footer } from './Footer';
+
 // Admin sidebar components - Admin Sidebar Requirements
 export { default as AdminSidebar } from './AdminSidebar';
 export { default as SidebarNavGroup } from './SidebarNavGroup';
