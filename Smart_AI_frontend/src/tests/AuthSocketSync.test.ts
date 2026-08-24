@@ -3,6 +3,7 @@ import type { Mock } from 'vitest';
 import chatService from '@/services/chat.service';
 import type { ChatServiceConfig } from '@/services/chat.service';
 import { useAuthStore } from '@/stores/authStore';
+import { useCompareStore } from '@/stores/compareStore';
 import { authService } from '@/services/auth.service';
 import { getSelectedSession, getRestoreMode } from '@/services/chatPersistence';
 import type { User } from '@/types/auth.type';
@@ -321,6 +322,43 @@ describe('authStore.logout disconnects the chat socket', () => {
 
     expect(getSelectedSession()).toBeNull();
     expect(getRestoreMode()).not.toBe('selected');
+  });
+
+  it('logout clears comparison state from localStorage and compareStore', async () => {
+    localStorage.setItem('compareList', JSON.stringify(['id1', 'id2']));
+    useCompareStore.setState({ items: ['id1', 'id2'] });
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tok');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rtok');
+
+    await useAuthStore.getState().logout();
+
+    expect(localStorage.getItem('compareList')).toBeNull();
+    expect(useCompareStore.getState().items).toEqual([]);
+  });
+
+  it('logout removes the user key from localStorage', async () => {
+    localStorage.setItem('user', JSON.stringify({ _id: 'u1', name: 'Test' }));
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tok');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rtok');
+
+    await useAuthStore.getState().logout();
+
+    expect(localStorage.getItem('user')).toBeNull();
+  });
+
+  it('cross-user comparison isolation: User1 compare list does not persist after logout', async () => {
+    localStorage.setItem('compareList', JSON.stringify(['prodA', 'prodB']));
+    useCompareStore.setState({ items: ['prodA', 'prodB'] });
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'tok');
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rtok');
+
+    await useAuthStore.getState().logout();
+
+    expect(localStorage.getItem('compareList')).toBeNull();
+    expect(useCompareStore.getState().items).toEqual([]);
+
+    useCompareStore.getState().loadFromStorage();
+    expect(useCompareStore.getState().items).toEqual([]);
   });
 });
 

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { authService } from '@/services/auth.service';
 import { useCartStore } from '@/stores/cartStore';
 import { useWishlistStore } from '@/stores/wishlistStore';
+import { useCompareStore } from '@/stores/compareStore';
 import { clearChatPersistence } from '@/services/chatPersistence';
 import type { User } from '@/types/auth.type';
 
@@ -153,6 +154,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     } finally {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
+      localStorage.removeItem('user');
 
       // Clear chat session persistence so a different user on this browser can
       // never hydrate the previous user's conversation after logout.
@@ -170,6 +172,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       useCartStore.getState().clearLocalCart();
       // Clear wishlist state on logout
       useWishlistStore.getState().reset();
+      // Clear comparison state on logout to prevent cross-user leakage
+      useCompareStore.getState().clearCompare();
 
       set({
         user: null,
