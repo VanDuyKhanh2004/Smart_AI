@@ -290,13 +290,57 @@ const preclassifyComplaintContinuation = (userQuery) => {
 };
 
 /**
+ * Deterministic pre-classifier for appointment queries.
+ * Recognizes OBVIOUS appointment-related Vietnamese phrases so the appointment
+ * flow never depends on a live LLM provider. Returns an appointment intent
+ * result, or null to defer elsewhere.
+ */
+const preclassifyAppointment = (userQuery) => {
+  const normalized = normalizePhrase(userQuery);
+  if (!normalized) return null;
+
+  const APPOINTMENT_RESULT = {
+    intent: "appointment",
+    clarified_query: null,
+    direct_response: null,
+    preclassified: "appointment",
+  };
+
+  // Appointment keywords (Vietnamese)
+  if (
+    /lịch\s*hẹn/.test(normalized) ||
+    /lịch\s*của\s*tôi/.test(normalized) ||
+    /có\s*lịch\s*hẹn/.test(normalized) ||
+    /đặt\s*lịch/.test(normalized) ||
+    /hẹn\s*trước/.test(normalized) ||
+    /lịch\s*đặt/.test(normalized) ||
+    /lịch\s*khám/.test(normalized) ||
+    /lịch\s*tư\s*vấn/.test(normalized) ||
+    /lịch\s*sửa\s*chữa/.test(normalized) ||
+    /lịch\s*bảo\s*hành/.test(normalized)
+  ) {
+    return APPOINTMENT_RESULT;
+  }
+
+  return null;
+};
+
+/**
  * Deterministic pre-classifier for known small-talk patterns.
  * Returns null if no pattern matches (defer to AI classifier).
  */
 const preclassifyIntent = (userQuery) => {
   if (!userQuery || typeof userQuery !== "string") return null;
 
-  // Complaint detection runs FIRST so an obvious complaint never falls through
+  // Appointment detection runs FIRST so an obvious appointment query never
+  // falls through to complaint/small-talk sets or a provider call.
+  const appointmentResult = preclassifyAppointment(userQuery);
+  if (appointmentResult) {
+    logger.debug("[Pre-classifier] Matched as appointment");
+    return appointmentResult;
+  }
+
+  // Complaint detection runs SECOND so an obvious complaint never falls through
   // to the small-talk sets or a provider call.
   const complaintResult = preclassifyComplaint(userQuery);
   if (complaintResult) {
@@ -471,7 +515,7 @@ const preclassifyIntent = (userQuery) => {
 };
 
 const INTENT_SYSTEM_PROMPT =
-  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
+  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint|appointment), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
 
 /**
  * Phân loại ý định và xử lý phản hồi thông minh
@@ -518,7 +562,7 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
       const parsedResponse = parseJsonFromText(responseText);
       if (
         !parsedResponse.intent ||
-        !["product_query", "small_talk", "complaint"].includes(parsedResponse.intent)
+        !["product_query", "small_talk", "complaint", "appointment"].includes(parsedResponse.intent)
       ) {
         throw new Error("Invalid intent classification");
       }
@@ -579,9 +623,9 @@ const generateResponse = async (prompt) => {
   }
 };
 
-const generateChatResponse = async (chatHistory, userMessage, productContext = []) => {
+const generateChatResponse = async (chatHistory, userMessage, productContext = [], userContext = null, appointmentContext = null) => {
   try {
-    const systemPrompt = createSystemPrompt(productContext, chatHistory);
+    const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext);
     const messages = [
       { role: "system", content: systemPrompt },
       ...(Array.isArray(chatHistory)
@@ -622,7 +666,7 @@ const generateChatResponse = async (chatHistory, userMessage, productContext = [
   }
 };
 
-const createSystemPrompt = (productContext = [], chatHistory = []) => {
+const createSystemPrompt = (productContext = [], chatHistory = [], userContext = null, appointmentContext = null) => {
   const contextText =
     Array.isArray(productContext) && productContext.length > 0
       ? productContext
@@ -647,12 +691,41 @@ ${product.specs ? `- Thông số: ${JSON.stringify(product.specs, null, 2)}` : "
           .join("\n")
       : "";
 
+  let userText = "";
+  if (userContext && typeof userContext === "object") {
+    const parts = [];
+    if (userContext.name) parts.push(`Tên: ${userContext.name}`);
+    if (userContext.email) parts.push(`Email: ${userContext.email}`);
+    if (userContext.phone) parts.push(`SĐT: ${userContext.phone}`);
+    if (parts.length > 0) {
+      userText = `THÔNG TIN KHÁCH HÀNG:\n${parts.join("\n")}`;
+    }
+  }
+
+  let appointmentText = "";
+  if (Array.isArray(appointmentContext) && appointmentContext.length > 0) {
+    appointmentText = appointmentContext
+      .map((apt, index) => {
+        const lines = [`LỊCH HẸN ${index + 1}:`];
+        if (apt.storeName) lines.push(`- Cửa hàng: ${apt.storeName}`);
+        if (apt.storeAddress) lines.push(`- Địa chỉ: ${apt.storeAddress}`);
+        if (apt.storePhone) lines.push(`- SĐT cửa hàng: ${apt.storePhone}`);
+        if (apt.date) lines.push(`- Ngày: ${apt.date}`);
+        if (apt.timeSlot) lines.push(`- Giờ: ${apt.timeSlot}`);
+        if (apt.purpose) lines.push(`- Mục đích: ${apt.purpose}`);
+        if (apt.status) lines.push(`- Trạng thái: ${apt.status}`);
+        if (apt.notes) lines.push(`- Ghi chú: ${apt.notes}`);
+        return lines.join("\n");
+      })
+      .join("\n\n");
+  }
+
   return `Bạn là Quỳnh Như nhân viên tư vấn bán hàng tại Dienthoaigiakho.
 1. TƯ VẤN NHIỆT TÌNH, thân thiện, tự nhiên.
 2. CHỈ dùng dữ liệu sản phẩm, không bịa.
 3. Luôn nêu tên sản phẩm, hãng, giá, tồn kho; chỉ đưa thông số khi được hỏi.
 4. Nếu thiếu dữ liệu thì thừa nhận và gợi ý thay thế.
-${contextText ? `DANH SÁCH SẢN PHẨM:\n${contextText}` : ""}
+${userText ? `${userText}\n` : ""}${appointmentText ? `DANH SÁCH LỊCH HẸN:\n${appointmentText}\n` : ""}${contextText ? `DANH SÁCH SẢN PHẨM:\n${contextText}` : ""}
 ${historyText ? `LỊCH SỬ CHAT GẦN ĐÂY:\n${historyText}` : ""}
 Không cần chào lại nếu đã chào trước đó. Trả lời bằng tiếng Việt thân thiện.`;
 };
@@ -757,8 +830,8 @@ const streamGeminiChat = async ({ systemPrompt, chatHistory, userMessage, signal
  * On a mid-stream provider error after partial output, throws the error with
  * error.partialContent set to whatever was emitted so far.
  */
-const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta }) => {
-  const systemPrompt = createSystemPrompt(productContext, chatHistory);
+const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta, userContext = null, appointmentContext = null }) => {
+  const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext);
   const messages = [
     { role: "system", content: systemPrompt },
     ...(Array.isArray(chatHistory) ? chatHistory.map((msg) => ({ role: msg.role, content: msg.content })) : []),
@@ -996,6 +1069,7 @@ module.exports = {
   preclassifyIntent,
   preclassifyComplaint,
   preclassifyComplaintContinuation,
+  preclassifyAppointment,
   generateResponse,
   generateChatResponse,
   generateChatResponseStream,

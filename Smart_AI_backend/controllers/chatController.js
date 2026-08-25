@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const Conversation = require("../models/Conversation");
 const Complaint = require("../models/Complaint");
+const Appointment = require("../models/Appointment");
 const logger = require("../utils/logger");
 const productSearchService = require("../services/productSearchService");
 const {
@@ -9,6 +10,7 @@ const {
   generateChatResponseStream,
   generateComplaintResponse,
   preclassifyComplaintContinuation,
+  preclassifyAppointment,
 } = require("../utils/gemini");
 const complaintService = require("../services/complaintService");
 const complaintFlowService = require("../services/complaintFlowService");
@@ -41,6 +43,99 @@ const extractContactFromMessage = (message) => {
   }
 
   return result;
+};
+
+/**
+ * Build user context from socket.data.user (server-trusted identity).
+ * Returns a plain object with safe profile fields, or null if no user.
+ */
+const buildUserContext = (socket) => {
+  const user = socket && socket.data && socket.data.user;
+  if (!user || !user.id) return null;
+  const ctx = {};
+  if (user.name) ctx.name = user.name;
+  if (user.email) ctx.email = user.email;
+  if (user.phone) ctx.phone = user.phone;
+  return Object.keys(ctx).length > 0 ? ctx : null;
+};
+
+/**
+ * Build appointment context for the authenticated user.
+ * Queries only by the server-trusted userId; never by a client-supplied value.
+ * Returns an array of appointment summaries for active (pending/confirmed)
+ * appointments, sorted by date ascending (nearest first).
+ */
+const buildAppointmentContext = async (userId) => {
+  if (!userId) return [];
+  const now = new Date();
+  try {
+    const appointments = await Appointment.find({
+      user: userId,
+      status: { $in: ["pending", "confirmed"] },
+      date: { $gte: now },
+    })
+      .populate("store", "name address phone")
+      .sort({ date: 1, "timeSlot.start": 1 })
+      .limit(10);
+
+    return appointments.map((apt) => {
+      const aptObj = apt.toObject ? apt.toObject() : { ...apt };
+      const result = {};
+      if (aptObj.store) {
+        if (aptObj.store.name) result.storeName = aptObj.store.name;
+        if (aptObj.store.address) {
+          result.storeAddress = aptObj.store.address.fullAddress || aptObj.store.address;
+        }
+        if (aptObj.store.phone) result.storePhone = aptObj.store.phone;
+      }
+      if (aptObj.date) {
+        result.date = aptObj.date.toLocaleDateString("vi-VN", {
+          weekday: "long", year: "numeric", month: "long", day: "numeric",
+          timeZone: "Asia/Ho_Chi_Minh",
+        });
+      }
+      if (aptObj.timeSlot) {
+        result.timeSlot = `${aptObj.timeSlot.start} - ${aptObj.timeSlot.end}`;
+      }
+      if (aptObj.purpose) {
+        const purposeMap = { consultation: "Tư vấn", warranty: "Bảo hành", purchase: "Mua hàng", other: "Khác" };
+        result.purpose = purposeMap[aptObj.purpose] || aptObj.purpose;
+      }
+      if (aptObj.status) {
+        const statusMap = { pending: "Chờ xác nhận", confirmed: "Đã xác nhận", cancelled: "Đã hủy", completed: "Đã hoàn thành" };
+        result.status = statusMap[aptObj.status] || aptObj.status;
+      }
+      if (aptObj.notes) result.notes = aptObj.notes;
+      return result;
+    });
+  } catch (err) {
+    logger.warn({ err: { message: err.message }, userId }, "Failed to fetch appointment context");
+    return [];
+  }
+};
+
+/**
+ * Deterministically format a list of appointment summaries into a Vietnamese
+ * response string. Used for simple factual appointment queries where
+ * deterministic output is preferred over LLM generation.
+ */
+const formatAppointmentResponse = (appointments) => {
+  if (!appointments || appointments.length === 0) {
+    return "Hiện tại bạn chưa có lịch hẹn nào sắp tới. Bạn có muốn đặt lịch hẹn không?";
+  }
+
+  const lines = [`Bạn có ${appointments.length} lịch hẹn sắp tới:`];
+  appointments.forEach((apt, i) => {
+    const parts = [];
+    if (apt.date) parts.push(apt.date);
+    if (apt.timeSlot) parts.push(apt.timeSlot);
+    if (apt.storeName) parts.push(`tại ${apt.storeName}`);
+    if (apt.purpose) parts.push(`(${apt.purpose})`);
+    if (apt.status) parts.push(`- ${apt.status}`);
+    lines.push(`${i + 1}. ${parts.join(" ")}`);
+  });
+
+  return lines.join("\n");
 };
 
 class ChatController {
@@ -153,6 +248,12 @@ class ChatController {
           clarifiedQuery: null,
           complaintSummary: null,
         };
+      } else if (intentResult.intent === "appointment") {
+        return {
+          intent: "appointment",
+          directResponse: null,
+          clarifiedQuery: null,
+        };
       } else if (intentResult.intent === "complaint") {
         return {
           intent: "complaint",
@@ -226,7 +327,9 @@ class ChatController {
     relatedProducts,
     clientMessageId,
     signal,
-    generationId = null
+    generationId = null,
+    userContext = null,
+    appointmentContext = null
   ) {
     let batching = null;
     let startEmitted = false;
@@ -318,6 +421,8 @@ class ChatController {
             productContext: validatedProducts,
             signal,
             onDelta: (delta) => batching.push(delta),
+            userContext,
+            appointmentContext,
           });
 
           // Guard the rare race where the abort lands exactly as the provider
@@ -349,7 +454,7 @@ class ChatController {
           throw _streamErr;
         }
       } else {
-        const res = await generateChatResponse(validatedHistory, userQuery, validatedProducts);
+        const res = await generateChatResponse(validatedHistory, userQuery, validatedProducts, userContext, appointmentContext);
         text = res.text;
         provider = res.provider;
         if (batching) { batching.dispose(); batching = null; }
@@ -436,6 +541,57 @@ class ChatController {
       return {
         fullResponse: fallbackResponse,
         responseType: "small_talk",
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    }
+  }
+
+  /**
+   * Handle Appointment intent - Query user's appointments.
+   *
+   * For simple factual queries (do I have an appointment, what's my nearest
+   * appointment), a deterministic response is preferred. For ambiguous
+   * follow-ups that require natural language reasoning, the LLM is used with
+   * appointment context injected into the system prompt.
+   */
+  async handleAppointment(socket, sessionId, userId, chatHistory, userQuery, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+      logger.info({ sessionId }, 'Handling appointment query');
+
+      const appointments = await buildAppointmentContext(userId);
+      throwIfCancelled(signal);
+
+      const responseText = formatAppointmentResponse(appointments);
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, responseText, {
+        responseType: "appointment",
+        skipRAG: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: responseText,
+        responseType: "appointment",
+        relatedProducts: [],
+        appointmentData: appointments,
+        aiPayload: payload,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'Appointment handling error');
+      const fallbackResponse = "Em xin lỗi, hiện tại em không thể truy xuất thông tin lịch hẹn. Bạn vui lòng thử lại sau hoặc kiểm tra lịch hẹn trong mục Quản lý lịch hẹn trên hệ thống.";
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, fallbackResponse, {
+        responseType: "appointment",
+        skipRAG: true,
+        fallback: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: fallbackResponse,
+        responseType: "appointment",
         relatedProducts: [],
         aiPayload: payload,
       };
@@ -1090,6 +1246,17 @@ class ChatController {
         clientMessageId,
         generationId
       );
+    } else if (intentResult.intent === "appointment") {
+      responseResult = await this.handleAppointment(
+        socket,
+        sessionId,
+        userId,
+        chatHistory,
+        userQuery,
+        clientMessageId,
+        generationId,
+        signal
+      );
     } else if (intentResult.intent === "complaint") {
       responseResult = await this.handleComplaint(
         socket,
@@ -1152,6 +1319,8 @@ class ChatController {
         await maybeTestDelay(signal);
       }
       throwIfCancelled(signal);
+      const userContext = buildUserContext(socket);
+      const appointmentContext = await buildAppointmentContext(userId);
       responseResult = await this.generateResponse(
         socket,
         sessionId,
@@ -1160,7 +1329,9 @@ class ChatController {
         relatedProducts,
         clientMessageId,
         signal,
-        generationId
+        generationId,
+        userContext,
+        appointmentContext
       );
 
       // ================================================================

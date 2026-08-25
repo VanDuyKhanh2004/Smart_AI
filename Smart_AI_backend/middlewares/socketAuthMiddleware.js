@@ -32,7 +32,7 @@ const extractToken = (socket) => {
  * Requires a valid access token via `socket.handshake.auth.token` or an
  * `Authorization: Bearer <token>` header. Access tokens are verified with the
  * same secret as REST endpoints; refresh tokens are rejected.
- * On success, `socket.data.user` is populated with `{ id, email, role }` only.
+ * On success, `socket.data.user` is populated with `{ id, email, role, name, phone }`.
  */
 const authenticateSocket = async (socket, next) => {
   const token = extractToken(socket);
@@ -61,6 +61,8 @@ const authenticateSocket = async (socket, next) => {
       id: user.id,
       email: user.email,
       role: user.role,
+      name: user.name,
+      phone: user.phone || null,
     };
 
     return next();

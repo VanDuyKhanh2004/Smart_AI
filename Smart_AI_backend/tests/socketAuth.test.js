@@ -178,8 +178,10 @@ describe('Socket.IO handshake authentication', () => {
       id: mockUser.id,
       email: mockUser.email,
       role: mockUser.role,
+      name: mockUser.name,
+      phone: mockUser.phone || null,
     });
-    expect(Object.keys(serverSocket.data.user).sort()).toEqual(['email', 'id', 'role']);
+    expect(Object.keys(serverSocket.data.user).sort()).toEqual(['email', 'id', 'name', 'phone', 'role']);
   });
 });
 
