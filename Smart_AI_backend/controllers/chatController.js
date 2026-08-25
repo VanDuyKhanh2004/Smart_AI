@@ -2,6 +2,8 @@ const crypto = require("crypto");
 const Conversation = require("../models/Conversation");
 const Complaint = require("../models/Complaint");
 const Appointment = require("../models/Appointment");
+const Store = require("../models/Store");
+const Promotion = require("../models/Promotion");
 const logger = require("../utils/logger");
 const productSearchService = require("../services/productSearchService");
 const {
@@ -138,6 +140,149 @@ const formatAppointmentResponse = (appointments) => {
   return lines.join("\n");
 };
 
+/**
+ * Build store context for the chatbot.
+ * Queries only active stores and returns safe user-facing fields.
+ * Follows the same pattern as buildAppointmentContext.
+ */
+const buildStoreContext = async () => {
+  try {
+    const stores = await Store.find({ isActive: true }).sort({ name: 1 }).limit(10);
+    return stores.map((store) => {
+      const obj = store.toObject ? store.toObject() : { ...store };
+      const result = {};
+      if (obj.name) result.name = obj.name;
+      if (obj.address) {
+        result.address = obj.address.fullAddress || obj.address;
+      }
+      if (obj.phone) result.phone = obj.phone;
+      if (obj.businessHours) {
+        const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+        const dayNames = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+        const parts = [];
+        days.forEach((day, i) => {
+          const bh = obj.businessHours[day];
+          if (bh && !bh.isClosed && bh.open && bh.close) {
+            parts.push(`${dayNames[i]}: ${bh.open}-${bh.close}`);
+          }
+        });
+        if (parts.length > 0) result.businessHours = parts.join(", ");
+      }
+      if (obj.description) result.description = obj.description;
+      return result;
+    });
+  } catch (err) {
+    logger.warn({ err: { message: err.message } }, "Failed to fetch store context");
+    return [];
+  }
+};
+
+/**
+ * Build promotion context for the chatbot.
+ * Queries only currently valid promotions (isActive, within date range, usage remaining).
+ * Returns safe user-facing fields with remainingUses virtual.
+ */
+const buildPromotionContext = async () => {
+  const now = new Date();
+  try {
+    const promotions = await Promotion.find({
+      isActive: true,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      $expr: { $lt: ["$usedCount", "$usageLimit"] },
+    }).sort({ createdAt: -1 }).limit(20);
+
+    return promotions.map((promo) => {
+      const obj = promo.toObject ? promo.toObject() : { ...promo };
+      const result = {};
+      if (obj.code) result.code = obj.code;
+      if (obj.description) result.description = obj.description;
+      if (obj.discountType) result.discountType = obj.discountType;
+      if (obj.discountValue != null) result.discountValue = obj.discountValue;
+      if (obj.maxDiscountAmount != null) result.maxDiscountAmount = obj.maxDiscountAmount;
+      if (obj.minOrderValue != null) result.minOrderValue = obj.minOrderValue;
+      if (obj.startDate) {
+        result.startDate = new Date(obj.startDate).toLocaleDateString("vi-VN", {
+          day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Ho_Chi_Minh",
+        });
+      }
+      if (obj.endDate) {
+        result.endDate = new Date(obj.endDate).toLocaleDateString("vi-VN", {
+          day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Ho_Chi_Minh",
+        });
+      }
+      if (obj.usageLimit != null && obj.usedCount != null) {
+        result.remainingUses = Math.max(0, obj.usageLimit - obj.usedCount);
+      }
+      return result;
+    });
+  } catch (err) {
+    logger.warn({ err: { message: err.message } }, "Failed to fetch promotion context");
+    return [];
+  }
+};
+
+/**
+ * Deterministically format a list of store summaries into a Vietnamese
+ * response string. Used for simple factual store queries.
+ */
+const formatStoreResponse = (stores) => {
+  if (!stores || stores.length === 0) {
+    return "Hiện chưa có cửa hàng nào đang hoạt động.";
+  }
+
+  const lines = [`Có ${stores.length} cửa hàng đang hoạt động:`];
+  stores.forEach((store, i) => {
+    const parts = [];
+    if (store.name) parts.push(store.name);
+    if (store.address) parts.push(`Địa chỉ: ${store.address}`);
+    if (store.phone) parts.push(`Điện thoại: ${store.phone}`);
+    if (store.businessHours) parts.push(`Giờ mở cửa: ${store.businessHours}`);
+    if (store.description) parts.push(`Mô tả: ${store.description}`);
+    lines.push(`${i + 1}. ${parts.join("\n   ")}`);
+  });
+
+  return lines.join("\n");
+};
+
+/**
+ * Deterministically format a list of promotion summaries into a Vietnamese
+ * response string. Used for simple factual promotion queries.
+ */
+const formatPromotionResponse = (promotions) => {
+  if (!promotions || promotions.length === 0) {
+    return "Hiện chưa có mã khuyến mãi nào đang hoạt động.";
+  }
+
+  const lines = [`Hiện có ${promotions.length} mã khuyến mãi:`];
+  promotions.forEach((promo, i) => {
+    const parts = [];
+    if (promo.code) parts.push(`${promo.code}`);
+    if (promo.description) parts.push(`   ${promo.description}`);
+    if (promo.discountType === "percentage") {
+      let discountLine = `   Giảm ${promo.discountValue}%`;
+      if (promo.maxDiscountAmount) {
+        discountLine += ` (tối đa ${promo.maxDiscountAmount.toLocaleString("vi-VN")}đ)`;
+      }
+      parts.push(discountLine);
+    } else if (promo.discountType === "fixed") {
+      parts.push(`   Giảm ${promo.discountValue.toLocaleString("vi-VN")}đ`);
+    }
+    if (promo.minOrderValue) {
+      parts.push(`   Đơn tối thiểu: ${promo.minOrderValue.toLocaleString("vi-VN")}đ`);
+    }
+    if (promo.startDate && promo.endDate) {
+      parts.push(`   Hiệu lực: ${promo.startDate} - ${promo.endDate}`);
+    }
+    if (promo.remainingUses != null) {
+      parts.push(`   Còn ${promo.remainingUses} lượt sử dụng`);
+    }
+    lines.push(`${i + 1}. ${parts.join("\n")}`);
+  });
+
+  return lines.join("\n");
+};
+
 class ChatController {
   /**
    * Builds the aiResponse payload shared by every branch. The same object is
@@ -257,6 +402,18 @@ class ChatController {
       } else if (intentResult.intent === "complaint") {
         return {
           intent: "complaint",
+          directResponse: null,
+          clarifiedQuery: null,
+        };
+      } else if (intentResult.intent === "store_query") {
+        return {
+          intent: "store_query",
+          directResponse: null,
+          clarifiedQuery: null,
+        };
+      } else if (intentResult.intent === "promotion_query") {
+        return {
+          intent: "promotion_query",
           directResponse: null,
           clarifiedQuery: null,
         };
@@ -592,6 +749,100 @@ class ChatController {
       return {
         fullResponse: fallbackResponse,
         responseType: "appointment",
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    }
+  }
+
+  /**
+   * Handle Store query - Query store information.
+   * Deterministic response following the same pattern as handleAppointment.
+   */
+  async handleStoreQuery(socket, sessionId, userId, chatHistory, userQuery, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+      logger.info({ sessionId }, 'Handling store query');
+
+      const stores = await buildStoreContext();
+      throwIfCancelled(signal);
+
+      const responseText = formatStoreResponse(stores);
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, responseText, {
+        responseType: "store_query",
+        skipRAG: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: responseText,
+        responseType: "store_query",
+        relatedProducts: [],
+        storeData: stores,
+        aiPayload: payload,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'Store query handling error');
+      const fallbackResponse = "Em xin lỗi, hiện tại em không thể truy xuất thông tin cửa hàng. Bạn vui lòng thử lại sau hoặc liên hệ hotline 1900xxxx để được hỗ trợ ạ.";
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, fallbackResponse, {
+        responseType: "store_query",
+        skipRAG: true,
+        fallback: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: fallbackResponse,
+        responseType: "store_query",
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    }
+  }
+
+  /**
+   * Handle Promotion query - Query promotion information.
+   * Deterministic response following the same pattern as handleAppointment.
+   */
+  async handlePromotionQuery(socket, sessionId, userId, chatHistory, userQuery, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+      logger.info({ sessionId }, 'Handling promotion query');
+
+      const promotions = await buildPromotionContext();
+      throwIfCancelled(signal);
+
+      const responseText = formatPromotionResponse(promotions);
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, responseText, {
+        responseType: "promotion_query",
+        skipRAG: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: responseText,
+        responseType: "promotion_query",
+        relatedProducts: [],
+        promotionData: promotions,
+        aiPayload: payload,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'Promotion query handling error');
+      const fallbackResponse = "Em xin lỗi, hiện tại em không thể truy xuất thông tin khuyến mãi. Bạn vui lòng thử lại sau hoặc kiểm tra trên hệ thống ạ.";
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, fallbackResponse, {
+        responseType: "promotion_query",
+        skipRAG: true,
+        fallback: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: fallbackResponse,
+        responseType: "promotion_query",
         relatedProducts: [],
         aiPayload: payload,
       };
@@ -1259,6 +1510,28 @@ class ChatController {
       );
     } else if (intentResult.intent === "complaint") {
       responseResult = await this.handleComplaint(
+        socket,
+        sessionId,
+        userId,
+        chatHistory,
+        userQuery,
+        clientMessageId,
+        generationId,
+        signal
+      );
+    } else if (intentResult.intent === "store_query") {
+      responseResult = await this.handleStoreQuery(
+        socket,
+        sessionId,
+        userId,
+        chatHistory,
+        userQuery,
+        clientMessageId,
+        generationId,
+        signal
+      );
+    } else if (intentResult.intent === "promotion_query") {
+      responseResult = await this.handlePromotionQuery(
         socket,
         sessionId,
         userId,

@@ -326,6 +326,102 @@ const preclassifyAppointment = (userQuery) => {
 };
 
 /**
+ * Deterministic pre-classifier for promotion queries.
+ * Recognizes OBVIOUS promotion-related Vietnamese phrases so the promotion
+ * flow never depends on a live LLM provider. Returns a promotion intent
+ * result, or null to defer elsewhere.
+ *
+ * Guard: product-pricing queries ("giảm giá sản phẩm X", "điện thoại nào giảm giá")
+ * must NOT match — those are product_query intents.
+ */
+const preclassifyPromotion = (userQuery) => {
+  const normalized = normalizePhrase(userQuery);
+  if (!normalized) return null;
+
+  const PROMOTION_RESULT = {
+    intent: "promotion_query",
+    clarified_query: null,
+    direct_response: null,
+    preclassified: "promotion_query",
+  };
+
+  // Product-pricing guard: if the query is about product discounts/pricing,
+  // it should remain a product_query, not promotion_query.
+  if (
+    /giảm\s*giá\s*(sản\s*phẩm|điện\s*thoại|máy|laptop|tablet|sp)/.test(normalized) ||
+    /(sản\s*phẩm|điện\s*thoại|máy|laptop|tablet|sp)\s*(nào|gì|đang|có)?(\s*\S+)?\s*giảm\s*giá/.test(normalized) ||
+    /(giá|giảm)\s*(sản\s*phẩm|điện\s*thoại|máy|laptop|tablet)/.test(normalized)
+  ) {
+    return null;
+  }
+
+  // Promotion keywords (Vietnamese)
+  if (
+    /mã\s*giảm\s*giá/.test(normalized) ||
+    /khuyến\s*mãi/.test(normalized) ||
+    /voucher/.test(normalized) ||
+    /coupon/.test(normalized) ||
+    /ưu\s*đãi/.test(normalized) ||
+    /chương\s*trình\s*giảm/.test(normalized) ||
+    /đợt\s*giảm/.test(normalized) ||
+    /có\s*mã\s*gì/.test(normalized) ||
+    /mã\s*nào/.test(normalized) ||
+    /mã\s*giam/.test(normalized) ||
+    /giảm\s*giá/.test(normalized)
+  ) {
+    return PROMOTION_RESULT;
+  }
+
+  return null;
+};
+
+/**
+ * Deterministic pre-classifier for store queries.
+ * Recognizes OBVIOUS store-related Vietnamese phrases so the store
+ * flow never depends on a live LLM provider. Returns a store intent
+ * result, or null to defer elsewhere.
+ *
+ * Guard: "ở đâu" alone must NOT match — it needs store-related context
+ * to avoid swallowing product-location queries.
+ */
+const preclassifyStore = (userQuery) => {
+  const normalized = normalizePhrase(userQuery);
+  if (!normalized) return null;
+
+  const STORE_RESULT = {
+    intent: "store_query",
+    clarified_query: null,
+    direct_response: null,
+    preclassified: "store_query",
+  };
+
+  // Store keywords (Vietnamese)
+  if (
+    /cửa\s*hàng/.test(normalized) ||
+    /chi\s*nhánh/.test(normalized) ||
+    /địa\s*chỉ\s*(shop|store|cửa\s*hàng)/.test(normalized) ||
+    /store\s*gần/.test(normalized) ||
+    /mở\s*cửa/.test(normalized) ||
+    /giờ\s*mở/.test(normalized) ||
+    /giờ\s*đóng/.test(normalized) ||
+    /(shop|store)\s*(ở|nào|gần|này|đó)/.test(normalized)
+  ) {
+    return STORE_RESULT;
+  }
+
+  // "ở đâu" — only match when combined with store-related context words.
+  // Product-location queries ("sản phẩm ở đâu") should remain product_query.
+  if (
+    /ở\s*đâu/.test(normalized) &&
+    /(cửa\s*hàng|chi\s*nhánh|shop|store)/.test(normalized)
+  ) {
+    return STORE_RESULT;
+  }
+
+  return null;
+};
+
+/**
  * Deterministic pre-classifier for known small-talk patterns.
  * Returns null if no pattern matches (defer to AI classifier).
  */
@@ -346,6 +442,22 @@ const preclassifyIntent = (userQuery) => {
   if (complaintResult) {
     logger.debug("[Pre-classifier] Matched as complaint");
     return complaintResult;
+  }
+
+  // Promotion detection runs THIRD so an obvious promotion query never
+  // falls through to small-talk sets or a provider call.
+  const promotionResult = preclassifyPromotion(userQuery);
+  if (promotionResult) {
+    logger.debug("[Pre-classifier] Matched as promotion_query");
+    return promotionResult;
+  }
+
+  // Store detection runs FOURTH so an obvious store query never
+  // falls through to small-talk sets or a provider call.
+  const storeResult = preclassifyStore(userQuery);
+  if (storeResult) {
+    logger.debug("[Pre-classifier] Matched as store_query");
+    return storeResult;
   }
 
   const normalize = normalizePhrase;
@@ -515,7 +627,7 @@ const preclassifyIntent = (userQuery) => {
 };
 
 const INTENT_SYSTEM_PROMPT =
-  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint|appointment), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
+  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint|appointment|store_query|promotion_query), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
 
 /**
  * Phân loại ý định và xử lý phản hồi thông minh
@@ -562,7 +674,7 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
       const parsedResponse = parseJsonFromText(responseText);
       if (
         !parsedResponse.intent ||
-        !["product_query", "small_talk", "complaint", "appointment"].includes(parsedResponse.intent)
+        !["product_query", "small_talk", "complaint", "appointment", "store_query", "promotion_query"].includes(parsedResponse.intent)
       ) {
         throw new Error("Invalid intent classification");
       }
@@ -1070,6 +1182,8 @@ module.exports = {
   preclassifyComplaint,
   preclassifyComplaintContinuation,
   preclassifyAppointment,
+  preclassifyPromotion,
+  preclassifyStore,
   generateResponse,
   generateChatResponse,
   generateChatResponseStream,

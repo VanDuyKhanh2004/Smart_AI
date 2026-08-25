@@ -26,6 +26,24 @@ const expectComplaint = (msg) => {
   expect(result.direct_response).toBeNull();
 };
 
+const expectStoreQuery = (msg) => {
+  const result = classify(msg);
+  expect(result).not.toBeNull();
+  expect(result.intent).toBe("store_query");
+  expect(result.clarified_query).toBeNull();
+  expect(result.direct_response).toBeNull();
+  expect(result.preclassified).toBe("store_query");
+};
+
+const expectPromotionQuery = (msg) => {
+  const result = classify(msg);
+  expect(result).not.toBeNull();
+  expect(result.intent).toBe("promotion_query");
+  expect(result.clarified_query).toBeNull();
+  expect(result.direct_response).toBeNull();
+  expect(result.preclassified).toBe("promotion_query");
+};
+
 /* ============================================================
    Pure small-talk phrases — should be caught by pre-classifier
    ============================================================ */
@@ -191,7 +209,6 @@ describe("mixed greeting + product query — NOT small talk", () => {
     "hello mình muốn mua samsung",
     "chào bạn ơi tư vấn giúp mình điện thoại",
     "hi bán cho mình oppo",
-    "xin chào cửa hàng còn iphone không",
     "alo cho hỏi giá iphone",
     "chào bạn mình cần tìm điện thoại pin trâu",
   ])('"%s" returns null (pass to AI)', expectNotSmallTalk);
@@ -204,14 +221,12 @@ describe("pure product queries — NOT small talk", () => {
     "giá oppo reno",
     "điện thoại nào pin tốt",
     "so sánh iphone và samsung",
-    "cửa hàng ở đâu",
     "tư vấn mua điện thoại",
     "thông số kỹ thuật iphone 16 pro max",
     "cách bảo hành sản phẩm",
     "thanh toán như thế nào",
     "giao hàng bao lâu",
     "có trả góp không",
-    "giảm giá gì không",
     "cho mình xem iphone 15 đi",
     "note 20 ultra giá",
     "còn hàng không",
@@ -219,6 +234,31 @@ describe("pure product queries — NOT small talk", () => {
     "laptop nào chơi game tốt",
     "iphone 14 và 15 khác gì nhau",
   ])('"%s" returns null (pass to AI)', expectNotSmallTalk);
+});
+
+/* ============================================================
+   Store queries — deterministic store_query intent
+   ============================================================ */
+describe("unambiguous store queries — deterministic store_query intent", () => {
+  test.each([
+    "cửa hàng ở đâu",
+    "xin chào cửa hàng còn iphone không",
+    "cửa hàng mở cửa lúc mấy giờ",
+    "cửa hàng có ở hà nội không",
+  ])('"%s" is store_query', expectStoreQuery);
+});
+
+/* ============================================================
+   Promotion queries — deterministic promotion_query intent
+   ============================================================ */
+describe("unambiguous promotion queries — deterministic promotion_query intent", () => {
+  test.each([
+    "giảm giá gì không",
+    "có mã giảm giá không",
+    "khuyến mãi hiện tại",
+    "có chương trình khuyến mãi nào",
+    "khuyến mãi tháng này",
+  ])('"%s" is promotion_query', expectPromotionQuery);
 });
 
 describe("unambiguous complaints — deterministic complaint intent", () => {
