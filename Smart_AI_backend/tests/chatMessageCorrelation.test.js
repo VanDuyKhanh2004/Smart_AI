@@ -80,6 +80,20 @@ jest.mock('../models/Complaint', () => {
   return Complaint;
 });
 
+jest.mock('../models/Appointment', () => {
+  const Appointment = jest.fn();
+  Appointment.find = jest.fn(() => {
+    const chain = {
+      populate: jest.fn(() => chain),
+      sort: jest.fn(() => chain),
+      limit: jest.fn(() => chain),
+      then: (resolve, reject) => Promise.resolve([]).then(resolve, reject),
+    };
+    return chain;
+  });
+  return Appointment;
+});
+
 jest.mock('../utils/gemini', () => ({
   classifyIntentAndRespond: jest.fn(),
   generateChatResponse: jest.fn(),
