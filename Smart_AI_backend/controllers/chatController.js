@@ -13,6 +13,7 @@ const {
   generateComplaintResponse,
   preclassifyComplaintContinuation,
   preclassifyAppointment,
+  preclassifyPersonalInfo,
 } = require("../utils/gemini");
 const complaintService = require("../services/complaintService");
 const complaintFlowService = require("../services/complaintFlowService");
@@ -283,6 +284,47 @@ const formatPromotionResponse = (promotions) => {
   return lines.join("\n");
 };
 
+/**
+ * Deterministically format a personal-info response based on the user's
+ * socket.data.user fields and the query intent. No LLM involved.
+ * Returns a Vietnamese response string.
+ */
+const formatPersonalInfoResponse = (user, query) => {
+  const q = (query || "").toLowerCase().trim();
+
+  // Name query
+  if (/tên/.test(q)) {
+    return user.name
+      ? `Tên của bạn là ${user.name} ạ.`
+      : "Hiện tại bạn chưa cập nhật tên trong hệ thống ạ.";
+  }
+
+  // Email query
+  if (/email/.test(q)) {
+    return user.email
+      ? `Email của bạn là ${user.email} ạ.`
+      : "Hiện tại bạn chưa cập nhật email trong hệ thống ạ.";
+  }
+
+  // Phone query
+  if (/số?\s*điện\s*thoại|sđt|sdt|phone/.test(q)) {
+    return user.phone
+      ? `Số điện thoại của bạn là ${user.phone} ạ.`
+      : "Hiện tại bạn chưa cập nhật số điện thoại trong hệ thống ạ.";
+  }
+
+  // Generic "about me" / "thông tin của tôi" — list all available fields
+  const parts = [];
+  if (user.name) parts.push(`- Tên: ${user.name}`);
+  if (user.email) parts.push(`- Email: ${user.email}`);
+  if (user.phone) parts.push(`- Số điện thoại: ${user.phone}`);
+
+  if (parts.length === 0) {
+    return "Bạn chưa cập nhật thông tin cá nhân nào trong hệ thống ạ. Bạn có thể cập nhật trong mục Quản lý tài khoản.";
+  }
+  return `Thông tin cá nhân của bạn:\n${parts.join("\n")}`;
+};
+
 class ChatController {
   /**
    * Builds the aiResponse payload shared by every branch. The same object is
@@ -414,6 +456,12 @@ class ChatController {
       } else if (intentResult.intent === "promotion_query") {
         return {
           intent: "promotion_query",
+          directResponse: null,
+          clarifiedQuery: null,
+        };
+      } else if (intentResult.intent === "personal_info") {
+        return {
+          intent: "personal_info",
           directResponse: null,
           clarifiedQuery: null,
         };
@@ -698,6 +746,69 @@ class ChatController {
       return {
         fullResponse: fallbackResponse,
         responseType: "small_talk",
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    }
+  }
+
+  /**
+   * Handle Personal Info - Tra loai thong tin ca nhan cua nguoi dung.
+   *
+   * Hoan toan deterministic: socket.data.user la nguon du lieu duy nhat.
+   * Khong goi LLM, khong tim kiem san pham, khong dung Redis.
+   */
+  async handlePersonalInfo(socket, sessionId, userId, userQuery, clientMessageId, generationId = null, signal = null) {
+    try {
+      throwIfCancelled(signal);
+      logger.info({ sessionId }, 'Handling personal info query');
+
+      const user = socket && socket.data && socket.data.user;
+
+      if (!user || !user.id) {
+        const text = "Bạn cần đăng nhập để tôi có thể xem thông tin cá nhân ạ.";
+        const payload = this.buildAiPayload(sessionId, clientMessageId, text, {
+          responseType: "personal_info",
+          skipRAG: true,
+          needsLogin: true,
+        }, generationId);
+        socket.emit("aiResponse", payload);
+        return {
+          fullResponse: text,
+          responseType: "personal_info",
+          relatedProducts: [],
+          aiPayload: payload,
+        };
+      }
+
+      const responseText = formatPersonalInfoResponse(user, userQuery);
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, responseText, {
+        responseType: "personal_info",
+        skipRAG: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: responseText,
+        responseType: "personal_info",
+        relatedProducts: [],
+        aiPayload: payload,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'Personal info handling error');
+      const fallbackResponse = "Em xin lỗi, hiện tại em không thể truy xuất thông tin cá nhân. Bạn vui lòng thử lại sau ạ.";
+
+      const payload = this.buildAiPayload(sessionId, clientMessageId, fallbackResponse, {
+        responseType: "personal_info",
+        skipRAG: true,
+        fallback: true,
+      }, generationId);
+      socket.emit("aiResponse", payload);
+
+      return {
+        fullResponse: fallbackResponse,
+        responseType: "personal_info",
         relatedProducts: [],
         aiPayload: payload,
       };
@@ -1536,6 +1647,16 @@ class ChatController {
         sessionId,
         userId,
         chatHistory,
+        userQuery,
+        clientMessageId,
+        generationId,
+        signal
+      );
+    } else if (intentResult.intent === "personal_info") {
+      responseResult = await this.handlePersonalInfo(
+        socket,
+        sessionId,
+        userId,
         userQuery,
         clientMessageId,
         generationId,
