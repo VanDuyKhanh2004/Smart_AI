@@ -422,6 +422,79 @@ const preclassifyStore = (userQuery) => {
 };
 
 /**
+ * Deterministic pre-classifier for personal-information / user-identity queries.
+ * Recognizes OBVIOUS user-data questions so the personal_info flow never depends
+ * on a live LLM provider. Returns a personal_info intent result, or null to
+ * defer elsewhere.
+ *
+ * Guard: bot-identity questions ("bạn là ai", "tên bạn là gì") must NOT match —
+ * those are small_talk, not personal_info. The guard checks for bot-identity
+ * pronouns (bạn/bot/ai) before the personal-info patterns.
+ */
+const preclassifyPersonalInfo = (userQuery) => {
+  const normalized = normalizePhrase(userQuery);
+  if (!normalized) return null;
+
+  const PERSONAL_INFO_RESULT = {
+    intent: "personal_info",
+    clarified_query: null,
+    direct_response: null,
+    preclassified: "personal_info",
+  };
+
+  // Bot-identity guard: "bạn là ai", "tên bạn", "bot là gì", "ai vậy bạn"
+  // must remain small_talk — never personal_info.
+  // Exclude "bạn có biết tên tôi" / "bạn biết gì về tôi" — those are user-identity queries.
+  if (/(bạn|bot|ai)\s*(là|tên)/.test(normalized)) {
+    return null;
+  }
+  if (/(bạn|bot|ai)\s*(biết|làm|có)/.test(normalized) && !/(tôi|mình|em)/.test(normalized)) {
+    return null;
+  }
+
+  // User-name queries
+  if (
+    /tên\s*(tôi|của\s*tôi|mình|em)/.test(normalized) ||
+    /tôi\s*tên\s*gì/.test(normalized) ||
+    /mình\s*tên\s*gì/.test(normalized) ||
+    /tôi\s*được\s*gọi\s*là\s*gì/.test(normalized)
+  ) {
+    return PERSONAL_INFO_RESULT;
+  }
+
+  // Email queries
+  if (
+    /email\s*(của\s*tôi|tôi|mình|em)/.test(normalized) ||
+    /tôi\s*(đăng\s*ký|dùng|sử\s*dụng)\s*bằng\s*email/.test(normalized) ||
+    /email\s*(gì|nào)/.test(normalized)
+  ) {
+    return PERSONAL_INFO_RESULT;
+  }
+
+  // Phone queries
+  if (
+    /(số\s*điện\s*thoại|sđt|sdt|phone)\s*(của\s*tôi|tôi|mình|em|là)/.test(normalized) ||
+    /tôi\s*(đăng\s*ký|dùng|sử\s*dụng)\s*bằng\s*(số\s*điện\s*thoại|sđt|sdt)/.test(normalized) ||
+    /(số\s*điện\s*thoại|sđt|sdt)\s*(gì|nào)/.test(normalized)
+  ) {
+    return PERSONAL_INFO_RESULT;
+  }
+
+  // Generic personal info / "about me" queries
+  if (
+    /thông\s*tin\s*(cá\s*nhân|của\s*tôi|tôi|mình|em)/.test(normalized) ||
+    /bạn\s*(biết|nhớ|có)\s*(gì|gì\s*về)\s*(tôi|mình|em)/.test(normalized) ||
+    /tôi\s*là\s*ai/.test(normalized) ||
+    /giới\s*thiệu\s*(về\s*tôi|bản\s*thân)/.test(normalized) ||
+    /tôi\s*có\s*những\s*thông\s*tin\s*gì/.test(normalized)
+  ) {
+    return PERSONAL_INFO_RESULT;
+  }
+
+  return null;
+};
+
+/**
  * Deterministic pre-classifier for known small-talk patterns.
  * Returns null if no pattern matches (defer to AI classifier).
  */
@@ -458,6 +531,14 @@ const preclassifyIntent = (userQuery) => {
   if (storeResult) {
     logger.debug("[Pre-classifier] Matched as store_query");
     return storeResult;
+  }
+
+  // Personal-info detection runs FIFTH so an obvious user-data query never
+  // falls through to small-talk sets or a provider call.
+  const personalInfoResult = preclassifyPersonalInfo(userQuery);
+  if (personalInfoResult) {
+    logger.debug("[Pre-classifier] Matched as personal_info");
+    return personalInfoResult;
   }
 
   const normalize = normalizePhrase;
@@ -627,7 +708,7 @@ const preclassifyIntent = (userQuery) => {
 };
 
 const INTENT_SYSTEM_PROMPT =
-  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint|appointment|store_query|promotion_query), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
+  "Bạn là Quỳnh Như nhân viên CSKH của Dienthoaigiakho. Trả về JSON với intent (product_query|small_talk|complaint|appointment|store_query|promotion_query|personal_info), clarified_query, direct_response. Nói tiếng Việt tự nhiên, thân thiện. Chỉ chào ở đầu cuộc trò chuyện.";
 
 /**
  * Phân loại ý định và xử lý phản hồi thông minh
@@ -674,7 +755,7 @@ const classifyIntentAndRespond = async (chatHistory, userQuery) => {
       const parsedResponse = parseJsonFromText(responseText);
       if (
         !parsedResponse.intent ||
-        !["product_query", "small_talk", "complaint", "appointment", "store_query", "promotion_query"].includes(parsedResponse.intent)
+        !["product_query", "small_talk", "complaint", "appointment", "store_query", "promotion_query", "personal_info"].includes(parsedResponse.intent)
       ) {
         throw new Error("Invalid intent classification");
       }
@@ -1184,6 +1265,7 @@ module.exports = {
   preclassifyAppointment,
   preclassifyPromotion,
   preclassifyStore,
+  preclassifyPersonalInfo,
   generateResponse,
   generateChatResponse,
   generateChatResponseStream,
