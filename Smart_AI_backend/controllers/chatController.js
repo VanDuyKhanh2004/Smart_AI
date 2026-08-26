@@ -24,7 +24,7 @@ const { throwIfCancelled, maybeTestDelay } = require("../utils/chatCancellation"
 const { parseProductConstraints } = require("../utils/productConstraintParser");
 const { matchesProductConstraints } = require("../utils/productValidator");
 const { rankProducts } = require("../utils/productRanking");
-const { classifyQuery, resolveFollowUpQuery, createContextFromParsed, sanitizeConversationContext } = require("../utils/conversationContext");
+const { classifyQuery, resolveFollowUpQuery, createContextFromParsed, sanitizeConversationContext, buildEntityLabels } = require("../utils/conversationContext");
 const contextService = require("../services/contextService");
 const { resolveProductSpec } = require("../utils/productSpecResolver");
 
@@ -534,7 +534,8 @@ class ChatController {
     signal,
     generationId = null,
     userContext = null,
-    appointmentContext = null
+    appointmentContext = null,
+    entityLabels = null
   ) {
     let batching = null;
     let startEmitted = false;
@@ -628,6 +629,7 @@ class ChatController {
             onDelta: (delta) => batching.push(delta),
             userContext,
             appointmentContext,
+            entityLabels,
           });
 
           // Guard the rare race where the abort lands exactly as the provider
@@ -659,7 +661,7 @@ class ChatController {
           throw _streamErr;
         }
       } else {
-        const res = await generateChatResponse(validatedHistory, userQuery, validatedProducts, userContext, appointmentContext);
+        const res = await generateChatResponse(validatedHistory, userQuery, validatedProducts, userContext, appointmentContext, entityLabels);
         text = res.text;
         provider = res.provider;
         if (batching) { batching.dispose(); batching = null; }
@@ -839,6 +841,25 @@ class ChatController {
       }, generationId);
       socket.emit("aiResponse", payload);
 
+      // Save appointment entity labels to context for follow-up reference resolution
+      try {
+        const contextService = require("../services/contextService");
+        const previousContext = await contextService.loadContext(userId, sessionId);
+        const lastAppointmentResults = Array.isArray(appointments)
+          ? appointments.slice(0, 5).map(a => ({
+              storeName: a.storeName,
+              date: a.date,
+              timeSlot: a.timeSlot,
+              status: a.status,
+            }))
+          : [];
+        const newContext = previousContext ? { ...previousContext } : {};
+        newContext.lastAppointmentResults = lastAppointmentResults;
+        await contextService.saveContext(userId, sessionId, sanitizeConversationContext(newContext));
+      } catch (_ctxErr) {
+        // context save failure must not fail the chat response
+      }
+
       return {
         fullResponse: responseText,
         responseType: "appointment",
@@ -886,6 +907,24 @@ class ChatController {
       }, generationId);
       socket.emit("aiResponse", payload);
 
+      // Save store entity labels to context for follow-up reference resolution
+      try {
+        const contextService = require("../services/contextService");
+        const previousContext = await contextService.loadContext(userId, sessionId);
+        const lastStoreResults = Array.isArray(stores)
+          ? stores.slice(0, 5).map(s => ({
+              name: s.name,
+              fullAddress: s.address || '',
+              phone: s.phone,
+            }))
+          : [];
+        const newContext = previousContext ? { ...previousContext } : {};
+        newContext.lastStoreResults = lastStoreResults;
+        await contextService.saveContext(userId, sessionId, sanitizeConversationContext(newContext));
+      } catch (_ctxErr) {
+        // context save failure must not fail the chat response
+      }
+
       return {
         fullResponse: responseText,
         responseType: "store_query",
@@ -932,6 +971,26 @@ class ChatController {
         skipRAG: true,
       }, generationId);
       socket.emit("aiResponse", payload);
+
+      // Save promotion entity labels to context for follow-up reference resolution
+      try {
+        const contextService = require("../services/contextService");
+        const previousContext = await contextService.loadContext(userId, sessionId);
+        const lastPromotionResults = Array.isArray(promotions)
+          ? promotions.slice(0, 5).map(p => ({
+              code: p.code,
+              description: p.description,
+              discountType: p.discountType,
+              discountValue: p.discountValue,
+              endDate: p.endDate,
+            }))
+          : [];
+        const newContext = previousContext ? { ...previousContext } : {};
+        newContext.lastPromotionResults = lastPromotionResults;
+        await contextService.saveContext(userId, sessionId, sanitizeConversationContext(newContext));
+      } catch (_ctxErr) {
+        // context save failure must not fail the chat response
+      }
 
       return {
         fullResponse: responseText,
@@ -1715,6 +1774,10 @@ class ChatController {
       throwIfCancelled(signal);
       const userContext = buildUserContext(socket);
       const appointmentContext = await buildAppointmentContext(userId);
+
+      // Build entity labels from previous context for follow-up reference resolution
+      const entityLabels = previousContext ? buildEntityLabels(previousContext) : null;
+
       responseResult = await this.generateResponse(
         socket,
         sessionId,
@@ -1725,7 +1788,8 @@ class ChatController {
         signal,
         generationId,
         userContext,
-        appointmentContext
+        appointmentContext,
+        entityLabels
       );
 
       // ================================================================
@@ -1748,10 +1812,22 @@ class ChatController {
             ? responseResult.relatedProducts.map(p => p.id).filter(Boolean).slice(0, 5)
             : relatedProducts.map(p => p._id).filter(Boolean).slice(0, 5);
 
+          // Build lastProducts entity labels for follow-up reference resolution
+          const lastProducts = Array.isArray(relatedProducts)
+            ? relatedProducts.slice(0, 5).map((p, i) => ({
+                id: p._id,
+                name: p.name,
+                brand: p.brand,
+                price: p.price,
+                position: i + 1,
+              }))
+            : [];
+
           const newContext = createContextFromParsed(
             { cleanedQuery: clarifiedQuery, filters: mergedFilters, preferences: mergedPreferences },
             productIds
           );
+          newContext.lastProducts = lastProducts;
           if (previousContext && !contextReset) {
             newContext.turnCount = (previousContext.turnCount || 0) + 1;
           }

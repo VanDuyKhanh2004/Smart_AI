@@ -495,6 +495,68 @@ const preclassifyPersonalInfo = (userQuery) => {
 };
 
 /**
+ * Deterministic pre-classifier for follow-up entity references.
+ * Detects natural-language references to entities from previous turns:
+ * - Positional: "cái đầu tiên", "máy thứ hai", "sản phẩm đầu tiên"
+ * - Demonstrative: "sản phẩm đó", "mã đó", "cửa hàng đó", "lịch hẹn đó"
+ *
+ * Returns { entityType, position } or null if no pattern matches.
+ * entityType: "product" | "promotion" | "store" | "appointment"
+ * position: 1-based index, or null for unresolvable demonstratives
+ */
+const preclassifyFollowUpReference = (userQuery) => {
+  if (!userQuery || typeof userQuery !== 'string') return null;
+  const q = userQuery.trim().toLowerCase();
+
+  /** Vietnamese ordinal words → numeric position */
+  const vietnameseOrdinal = { hai: 2, ba: 3, bốn: 4, bon: 4, năm: 5, sau: 6, bảy: 7, bay: 8, chín: 9, chin: 10 };
+
+  /** Extract position from "thứ X" where X is a digit or Vietnamese word */
+  function extractPosition(str) {
+    const digitMatch = str.match(/thứ\s*(\d+)/);
+    if (digitMatch) return parseInt(digitMatch[1], 10);
+    for (const [word, num] of Object.entries(vietnameseOrdinal)) {
+      if (str.includes(`thứ ${word}`)) return num;
+    }
+    return null;
+  }
+
+  // Product patterns: "cái đầu tiên", "máy thứ hai", "sản phẩm đầu tiên", etc.
+  if (/(?:cái|máy|sản\s*phẩm|điện\s*thoại|đt|phone)\s*(?:thứ\s*)?(?:đầu\s*tiên|thứ\s*(?:\d+|hai|ba|bốn|bon|năm|sau|bảy|bay|chín|chin)|tiếp\s*theo|sau)/.test(q)) {
+    let position = 1;
+    if (/đầu\s*tiên/.test(q)) position = 1;
+    else position = extractPosition(q) || 1;
+    return { entityType: 'product', position };
+  }
+
+  // Promotion: "mã đầu tiên", "mã thứ hai", "mã đó"
+  if (/(?:mã|mã\s*giảm\s*giá|mã\s*khuyến\s*mãi)\s*(?:thứ\s*)?(?:đầu\s*tiên|thứ\s*(?:\d+|hai|ba|bốn|bon|năm)|đó)/.test(q)) {
+    let position = null;
+    if (/đầu\s*tiên/.test(q)) position = 1;
+    else position = extractPosition(q);
+    return { entityType: 'promotion', position };
+  }
+
+  // Store: "cửa hàng đầu tiên", "shop đầu tiên", "cửa hàng đó"
+  if (/(?:cửa\s*hàng|shop|store)\s*(?:thứ\s*)?(?:đầu\s*tiên|thứ\s*(?:\d+|hai|ba|bốn|bon|năm)|đó)/.test(q)) {
+    let position = null;
+    if (/đầu\s*tiên/.test(q)) position = 1;
+    else position = extractPosition(q);
+    return { entityType: 'store', position };
+  }
+
+  // Appointment: "lịch hẹn đầu tiên", "cuộc hẹn đầu tiên", "lịch hẹn đó"
+  if (/(?:lịch\s*hẹn|cuộc\s*hẹn)\s*(?:thứ\s*)?(?:đầu\s*tiên|thứ\s*(?:\d+|hai|ba|bốn|bon|năm)|đó)/.test(q)) {
+    let position = null;
+    if (/đầu\s*tiên/.test(q)) position = 1;
+    else position = extractPosition(q);
+    return { entityType: 'appointment', position };
+  }
+
+  return null;
+};
+
+/**
  * Deterministic pre-classifier for known small-talk patterns.
  * Returns null if no pattern matches (defer to AI classifier).
  */
@@ -816,9 +878,9 @@ const generateResponse = async (prompt) => {
   }
 };
 
-const generateChatResponse = async (chatHistory, userMessage, productContext = [], userContext = null, appointmentContext = null) => {
+const generateChatResponse = async (chatHistory, userMessage, productContext = [], userContext = null, appointmentContext = null, entityLabels = null) => {
   try {
-    const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext);
+    const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext, entityLabels);
     const messages = [
       { role: "system", content: systemPrompt },
       ...(Array.isArray(chatHistory)
@@ -859,7 +921,7 @@ const generateChatResponse = async (chatHistory, userMessage, productContext = [
   }
 };
 
-const createSystemPrompt = (productContext = [], chatHistory = [], userContext = null, appointmentContext = null) => {
+const createSystemPrompt = (productContext = [], chatHistory = [], userContext = null, appointmentContext = null, entityLabels = null) => {
   const contextText =
     Array.isArray(productContext) && productContext.length > 0
       ? productContext
@@ -913,12 +975,17 @@ ${product.specs ? `- Thông số: ${JSON.stringify(product.specs, null, 2)}` : "
       .join("\n\n");
   }
 
+  let entityLabelsText = "";
+  if (entityLabels && typeof entityLabels === "string" && entityLabels.trim().length > 0) {
+    entityLabelsText = entityLabels;
+  }
+
   return `Bạn là Quỳnh Như nhân viên tư vấn bán hàng tại Dienthoaigiakho.
 1. TƯ VẤN NHIỆT TÌNH, thân thiện, tự nhiên.
 2. CHỈ dùng dữ liệu sản phẩm, không bịa.
 3. Luôn nêu tên sản phẩm, hãng, giá, tồn kho; chỉ đưa thông số khi được hỏi.
 4. Nếu thiếu dữ liệu thì thừa nhận và gợi ý thay thế.
-${userText ? `${userText}\n` : ""}${appointmentText ? `DANH SÁCH LỊCH HẸN:\n${appointmentText}\n` : ""}${contextText ? `DANH SÁCH SẢN PHẨM:\n${contextText}` : ""}
+${userText ? `${userText}\n` : ""}${entityLabelsText ? `${entityLabelsText}\n\n` : ""}${appointmentText ? `DANH SÁCH LỊCH HẸN:\n${appointmentText}\n` : ""}${contextText ? `DANH SÁCH SẢN PHẨM:\n${contextText}` : ""}
 ${historyText ? `LỊCH SỬ CHAT GẦN ĐÂY:\n${historyText}` : ""}
 Không cần chào lại nếu đã chào trước đó. Trả lời bằng tiếng Việt thân thiện.`;
 };
@@ -1023,8 +1090,8 @@ const streamGeminiChat = async ({ systemPrompt, chatHistory, userMessage, signal
  * On a mid-stream provider error after partial output, throws the error with
  * error.partialContent set to whatever was emitted so far.
  */
-const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta, userContext = null, appointmentContext = null }) => {
-  const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext);
+const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta, userContext = null, appointmentContext = null, entityLabels = null }) => {
+  const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext, entityLabels);
   const messages = [
     { role: "system", content: systemPrompt },
     ...(Array.isArray(chatHistory) ? chatHistory.map((msg) => ({ role: msg.role, content: msg.content })) : []),
@@ -1266,6 +1333,7 @@ module.exports = {
   preclassifyPromotion,
   preclassifyStore,
   preclassifyPersonalInfo,
+  preclassifyFollowUpReference,
   generateResponse,
   generateChatResponse,
   generateChatResponseStream,

@@ -1,5 +1,5 @@
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-dummy-key-for-classifier";
-const { preclassifyIntent } = require("../utils/gemini");
+const { preclassifyIntent, preclassifyFollowUpReference } = require("../utils/gemini");
 
 const classify = (msg) => preclassifyIntent(msg);
 
@@ -326,4 +326,125 @@ describe("English small talk", () => {
     "ok",
     "okay",
   ])('"%s" is small_talk', expectSmallTalk);
+});
+
+/* ============================================================
+   preclassifyFollowUpReference
+   ============================================================ */
+describe("preclassifyFollowUpReference", () => {
+  describe("product positional references", () => {
+    test.each([
+      ["cái đầu tiên", 1],
+      ["sản phẩm đầu tiên", 1],
+      ["điện thoại đầu tiên", 1],
+      ["máy đầu tiên", 1],
+      ["phone đầu tiên", 1],
+    ])('"%s" → product position %d', (msg, expectedPos) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("product");
+      expect(result.position).toBe(expectedPos);
+    });
+
+    test.each([
+      ["máy thứ hai", 2],
+      ["sản phẩm thứ ba", 3],
+      ["cái thứ 2", 2],
+      ["máy thứ 4", 4],
+    ])('"%s" → product position %d', (msg, expectedPos) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("product");
+      expect(result.position).toBe(expectedPos);
+    });
+
+    test("máy tiếp theo → product position null", () => {
+      const result = preclassifyFollowUpReference("máy tiếp theo");
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("product");
+    });
+  });
+
+  describe("promotion references", () => {
+    test.each([
+      ["mã đầu tiên", 1],
+      ["mã giảm giá đầu tiên", 1],
+      ["mã khuyến mãi đầu tiên", 1],
+    ])('"%s" → promotion position %d', (msg, expectedPos) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("promotion");
+      expect(result.position).toBe(expectedPos);
+    });
+
+    test.each([
+      ["mã đó", null],
+      ["mã giảm giá đó", null],
+    ])('"%s" → promotion position null', (msg) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("promotion");
+      expect(result.position).toBeNull();
+    });
+  });
+
+  describe("store references", () => {
+    test.each([
+      ["cửa hàng đầu tiên", 1],
+      ["shop đầu tiên", 1],
+      ["store đầu tiên", 1],
+    ])('"%s" → store position %d', (msg, expectedPos) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("store");
+      expect(result.position).toBe(expectedPos);
+    });
+
+    test.each([
+      ["cửa hàng đó", null],
+      ["shop đó", null],
+    ])('"%s" → store position null', (msg) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("store");
+      expect(result.position).toBeNull();
+    });
+  });
+
+  describe("appointment references", () => {
+    test.each([
+      ["lịch hẹn đầu tiên", 1],
+      ["cuộc hẹn đầu tiên", 1],
+    ])('"%s" → appointment position %d', (msg, expectedPos) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("appointment");
+      expect(result.position).toBe(expectedPos);
+    });
+
+    test.each([
+      ["lịch hẹn đó", null],
+      ["cuộc hẹn đó", null],
+    ])('"%s" → appointment position null', (msg) => {
+      const result = preclassifyFollowUpReference(msg);
+      expect(result).not.toBeNull();
+      expect(result.entityType).toBe("appointment");
+      expect(result.position).toBeNull();
+    });
+  });
+
+  describe("non-follow-up queries", () => {
+    test.each([
+      "mua iphone 15",
+      "tìm samsung dưới 15 triệu",
+      "bạn là ai",
+      "cảm ơn",
+      "xin chào",
+      "giá bao nhiêu",
+      "",
+      null,
+    ])('"%s" → null', (msg) => {
+      expect(preclassifyFollowUpReference(msg)).toBeNull();
+    });
+  });
 });

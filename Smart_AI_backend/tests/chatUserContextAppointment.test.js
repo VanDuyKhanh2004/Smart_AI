@@ -731,8 +731,11 @@ describe('Cross-user appointment isolation', () => {
 
     expect(result.appointmentData).toHaveLength(1);
     expect(result.appointmentData[0].storeName).toBe('Store B');
-    // User A's stale context is not visible
-    expect(global.__ctxCache[keyB]).toBeUndefined();
+    // User B's context is saved with lastAppointmentResults, not User A's stale data
+    expect(global.__ctxCache[keyB]).toBeDefined();
+    expect(global.__ctxCache[keyB].lastAppointmentResults).toBeDefined();
+    expect(global.__ctxCache[keyB].lastAppointmentResults[0].storeName).toBe('Store B');
+    expect(global.__ctxCache[keyB].lastAppointmentId).toBeUndefined();
   });
 
   it('unauthenticated user receives graceful response and no private data', async () => {
