@@ -661,6 +661,20 @@ describe('handleStoreQuery', () => {
     expect(result.fullResponse).toContain('T2:');
     expect(result.fullResponse).toContain('08:00-21:00');
   });
+
+  it('should save lastStoreResults with normalized address string (not empty)', async () => {
+    const contextService = require('../services/contextService');
+    const socket = makeSocket(USER_ID);
+    await ChatController.handleStoreQuery(
+      socket, SESSION_ID, USER_ID, [], 'Có cửa hàng nào?', 'msg-addr'
+    );
+    const ctx = await contextService.loadContext(USER_ID, SESSION_ID);
+    expect(ctx).toBeTruthy();
+    expect(ctx.lastStoreResults).toHaveLength(2);
+    // BUG 2 regression: fullAddress must be the flattened address string, not empty
+    expect(ctx.lastStoreResults[0].fullAddress).toBe('123 Nguyễn Huệ, Quận 1, TP.HCM');
+    expect(ctx.lastStoreResults[1].fullAddress).toBe('456 Lê Lợi, Quận 1, TP.HCM');
+  });
 });
 
 /* =========================================================

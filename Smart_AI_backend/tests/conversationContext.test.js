@@ -20,6 +20,7 @@ const {
   classifyQuery,
   cloneContext,
   shouldResetContext,
+  buildEntityLabels,
 } = require('../utils/conversationContext');
 
 /* ------------------------------------------------------------------ */
@@ -628,5 +629,217 @@ describe('Production mode (no memory fallback)', () => {
 
     const loadResult = await disabledCtx.loadContext('user-1', 'disabled-session');
     expect(loadResult).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Tests: Entity label fields in context                              */
+/* ------------------------------------------------------------------ */
+
+describe('createContextFromParsed — entity label fields', () => {
+  it('returns empty arrays for lastProducts, lastStoreResults, lastPromotionResults, lastAppointmentResults', () => {
+    const ctx = createContextFromParsed({ cleanedQuery: 'test', filters: {}, preferences: {} });
+    expect(ctx.lastProducts).toEqual([]);
+    expect(ctx.lastStoreResults).toEqual([]);
+    expect(ctx.lastPromotionResults).toEqual([]);
+    expect(ctx.lastAppointmentResults).toEqual([]);
+  });
+});
+
+describe('mergeConversationContext — entity label merging', () => {
+  it('inherits previous entity labels when current has none', () => {
+    const prev = {
+      filters: { brands: ['samsung'] },
+      preferences: { camera: false, battery: false, performance: false, compact: false },
+      lastProductIds: ['p1'],
+      lastProducts: [{ id: 'p1', name: 'Galaxy A15', brand: 'samsung', price: 5000000, position: 1 }],
+      lastStoreResults: [{ name: 'Store 1', fullAddress: '123 ABC' }],
+      lastPromotionResults: [{ code: 'SALE10', discountType: 'percentage', discountValue: 10 }],
+      lastAppointmentResults: [{ storeName: 'Store 1', date: '26/08/2026' }],
+      turnCount: 1,
+    };
+    const curr = {
+      filters: {},
+      preferences: { camera: false, battery: false, performance: false, compact: false },
+      lastProductIds: [],
+      lastProducts: [],
+      lastStoreResults: [],
+      lastPromotionResults: [],
+      lastAppointmentResults: [],
+    };
+    const merged = mergeConversationContext(prev, curr);
+    // Entity labels are per-turn: empty current arrays replace (not inherit) previous
+    expect(merged.lastProducts).toEqual([]);
+    expect(merged.lastStoreResults).toEqual([]);
+    expect(merged.lastPromotionResults).toEqual([]);
+    expect(merged.lastAppointmentResults).toEqual([]);
+  });
+
+  it('current entity labels replace previous when present', () => {
+    const prev = {
+      filters: { brands: ['samsung'] },
+      preferences: { camera: false, battery: false, performance: false, compact: false },
+      lastProductIds: ['p1'],
+      lastProducts: [{ id: 'p1', name: 'Old Product', brand: 'samsung', price: 5000000, position: 1 }],
+      lastStoreResults: [{ name: 'Old Store' }],
+      lastPromotionResults: [{ code: 'OLD10' }],
+      lastAppointmentResults: [{ storeName: 'Old Store', date: '01/01/2026' }],
+      turnCount: 1,
+    };
+    const curr = {
+      filters: {},
+      preferences: { camera: false, battery: false, performance: false, compact: false },
+      lastProductIds: [],
+      lastProducts: [{ id: 'p2', name: 'New Product', brand: 'apple', price: 10000000, position: 1 }],
+      lastStoreResults: [{ name: 'New Store' }],
+      lastPromotionResults: [{ code: 'NEW20' }],
+      lastAppointmentResults: [{ storeName: 'New Store', date: '30/12/2026' }],
+    };
+    const merged = mergeConversationContext(prev, curr);
+    expect(merged.lastProducts).toEqual(curr.lastProducts);
+    expect(merged.lastStoreResults).toEqual(curr.lastStoreResults);
+    expect(merged.lastPromotionResults).toEqual(curr.lastPromotionResults);
+    expect(merged.lastAppointmentResults).toEqual(curr.lastAppointmentResults);
+  });
+});
+
+describe('sanitizeConversationContext — entity label bounds', () => {
+  it('bounds all entity label arrays to MAX_ENTITY_LABELS (5)', () => {
+    const ctx = {
+      filters: {},
+      preferences: { camera: false, battery: false, performance: false, compact: false },
+      lastProductIds: [],
+      lastProducts: Array.from({ length: 10 }, (_, i) => ({ id: `p${i}`, name: `Product ${i}` })),
+      lastStoreResults: Array.from({ length: 10 }, (_, i) => ({ name: `Store ${i}` })),
+      lastPromotionResults: Array.from({ length: 10 }, (_, i) => ({ code: `CODE${i}` })),
+      lastAppointmentResults: Array.from({ length: 10 }, (_, i) => ({ storeName: `Store ${i}` })),
+      turnCount: 1,
+    };
+    const sanitized = sanitizeConversationContext(ctx);
+    expect(sanitized.lastProducts).toHaveLength(5);
+    expect(sanitized.lastStoreResults).toHaveLength(5);
+    expect(sanitized.lastPromotionResults).toHaveLength(5);
+    expect(sanitized.lastAppointmentResults).toHaveLength(5);
+  });
+
+  it('defaults missing entity label arrays to empty arrays', () => {
+    const ctx = {
+      filters: {},
+      preferences: { camera: false, battery: false, performance: false, compact: false },
+      lastProductIds: [],
+      turnCount: 1,
+    };
+    const sanitized = sanitizeConversationContext(ctx);
+    expect(sanitized.lastProducts).toEqual([]);
+    expect(sanitized.lastStoreResults).toEqual([]);
+    expect(sanitized.lastPromotionResults).toEqual([]);
+    expect(sanitized.lastAppointmentResults).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Tests: buildEntityLabels                                           */
+/* ------------------------------------------------------------------ */
+
+describe('buildEntityLabels', () => {
+  it('returns empty string for null context', () => {
+    expect(buildEntityLabels(null)).toBe('');
+  });
+
+  it('returns empty string when all entity arrays are empty', () => {
+    expect(buildEntityLabels({ lastProducts: [], lastStoreResults: [], lastPromotionResults: [], lastAppointmentResults: [] })).toBe('');
+  });
+
+  it('formats products with name, brand, and price', () => {
+    const ctx = {
+      lastProducts: [
+        { id: 'p1', name: 'Galaxy A15', brand: 'samsung', price: 4990000, position: 1 },
+        { id: 'p2', name: 'iPhone 15', brand: 'apple', price: 22000000, position: 2 },
+      ],
+      lastStoreResults: [],
+      lastPromotionResults: [],
+      lastAppointmentResults: [],
+    };
+    const labels = buildEntityLabels(ctx);
+    expect(labels).toContain('KẾT QUẢ TÌM KIẾM TRƯỚC ĐÂY');
+    expect(labels).toContain('1. Galaxy A15 — samsung');
+    expect(labels).toContain('2. iPhone 15 — apple');
+    expect(labels).toContain('4.990.000 VND');
+    expect(labels).toContain('22.000.000 VND');
+  });
+
+  it('formats stores with name and address', () => {
+    const ctx = {
+      lastProducts: [],
+      lastStoreResults: [
+        { name: 'Cửa hàng Nguyễn Huệ', fullAddress: '123 Nguyễn Huệ, Q1', phone: '1900xxxx' },
+      ],
+      lastPromotionResults: [],
+      lastAppointmentResults: [],
+    };
+    const labels = buildEntityLabels(ctx);
+    expect(labels).toContain('CỬA HÀNG TRƯỚC ĐÂY');
+    expect(labels).toContain('1. Cửa hàng Nguyễn Huệ — 123 Nguyễn Huệ, Q1');
+  });
+
+  it('formats promotions with code, discount, and end date', () => {
+    const ctx = {
+      lastProducts: [],
+      lastStoreResults: [],
+      lastPromotionResults: [
+        { code: 'SALE10', description: 'Giảm 10%', discountType: 'percentage', discountValue: 10, endDate: '30/09/2026' },
+      ],
+      lastAppointmentResults: [],
+    };
+    const labels = buildEntityLabels(ctx);
+    expect(labels).toContain('KHUYẾN MÃI TRƯỚC ĐÂY');
+    expect(labels).toContain('1. Mã: SALE10');
+    expect(labels).toContain('Giảm 10%');
+    expect(labels).toContain('HSD: 30/09/2026');
+  });
+
+  it('formats appointments with store name, date, time, and status', () => {
+    const ctx = {
+      lastProducts: [],
+      lastStoreResults: [],
+      lastPromotionResults: [],
+      lastAppointmentResults: [
+        { storeName: 'Cửa hàng Nguyễn Huệ', date: '26/08/2026', timeSlot: '09:00-10:00', status: 'pending' },
+      ],
+    };
+    const labels = buildEntityLabels(ctx);
+    expect(labels).toContain('LỊCH HẸN TRƯỚC ĐÂY');
+    expect(labels).toContain('1. Cửa hàng Nguyễn Huệ — 26/08/2026 — 09:00-10:00 — pending');
+  });
+
+  it('formats mixed entity types in correct order', () => {
+    const ctx = {
+      lastProducts: [{ id: 'p1', name: 'Galaxy A15', brand: 'samsung', price: 4990000, position: 1 }],
+      lastStoreResults: [{ name: 'Store 1', fullAddress: '123 ABC' }],
+      lastPromotionResults: [{ code: 'SALE10', discountType: 'percentage', discountValue: 10 }],
+      lastAppointmentResults: [{ storeName: 'Store 1', date: '26/08/2026' }],
+    };
+    const labels = buildEntityLabels(ctx);
+    expect(labels).toContain('KẾT QUẢ TÌM KIẾM TRƯỚC ĐÂY');
+    expect(labels).toContain('CỬA HÀNG TRƯỚC ĐÂY');
+    expect(labels).toContain('KHUYẾN MÃI TRƯỚC ĐÂY');
+    expect(labels).toContain('LỊCH HẸN TRƯỚC ĐÂY');
+    // Instruction text should be present
+    expect(labels).toContain('cái đầu tiên');
+    expect(labels).toContain('sản phẩm đó');
+  });
+
+  it('handles missing optional fields gracefully', () => {
+    const ctx = {
+      lastProducts: [{ name: 'Product A' }],
+      lastStoreResults: [{ name: 'Store B' }],
+      lastPromotionResults: [{ code: 'CODE1' }],
+      lastAppointmentResults: [{ storeName: 'Store C' }],
+    };
+    const labels = buildEntityLabels(ctx);
+    expect(labels).toContain('1. Product A');
+    expect(labels).toContain('1. Store B');
+    expect(labels).toContain('1. Mã: CODE1');
+    expect(labels).toContain('1. Store C');
   });
 });

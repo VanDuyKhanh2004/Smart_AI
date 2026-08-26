@@ -6,6 +6,8 @@
  * - Merge rules (brands, price, RAM, storage, color, preferences)
  * - Reset detection
  * - Category-change detection
+ * - Entity label tracking (products, stores, promotions, appointments)
+ * - Entity label formatting for LLM prompts
  * - Context sanitization
  *
  * All functions are pure — no I/O, no randomness, no mutations.
@@ -19,6 +21,7 @@ const { parseProductConstraints } = require('./productConstraintParser');
 
 const MAX_TURNS = 20;
 const MAX_PRODUCT_IDS = 5;
+const MAX_ENTITY_LABELS = 5;
 
 /** Phrases that reset all shopping context. */
 const RESET_PHRASES = [
@@ -223,6 +226,10 @@ function createContextFromParsed(parsed, productIds) {
     },
     preferences: { ...preferences },
     lastProductIds: Array.isArray(productIds) ? productIds.slice(0, MAX_PRODUCT_IDS) : [],
+    lastProducts: [],
+    lastStoreResults: [],
+    lastPromotionResults: [],
+    lastAppointmentResults: [],
     turnCount: 1,
   };
 }
@@ -271,6 +278,10 @@ function mergeConversationContext(previous, current) {
     },
     preferences: { camera: false, battery: false, performance: false, compact: false },
     lastProductIds: [],
+    lastProducts: [],
+    lastStoreResults: [],
+    lastPromotionResults: [],
+    lastAppointmentResults: [],
     turnCount: (prev.turnCount || 0) + 1,
   };
 
@@ -343,6 +354,14 @@ function mergeConversationContext(previous, current) {
     ? curr.lastProductIds.slice(0, MAX_PRODUCT_IDS)
     : (prev.lastProductIds || []).slice(0, MAX_PRODUCT_IDS);
 
+  // Entity labels: unconditional current-turn replacement.
+  // Entity labels are per-turn — only the current turn's results should survive.
+  // Empty arrays from the current turn intentionally clear previous labels.
+  merged.lastProducts = (curr.lastProducts || []).slice(0, MAX_ENTITY_LABELS);
+  merged.lastStoreResults = (curr.lastStoreResults || []).slice(0, MAX_ENTITY_LABELS);
+  merged.lastPromotionResults = (curr.lastPromotionResults || []).slice(0, MAX_ENTITY_LABELS);
+  merged.lastAppointmentResults = (curr.lastAppointmentResults || []).slice(0, MAX_ENTITY_LABELS);
+
   return merged;
 }
 
@@ -403,10 +422,118 @@ function sanitizeConversationContext(context) {
   }
   sanitized.lastProductIds = sanitized.lastProductIds.slice(0, MAX_PRODUCT_IDS);
 
+  // Ensure entity label arrays are bounded
+  if (!Array.isArray(sanitized.lastProducts)) {
+    sanitized.lastProducts = [];
+  }
+  sanitized.lastProducts = sanitized.lastProducts.slice(0, MAX_ENTITY_LABELS);
+
+  if (!Array.isArray(sanitized.lastStoreResults)) {
+    sanitized.lastStoreResults = [];
+  }
+  sanitized.lastStoreResults = sanitized.lastStoreResults.slice(0, MAX_ENTITY_LABELS);
+
+  if (!Array.isArray(sanitized.lastPromotionResults)) {
+    sanitized.lastPromotionResults = [];
+  }
+  sanitized.lastPromotionResults = sanitized.lastPromotionResults.slice(0, MAX_ENTITY_LABELS);
+
+  if (!Array.isArray(sanitized.lastAppointmentResults)) {
+    sanitized.lastAppointmentResults = [];
+  }
+  sanitized.lastAppointmentResults = sanitized.lastAppointmentResults.slice(0, MAX_ENTITY_LABELS);
+
   // Add timestamp
   sanitized.updatedAt = new Date().toISOString();
 
   return sanitized;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Entity label formatting for LLM prompts                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Build a formatted string of entity labels from the previous turn's results.
+ * This is injected into the LLM system prompt so it can resolve references
+ * like "cái đầu tiên", "sản phẩm đó", "mã đó", etc.
+ *
+ * Returns an empty string if no entity labels are available.
+ */
+function buildEntityLabels(context) {
+  if (!context) return '';
+
+  const sections = [];
+
+  // Products from last search
+  if (Array.isArray(context.lastProducts) && context.lastProducts.length > 0) {
+    const productLines = context.lastProducts
+      .map((p, i) => {
+        const parts = [];
+        if (p.name) parts.push(p.name);
+        if (p.brand) parts.push(p.brand);
+        if (p.price != null) {
+          parts.push(`${new Intl.NumberFormat('vi-VN').format(p.price)} VND`);
+        }
+        return `${i + 1}. ${parts.join(' — ')}`;
+      })
+      .join('\n');
+    sections.push(`KẾT QUẢ TÌM KIẾM TRƯỚC ĐÂY:\n${productLines}`);
+  }
+
+  // Stores from last query
+  if (Array.isArray(context.lastStoreResults) && context.lastStoreResults.length > 0) {
+    const storeLines = context.lastStoreResults
+      .map((s, i) => {
+        const parts = [];
+        if (s.name) parts.push(s.name);
+        if (s.fullAddress || s.address) parts.push(s.fullAddress || s.address);
+        if (s.phone) parts.push(`SĐT: ${s.phone}`);
+        return `${i + 1}. ${parts.join(' — ')}`;
+      })
+      .join('\n');
+    sections.push(`CỬA HÀNG TRƯỚC ĐÂY:\n${storeLines}`);
+  }
+
+  // Promotions from last query
+  if (Array.isArray(context.lastPromotionResults) && context.lastPromotionResults.length > 0) {
+    const promoLines = context.lastPromotionResults
+      .map((p, i) => {
+        const parts = [];
+        if (p.code) parts.push(`Mã: ${p.code}`);
+        if (p.description) parts.push(p.description);
+        if (p.discountType === 'percentage' && p.discountValue != null) {
+          parts.push(`Giảm ${p.discountValue}%`);
+        } else if (p.discountType === 'fixed' && p.discountValue != null) {
+          parts.push(`Giảm ${new Intl.NumberFormat('vi-VN').format(p.discountValue)} VND`);
+        }
+        if (p.endDate) parts.push(`HSD: ${p.endDate}`);
+        return `${i + 1}. ${parts.join(' — ')}`;
+      })
+      .join('\n');
+    sections.push(`KHUYẾN MÃI TRƯỚC ĐÂY:\n${promoLines}`);
+  }
+
+  // Appointments from last query
+  if (Array.isArray(context.lastAppointmentResults) && context.lastAppointmentResults.length > 0) {
+    const aptLines = context.lastAppointmentResults
+      .map((a, i) => {
+        const parts = [];
+        if (a.storeName) parts.push(a.storeName);
+        if (a.date) parts.push(a.date);
+        if (a.timeSlot) parts.push(a.timeSlot);
+        if (a.status) parts.push(a.status);
+        return `${i + 1}. ${parts.join(' — ')}`;
+      })
+      .join('\n');
+    sections.push(`LỊCH HẸN TRƯỚC ĐÂY:\n${aptLines}`);
+  }
+
+  if (sections.length === 0) return '';
+
+  return sections.join('\n\n') +
+    '\n\nKhi khách hàng nói "cái đầu tiên", "sản phẩm đó", "mã đó", "cửa hàng đó", "lịch hẹn đó", ' +
+    'họ đang đề cập đến một trong các kết quả trên. Hãy trả lời dựa trên kết quả tương ứng.';
 }
 
 /* ------------------------------------------------------------------ */
@@ -444,4 +571,5 @@ module.exports = {
   sanitizeConversationContext,
   classifyQuery,
   cloneContext,
+  buildEntityLabels,
 };
