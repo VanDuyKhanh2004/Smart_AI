@@ -1422,4 +1422,171 @@ describe('Product constraint integration — pipeline enforcement', () => {
       expect(ctx.preferences.camera).toBe(false);
     });
   });
+
+  describe('44. P0 regression: product query preserves non-product entity labels', () => {
+    it('preserves lastStoreResults when product_query runs after store context', async () => {
+      // Simulate a prior store query by pre-populating context
+      await contextService.saveContext('user-test-1', 'session-cross-store', {
+        filters: {},
+        preferences: { camera: false, battery: false, performance: false, compact: false },
+        lastProductIds: [],
+        lastProducts: [],
+        lastStoreResults: [
+          { name: 'Cửa hàng Nguyễn Huệ', fullAddress: '123 Nguyễn Huệ, Q1', phone: '0123456789' },
+          { name: 'Cửa hàng Lê Lợi', fullAddress: '456 Lê Lợi, Q1', phone: '0987654321' },
+        ],
+        lastPromotionResults: [],
+        lastAppointmentResults: [],
+        turnCount: 1,
+      });
+
+      // Now run a product query
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung dưới 15 triệu',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-cross-store',
+        message: 'Samsung dưới 15 triệu',
+      });
+
+      const ctx = await contextService.loadContext('user-test-1', 'session-cross-store');
+      expect(ctx).not.toBeNull();
+      // lastProducts should be updated with current search results
+      expect(ctx.lastProducts.length).toBeGreaterThan(0);
+      // lastStoreResults must be preserved from previous context
+      expect(ctx.lastStoreResults).toHaveLength(2);
+      expect(ctx.lastStoreResults[0].name).toBe('Cửa hàng Nguyễn Huệ');
+      expect(ctx.lastStoreResults[1].name).toBe('Cửa hàng Lê Lợi');
+    });
+
+    it('preserves lastPromotionResults when product_query runs after promotion context', async () => {
+      await contextService.saveContext('user-test-1', 'session-cross-promo', {
+        filters: {},
+        preferences: { camera: false, battery: false, performance: false, compact: false },
+        lastProductIds: [],
+        lastProducts: [],
+        lastStoreResults: [],
+        lastPromotionResults: [
+          { code: 'SALE10', description: 'Giảm 10%', discountType: 'percentage', discountValue: 10 },
+          { code: 'FIXED50K', description: 'Giảm 50K', discountType: 'fixed', discountValue: 50000 },
+        ],
+        lastAppointmentResults: [],
+        turnCount: 1,
+      });
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'iPhone',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-cross-promo',
+        message: 'iPhone',
+      });
+
+      const ctx = await contextService.loadContext('user-test-1', 'session-cross-promo');
+      expect(ctx).not.toBeNull();
+      expect(ctx.lastProducts.length).toBeGreaterThan(0);
+      expect(ctx.lastPromotionResults).toHaveLength(2);
+      expect(ctx.lastPromotionResults[0].code).toBe('SALE10');
+      expect(ctx.lastPromotionResults[1].code).toBe('FIXED50K');
+    });
+
+    it('preserves lastAppointmentResults when product_query runs after appointment context', async () => {
+      await contextService.saveContext('user-test-1', 'session-cross-apt', {
+        filters: {},
+        preferences: { camera: false, battery: false, performance: false, compact: false },
+        lastProductIds: [],
+        lastProducts: [],
+        lastStoreResults: [],
+        lastPromotionResults: [],
+        lastAppointmentResults: [
+          { storeName: 'Cửa hàng Nguyễn Huệ', date: '28/08/2026', timeSlot: '10:00-10:30', status: 'pending' },
+        ],
+        turnCount: 1,
+      });
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Samsung',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-cross-apt',
+        message: 'Samsung',
+      });
+
+      const ctx = await contextService.loadContext('user-test-1', 'session-cross-apt');
+      expect(ctx).not.toBeNull();
+      expect(ctx.lastProducts.length).toBeGreaterThan(0);
+      expect(ctx.lastAppointmentResults).toHaveLength(1);
+      expect(ctx.lastAppointmentResults[0].storeName).toBe('Cửa hàng Nguyễn Huệ');
+    });
+
+    it('preserves all non-product entity labels simultaneously', async () => {
+      await contextService.saveContext('user-test-1', 'session-cross-all', {
+        filters: {},
+        preferences: { camera: false, battery: false, performance: false, compact: false },
+        lastProductIds: [],
+        lastProducts: [],
+        lastStoreResults: [{ name: 'Store A', fullAddress: '111', phone: '000' }],
+        lastPromotionResults: [{ code: 'PROMO1', description: 'test', discountType: 'fixed', discountValue: 10000 }],
+        lastAppointmentResults: [{ storeName: 'Store A', date: '01/09/2026', timeSlot: '14:00-14:30', status: 'confirmed' }],
+        turnCount: 2,
+      });
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'Galaxy',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-cross-all',
+        message: 'Galaxy',
+      });
+
+      const ctx = await contextService.loadContext('user-test-1', 'session-cross-all');
+      expect(ctx).not.toBeNull();
+      expect(ctx.lastProducts.length).toBeGreaterThan(0);
+      expect(ctx.lastStoreResults).toHaveLength(1);
+      expect(ctx.lastStoreResults[0].name).toBe('Store A');
+      expect(ctx.lastPromotionResults).toHaveLength(1);
+      expect(ctx.lastPromotionResults[0].code).toBe('PROMO1');
+      expect(ctx.lastAppointmentResults).toHaveLength(1);
+      expect(ctx.lastAppointmentResults[0].storeName).toBe('Store A');
+    });
+
+    it('does NOT preserve lastProducts from previous context (replaced by current)', async () => {
+      await contextService.saveContext('user-test-1', 'session-prod-replace', {
+        filters: {},
+        preferences: { camera: false, battery: false, performance: false, compact: false },
+        lastProductIds: [],
+        lastProducts: [{ id: 'old', name: 'Old Product', brand: 'samsung', price: 1000000, position: 1 }],
+        lastStoreResults: [{ name: 'Store X' }],
+        lastPromotionResults: [],
+        lastAppointmentResults: [],
+        turnCount: 1,
+      });
+
+      setupVectorSearch(allProducts);
+      classifyIntentAndRespond.mockResolvedValue({
+        intent: 'product_query',
+        clarified_query: 'iPhone',
+      });
+      await ChatController.processMessage(mockSocket, {
+        sessionId: 'session-prod-replace',
+        message: 'iPhone',
+      });
+
+      const ctx = await contextService.loadContext('user-test-1', 'session-prod-replace');
+      expect(ctx).not.toBeNull();
+      // lastProducts should be replaced, not inherited
+      expect(ctx.lastProducts.some(p => p.name === 'Old Product')).toBe(false);
+      // lastStoreResults should be preserved
+      expect(ctx.lastStoreResults).toHaveLength(1);
+      expect(ctx.lastStoreResults[0].name).toBe('Store X');
+    });
+  });
 });
