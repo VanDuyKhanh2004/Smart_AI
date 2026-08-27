@@ -1828,6 +1828,12 @@ class ChatController {
             productIds
           );
           newContext.lastProducts = lastProducts;
+          // Preserve non-product entity labels from previous context for cross-entity follow-up
+          if (previousContext) {
+            newContext.lastStoreResults = previousContext.lastStoreResults || [];
+            newContext.lastPromotionResults = previousContext.lastPromotionResults || [];
+            newContext.lastAppointmentResults = previousContext.lastAppointmentResults || [];
+          }
           if (previousContext && !contextReset) {
             newContext.turnCount = (previousContext.turnCount || 0) + 1;
           }
