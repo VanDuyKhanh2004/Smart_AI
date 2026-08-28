@@ -15,7 +15,7 @@ The platform is Vietnamese-language: user-facing store and assistant messages ar
 - **Semantic product search** — `gemini-embedding-001` embeddings (1536-dim) maintained by a content-hash-deduplicated BullMQ pipeline, queried via Atlas `$vectorSearch` with `$text` ranking fallback.
 - **Secure identity** — JWT access/refresh flows, Google OAuth, email verification (hashed, one-time tokens), account lockout, Redis-backed login IP rate limiting (atomic Lua script), and a JWT-gated chat socket.
 - **Reliable under failures** — graceful shutdown sequence, liveness/health/readiness endpoints, Redis auto-reconnect with an explicit fail-open/fail-closed policy map, idempotent checkout, and a bounded single-retry for timed-out GET requests (cold-start hardening).
-- **Quality rail** — **2,464 automated tests** (backend 68 suites / 2,043 tests, frontend 40 files / 421 tests) plus an offline, deterministic AI evaluation harness; CI enforces type-check, lint, tests, and a production build on every push/PR.
+- **Quality rail** — **3,338 automated tests** (backend 88 suites / 2,887 tests, frontend 44 files / 451 tests) plus an offline, deterministic AI evaluation harness; CI enforces type-check, lint, tests, and a production build on every push/PR.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ flowchart TB
 
 The chat is a Socket.IO flow that runs this pipeline per product query:
 
-1. **Intent classification** — `product_query` \| `small_talk` \| `complaint` (OpenAI, Gemini fallback).
+1. **Intent classification** — `product_query` \| `small_talk` \| `complaint` \| `appointment` \| `store_query` \| `promotion_query` \| `personal_info` (OpenAI, Gemini fallback).
 2. **Embed + retrieve** — query embedded with `gemini-embedding-001`, then Atlas `$vectorSearch`; on failure falls back to weighted `$text` search (name=10, brand=8, description=5, specs=6), then to latest in-stock products.
 3. **Constrain** — rule-based parsing of the natural-language request (price range, brands include/exclude, in-stock) applied deterministically so answers respect the ask.
 4. **Rank** — soft preferences (camera, battery, performance, compact) order results.
@@ -117,12 +117,12 @@ See [`SECURITY.md`](./SECURITY.md) for the full policy and known limitations.
 
 ## Testing & CI/CD
 
-> Test totals are a current snapshot, verified **2026-08-13** on branch `docs/portfolio-project-polish` (HEAD `f5b6c52`).
+> Test totals are a current snapshot verified on the main branch.
 
 | Suite | Runner | Count |
 |---|---|---|
-| Backend | Jest 30 + Supertest 7, `--runInBand` | **68 suites / 2,043 tests** |
-| Frontend | Vitest 4 + @testing-library/react 16 + jsdom | **40 files / 421 tests** |
+| Backend | Jest 30 + Supertest 7, `--runInBand` | **88 suites / 2,887 tests** |
+| Frontend | Vitest 4 + @testing-library/react 16 + jsdom | **44 files / 451 tests** |
 | AI evaluation | Offline deterministic harness (`npm run evaluate:chatbot`) | **40 mocked scenarios** |
 
 - Backend tests mock every external dependency (MongoDB, Redis, Cloudinary, Brevo, AI providers); Socket.IO suites run a real in-memory HTTP + socket server.
@@ -204,8 +204,6 @@ scripts/               Data migrations + API benchmarks (backend)
 ## Demo
 
 A guided walkthrough covering the storefront search, the AI chat (streaming, stop, retry/regenerate, history restore), auth/email flows, and the admin dashboard is in [`docs/PORTFOLIO_NOTES.md`](./docs/PORTFOLIO_NOTES.md).
-
-<!-- TODO: add product/search/AI-chat/admin screenshots here -->
 
 ## Documentation
 
