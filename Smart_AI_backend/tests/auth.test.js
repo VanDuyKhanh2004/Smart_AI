@@ -670,7 +670,7 @@ describe('Auth Controller — centralized error handling', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.user).toBeDefined();
-      expect(mockSelect).not.toHaveBeenCalled();
+      expect(mockSelect).toHaveBeenCalledWith('+loginAttempts +lockUntil');
     });
 
     it('should return 404 when user not found', async () => {

@@ -47,14 +47,36 @@ const protect = async (req, res, next) => {
       });
     }
 
-    // Find user
-    const user = await User.findById(decoded.id);
+    // Find user (select lock fields so the isLocked virtual works correctly)
+    const user = await User.findById(decoded.id).select('+loginAttempts +lockUntil');
     if (!user) {
       return res.status(401).json({
         success: false,
         error: {
           code: 'UNAUTHORIZED',
           message: 'Người dùng không tồn tại'
+        }
+      });
+    }
+
+    // Enforce account lock state
+    if (user.isLocked) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'ACCOUNT_LOCKED',
+          message: 'Tài khoản tạm thời bị khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau.'
+        }
+      });
+    }
+
+    // Enforce email verification
+    if (user.emailVerified === false) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Vui lòng xác nhận email trước khi truy cập'
         }
       });
     }

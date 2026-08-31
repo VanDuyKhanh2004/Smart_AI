@@ -36,6 +36,16 @@ function mockRes() {
   return res;
 }
 
+/** Build a chainable mock for User.findById(...).select(...) */
+function mockFindByIdChain(user) {
+  const selectMock = jest.fn().mockResolvedValue(user);
+  const chainObj = {
+    select: selectMock,
+    then(resolve) { return Promise.resolve(user).then(resolve); },
+  };
+  User.findById = jest.fn().mockReturnValue(chainObj);
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -64,7 +74,7 @@ describe('protect', () => {
 
   it('returns 401 UNAUTHORIZED when verifyAccessToken succeeds but User.findById returns null', async () => {
     verifyAccessToken.mockReturnValue({ id: 'user-not-exist', email: 'x@test.com' });
-    User.findById.mockResolvedValue(null);
+    mockFindByIdChain(null);
 
     const req = mockReq({ authorization: 'Bearer valid-token' });
     const res = mockRes();
@@ -112,7 +122,7 @@ describe('protect', () => {
 
   it('returns 500 SERVER_ERROR when User.findById throws', async () => {
     verifyAccessToken.mockReturnValue({ id: 'user-1', email: 'u@test.com' });
-    User.findById.mockRejectedValue(new Error('db connection lost'));
+    User.findById = jest.fn().mockImplementation(() => { throw new Error('db connection lost'); });
 
     const req = mockReq({ authorization: 'Bearer valid-token' });
     const res = mockRes();
@@ -129,6 +139,106 @@ describe('protect', () => {
       expect.objectContaining({ err: expect.any(Error) }),
       'Auth middleware error',
     );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('attaches req.user and calls next() for a normal active verified user', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-1', email: 'u@test.com' });
+    const fakeUser = { _id: 'user-1', email: 'u@test.com', role: 'user', emailVerified: true, isLocked: false };
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ authorization: 'Bearer good-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(req.user).toBe(fakeUser);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 ACCOUNT_LOCKED when user account is locked', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-locked', email: 'locked@test.com' });
+    const lockedUser = {
+      _id: 'user-locked',
+      email: 'locked@test.com',
+      role: 'user',
+      emailVerified: true,
+      isLocked: true,
+    };
+    mockFindByIdChain(lockedUser);
+
+    const req = mockReq({ authorization: 'Bearer locked-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: {
+        code: 'ACCOUNT_LOCKED',
+        message: 'Tài khoản tạm thời bị khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau.',
+      },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 EMAIL_NOT_VERIFIED when user email is not verified', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-unverified', email: 'unverified@test.com' });
+    const unverifiedUser = {
+      _id: 'user-unverified',
+      email: 'unverified@test.com',
+      role: 'user',
+      emailVerified: false,
+      isLocked: false,
+    };
+    mockFindByIdChain(unverifiedUser);
+
+    const req = mockReq({ authorization: 'Bearer unverified-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: {
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Vui lòng xác nhận email trước khi truy cập',
+      },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when user is both locked and unverified (locked check runs first)', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-both', email: 'both@test.com' });
+    const bothUser = {
+      _id: 'user-both',
+      email: 'both@test.com',
+      role: 'user',
+      emailVerified: false,
+      isLocked: true,
+    };
+    mockFindByIdChain(bothUser);
+
+    const req = mockReq({ authorization: 'Bearer both-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: {
+        code: 'ACCOUNT_LOCKED',
+        message: 'Tài khoản tạm thời bị khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau.',
+      },
+    });
     expect(next).not.toHaveBeenCalled();
   });
 });
@@ -150,7 +260,7 @@ describe('optionalAuth', () => {
   it('attaches req.user when token and user are valid', async () => {
     const fakeUser = { _id: 'u1', email: 'a@b.com', role: 'user' };
     verifyAccessToken.mockReturnValue({ id: 'u1', email: 'a@b.com' });
-    User.findById.mockResolvedValue(fakeUser);
+    mockFindByIdChain(fakeUser);
 
     const req = mockReq({ authorization: 'Bearer good-token' });
     const res = mockRes();
