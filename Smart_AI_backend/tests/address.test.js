@@ -15,13 +15,19 @@ const mockUser = {
   name: 'Test User',
 };
 
-jest.mock('../models/User', () => ({
-  findById: jest.fn((id) => {
-    if (id === USER_ID) return Promise.resolve(mockUser);
-    if (id === OTHER_USER_ID) return Promise.resolve({ ...mockUser, _id: OTHER_USER_ID });
-    return Promise.resolve(null);
-  }),
-}));
+jest.mock('../models/User', () => {
+  const thenableChainable = (result) => ({
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  });
+  return {
+    findById: jest.fn((id) => {
+      if (id === USER_ID) return thenableChainable(mockUser);
+      if (id === OTHER_USER_ID) return thenableChainable({ ...mockUser, _id: OTHER_USER_ID });
+      return thenableChainable(null);
+    }),
+  };
+});
 
 const mockAddress = {
   _id: '507f191e810c19729de860f1',

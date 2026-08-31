@@ -53,6 +53,13 @@ const mockUserWithPassword = {
   save: jest.fn().mockResolvedValue(true),
 };
 
+function thenableChainable(result) {
+  return {
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  };
+}
+
 jest.mock('../models/User', () => ({
   findById: jest.fn(),
   findByIdAndUpdate: jest.fn(),
@@ -106,7 +113,7 @@ describe('Profile Controller — centralized error handling', () => {
 
   describe('GET /api/profile', () => {
     it('returns 200 with user profile', async () => {
-      User.findById.mockResolvedValue(mockUser);
+      User.findById.mockReturnValue(thenableChainable(mockUser));
 
       const res = await request(app)
         .get('/api/profile')
@@ -120,8 +127,8 @@ describe('Profile Controller — centralized error handling', () => {
 
     it('returns 404 when user not found', async () => {
       User.findById
-        .mockResolvedValueOnce(mockUser)
-        .mockResolvedValueOnce(null);
+        .mockReturnValueOnce(thenableChainable(mockUser))
+        .mockReturnValueOnce(thenableChainable(null));
 
       const res = await request(app)
         .get('/api/profile')
@@ -138,7 +145,7 @@ describe('Profile Controller — centralized error handling', () => {
   describe('PUT /api/profile', () => {
     it('returns 200 when profile is updated', async () => {
       const updatedUser = { ...mockUser, name: 'New Name', toJSON: mockUser.toJSON };
-      User.findById.mockResolvedValue(mockUser);
+      User.findById.mockReturnValue(thenableChainable(mockUser));
       User.findByIdAndUpdate.mockResolvedValue(updatedUser);
 
       const res = await request(app)
@@ -152,7 +159,7 @@ describe('Profile Controller — centralized error handling', () => {
     });
 
     it('returns 400 when name is too short', async () => {
-      User.findById.mockResolvedValue(mockUser);
+      User.findById.mockReturnValue(thenableChainable(mockUser));
 
       const res = await request(app)
         .put('/api/profile')
@@ -167,7 +174,7 @@ describe('Profile Controller — centralized error handling', () => {
     });
 
     it('returns 400 when phone is invalid', async () => {
-      User.findById.mockResolvedValue(mockUser);
+      User.findById.mockReturnValue(thenableChainable(mockUser));
 
       const res = await request(app)
         .put('/api/profile')
@@ -182,7 +189,7 @@ describe('Profile Controller — centralized error handling', () => {
     });
 
     it('returns 404 when user not found after update', async () => {
-      User.findById.mockResolvedValue(mockUser);
+      User.findById.mockReturnValue(thenableChainable(mockUser));
       User.findByIdAndUpdate.mockResolvedValue(null);
 
       const res = await request(app)
@@ -200,7 +207,7 @@ describe('Profile Controller — centralized error handling', () => {
 
   describe('POST /api/profile/avatar', () => {
     it('returns 200 when avatar is uploaded', async () => {
-      User.findById.mockResolvedValue({ ...mockUser, save: jest.fn().mockResolvedValue(true) });
+      User.findById.mockReturnValue(thenableChainable({ ...mockUser, save: jest.fn().mockResolvedValue(true) }));
 
       const res = await request(app)
         .post('/api/profile/avatar')
@@ -212,7 +219,7 @@ describe('Profile Controller — centralized error handling', () => {
     });
 
     it('does not delete uploaded file on success', async () => {
-      User.findById.mockResolvedValue({ ...mockUser, save: jest.fn().mockResolvedValue(true) });
+      User.findById.mockReturnValue(thenableChainable({ ...mockUser, save: jest.fn().mockResolvedValue(true) }));
 
       const res = await request(app)
         .post('/api/profile/avatar')
@@ -224,8 +231,8 @@ describe('Profile Controller — centralized error handling', () => {
 
     it('returns 404 when user not found and cleans up file', async () => {
       User.findById
-        .mockResolvedValueOnce(mockUser)
-        .mockResolvedValueOnce(null);
+        .mockReturnValueOnce(thenableChainable(mockUser))
+        .mockReturnValueOnce(thenableChainable(null));
       fs.existsSync.mockReturnValue(true);
 
       const res = await request(app)
@@ -250,8 +257,7 @@ describe('Profile Controller — centralized error handling', () => {
           .mockResolvedValueOnce(false),
         save: jest.fn().mockResolvedValue(true),
       };
-      User.findById.mockResolvedValue(userWithPw);
-      User.findById.mockReturnValue({ ...userWithPw, select: jest.fn().mockResolvedValue(userWithPw) });
+      User.findById.mockReturnValue(thenableChainable(userWithPw));
 
       const res = await request(app)
         .put('/api/profile/password')
@@ -319,7 +325,7 @@ describe('Profile Controller — centralized error handling', () => {
         comparePassword: jest.fn().mockResolvedValue(false),
         save: jest.fn().mockResolvedValue(true),
       };
-      User.findById.mockReturnValue({ ...userWithPw, select: jest.fn().mockResolvedValue(userWithPw) });
+      User.findById.mockReturnValue(thenableChainable(userWithPw));
 
       const res = await request(app)
         .put('/api/profile/password')
@@ -343,7 +349,7 @@ describe('Profile Controller — centralized error handling', () => {
         comparePassword: jest.fn().mockResolvedValue(true),
         save: jest.fn().mockResolvedValue(true),
       };
-      User.findById.mockReturnValue({ ...userWithPw, select: jest.fn().mockResolvedValue(userWithPw) });
+      User.findById.mockReturnValue(thenableChainable(userWithPw));
 
       const res = await request(app)
         .put('/api/profile/password')
@@ -365,7 +371,7 @@ describe('Profile Controller — centralized error handling', () => {
   describe('Unexpected error reaches global errorHandler', () => {
     it('returns 500 when User.findById throws in controller', async () => {
       User.findById
-        .mockResolvedValueOnce(mockUser)
+        .mockReturnValueOnce(thenableChainable(mockUser))
         .mockRejectedValueOnce(new Error('DB error'));
 
       const res = await request(app)
@@ -379,7 +385,7 @@ describe('Profile Controller — centralized error handling', () => {
     });
 
     it('returns 500 when User.findByIdAndUpdate throws', async () => {
-      User.findById.mockResolvedValue(mockUser);
+      User.findById.mockReturnValue(thenableChainable(mockUser));
       User.findByIdAndUpdate.mockRejectedValue(new Error('DB error'));
 
       const res = await request(app)
@@ -399,7 +405,7 @@ describe('Profile Controller — centralized error handling', () => {
         ...mockUserWithPassword,
         comparePassword: jest.fn().mockRejectedValue(new Error('compare error')),
       };
-      User.findById.mockReturnValue({ ...userWithPw, select: jest.fn().mockResolvedValue(userWithPw) });
+      User.findById.mockReturnValue(thenableChainable(userWithPw));
 
       const res = await request(app)
         .put('/api/profile/password')

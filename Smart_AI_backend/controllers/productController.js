@@ -170,7 +170,7 @@ const createProduct = asyncHandler(async (req, res) => {
   }
 
   const existingProduct = await Product.findOne({
-    name: { $regex: new RegExp(`^${name}$`, "i") },
+    name: { $regex: new RegExp(`^${escapeRegex(name)}$`, "i") },
     brand: brand.toLowerCase(),
   });
 

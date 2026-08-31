@@ -23,6 +23,10 @@ const mockAdmin = {
 };
 
 jest.mock('../models/User', () => {
+  const thenableChainable = (result) => ({
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  });
   const mockUserNonAdmin = {
     _id: '507f191e810c19729de860ea',
     email: 'user@test.com',
@@ -37,9 +41,9 @@ jest.mock('../models/User', () => {
   };
   return {
     findById: jest.fn((id) => {
-      if (id === '507f191e810c19729de860ea') return Promise.resolve(mockUserNonAdmin);
-      if (id === '507f191e810c19729de860eb') return Promise.resolve(mockAdmin);
-      return Promise.resolve(null);
+      if (id === '507f191e810c19729de860ea') return thenableChainable(mockUserNonAdmin);
+      if (id === '507f191e810c19729de860eb') return thenableChainable(mockAdmin);
+      return thenableChainable(null);
     }),
   };
 });

@@ -76,10 +76,12 @@ jest.mock('../models/Cart', () => {
 });
 
 const mockProductFindByIdAndUpdate = jest.fn().mockResolvedValue({});
+const mockProductBulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0 });
 
 jest.mock('../models/Product', () => {
   const MockProduct = jest.fn();
   MockProduct.findByIdAndUpdate = mockProductFindByIdAndUpdate;
+  MockProduct.bulkWrite = mockProductBulkWrite;
   MockProduct.find = jest.fn();
   MockProduct.findById = jest.fn();
   MockProduct.findOne = jest.fn();
@@ -91,6 +93,17 @@ jest.mock('../models/Promotion', () => {
   MockPromotion.findOne = jest.fn();
   MockPromotion.findOneAndUpdate = jest.fn().mockResolvedValue({});
   return MockPromotion;
+});
+
+const mockUserFind = jest.fn().mockReturnValue({
+  select: jest.fn().mockReturnThis(),
+  lean: jest.fn().mockResolvedValue([]),
+});
+
+jest.mock('../models/User', () => {
+  const MockUser = jest.fn();
+  MockUser.find = mockUserFind;
+  return MockUser;
 });
 
 jest.mock('../utils/checkoutFingerprint', () => ({
@@ -342,6 +355,13 @@ beforeEach(() => {
   mockOrderSave.mockResolvedValue();
   mockOrderAddStatusHistory.mockReset();
   mockProductFindByIdAndUpdate.mockResolvedValue({});
+  mockProductBulkWrite.mockReset();
+  mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0 });
+  mockUserFind.mockReset();
+  mockUserFind.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
   mockSet.mockReturnValue({ json: mockJson });
   mockIdempotencySave.mockResolvedValue();
   mockIdempotencyFindByIdAndUpdate.mockResolvedValue({});
@@ -459,7 +479,7 @@ describe('createOrder', () => {
       const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
       expect(Order).not.toHaveBeenCalled();
-      expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
       expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
       expect(mockSession.commitTransaction).not.toHaveBeenCalled();
@@ -658,7 +678,7 @@ describe('createOrder', () => {
 
       const next = jest.fn(); await createOrder(makeIdempotentReq(), mockRes(), next);
 
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledTimes(2);
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
     });
 
     it('email queued once on first request', async () => {
@@ -984,7 +1004,7 @@ describe('createOrder', () => {
         expect.objectContaining({ statusCode: 400, code: 'INSUFFICIENT_STOCK' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
-      expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
       expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
     });
   });
@@ -1040,22 +1060,28 @@ describe('createOrder', () => {
   });
 
   describe('inventory management', () => {
-    it('decrements inStock for each item inside the transaction', async () => {
+    it('decrements inStock for each item via bulkWrite inside the transaction', async () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
 
       const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
-        'product-1',
-        { $inc: { inStock: -2 } },
-        { session: mockSession }
-      );
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
-        'product-2',
-        { $inc: { inStock: -1 } },
-        { session: mockSession }
-      );
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      expect(bulkOps).toHaveLength(2);
+      expect(bulkOps[0]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-1' },
+          update: { $inc: { inStock: -2 } }
+        }
+      });
+      expect(bulkOps[1]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-2' },
+          update: { $inc: { inStock: -1 } }
+        }
+      });
+      expect(mockProductBulkWrite.mock.calls[0][1]).toEqual({ session: mockSession });
     });
 
     it('does not decrement stock when validation fails', async () => {
@@ -1067,7 +1093,49 @@ describe('createOrder', () => {
 
       const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
-      expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
+    });
+
+    it('single-item cart calls bulkWrite with one operation', async () => {
+      const singleItemCart = {
+        _id: 'cart-123',
+        user: 'user-123',
+        items: [
+          {
+            _id: 'cart-item-1',
+            product: { _id: 'product-1', name: 'Solo Product', price: 500000, inStock: 10, image: 'test.jpg', isActive: true },
+            quantity: 3,
+            color: 'Black',
+          },
+        ],
+      };
+      setupCartFindOne(singleItemCart);
+      setupOrderFindByIdForCreate();
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      expect(bulkOps).toHaveLength(1);
+      expect(bulkOps[0]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-1' },
+          update: { $inc: { inStock: -3 } }
+        }
+      });
+      expect(mockProductBulkWrite.mock.calls[0][1]).toEqual({ session: mockSession });
+    });
+
+    it('skips bulkWrite when cart is empty', async () => {
+      const emptyCart = { _id: 'cart-123', user: 'user-123', items: [] };
+      setupCartFindOne(emptyCart);
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'CART_EMPTY' })
+      );
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
     });
   });
 
@@ -1311,7 +1379,7 @@ describe('createOrder', () => {
 
     it('does not enqueue email when stock update fails', async () => {
       setupCartFindOne(defaultCartDoc());
-      mockProductFindByIdAndUpdate.mockRejectedValue(new Error('Stock update failed'));
+      mockProductBulkWrite.mockRejectedValue(new Error('Stock update failed'));
 
       const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
@@ -1320,9 +1388,9 @@ describe('createOrder', () => {
   });
 
   describe('error handling', () => {
-    it('returns 500 when Product.findByIdAndUpdate throws', async () => {
+    it('returns 500 when Product.bulkWrite throws', async () => {
       setupCartFindOne(defaultCartDoc());
-      mockProductFindByIdAndUpdate.mockRejectedValue(new Error('DB error during stock update'));
+      mockProductBulkWrite.mockRejectedValue(new Error('DB error during stock update'));
 
       const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
@@ -1343,7 +1411,7 @@ describe('createOrder', () => {
         expect.objectContaining({ statusCode: 500, code: 'SERVER_ERROR' })
       );
       expect(mockSession.abortTransaction).toHaveBeenCalled();
-      expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
     });
 
     it('returns 500 when commitTransaction throws', async () => {
@@ -1437,23 +1505,29 @@ describe('cancelOrder', () => {
   }
 
   describe('success', () => {
-    it('cancels a pending order and restores stock inside the transaction', async () => {
+    it('cancels a pending order and restores stock via bulkWrite inside the transaction', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
 
       const next = jest.fn();
       await cancelOrder(makeReq(), mockRes(), next);
 
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
-        'product-1',
-        { $inc: { inStock: 2 } },
-        { session: mockSession }
-      );
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
-        'product-2',
-        { $inc: { inStock: 1 } },
-        { session: mockSession }
-      );
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      expect(bulkOps).toHaveLength(2);
+      expect(bulkOps[0]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-1' },
+          update: { $inc: { inStock: 2 } }
+        }
+      });
+      expect(bulkOps[1]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-2' },
+          update: { $inc: { inStock: 1 } }
+        }
+      });
+      expect(mockProductBulkWrite.mock.calls[0][1]).toEqual({ session: mockSession });
     });
 
     it('updates order status to cancelled with reason and timestamp', async () => {
@@ -1500,6 +1574,28 @@ describe('cancelOrder', () => {
         })
       );
       expect(next).not.toHaveBeenCalled();
+    });
+
+    it('single-item order calls bulkWrite with one restoration operation', async () => {
+      const singleItemOrder = defaultOrderDoc({
+        status: 'pending',
+        items: [{ product: 'product-1', name: 'Solo Product', price: 500000, quantity: 3, color: 'Black', image: 'test.jpg' }],
+      });
+      setupOrderFindByIdForCancel(singleItemOrder);
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      expect(bulkOps).toHaveLength(1);
+      expect(bulkOps[0]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-1' },
+          update: { $inc: { inStock: 3 } }
+        }
+      });
+      expect(mockProductBulkWrite.mock.calls[0][1]).toEqual({ session: mockSession });
     });
   });
 
@@ -1567,7 +1663,7 @@ describe('cancelOrder', () => {
         expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
         expect(next.mock.calls[0][0].statusCode).toBe(400);
         expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_FOR_CANCEL');
-        expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+        expect(mockProductBulkWrite).not.toHaveBeenCalled();
       }
     });
 
@@ -1579,7 +1675,7 @@ describe('cancelOrder', () => {
       await cancelOrder(makeReq(), mockRes(), next);
 
       expect(mockStatus).toHaveBeenCalledWith(200);
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalled();
+      expect(mockProductBulkWrite).toHaveBeenCalled();
       expect(next).not.toHaveBeenCalled();
     });
   });
@@ -1588,7 +1684,7 @@ describe('cancelOrder', () => {
     it('aborts transaction on error', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
-      mockProductFindByIdAndUpdate.mockRejectedValue(new Error('Stock restore failed'));
+      mockProductBulkWrite.mockRejectedValue(new Error('Stock restore failed'));
 
       const next = jest.fn();
       await cancelOrder(makeReq(), mockRes(), next);
@@ -1601,7 +1697,7 @@ describe('cancelOrder', () => {
     it('ends session on error', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForCancel(orderDoc);
-      mockProductFindByIdAndUpdate.mockRejectedValue(new Error('Stock restore failed'));
+      mockProductBulkWrite.mockRejectedValue(new Error('Stock restore failed'));
 
       const next = jest.fn();
       await cancelOrder(makeReq(), mockRes(), next);
@@ -1617,7 +1713,7 @@ describe('cancelOrder', () => {
       const next = jest.fn();
       await cancelOrder(makeReq(), mockRes(), next);
 
-      expect(mockProductFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
       expect(next.mock.calls[0][0].statusCode).toBe(400);
@@ -1688,7 +1784,7 @@ describe('updateOrderStatus', () => {
   });
 
   describe('cancellation with stock restore', () => {
-    it('restores stock when transitioning to cancelled', async () => {
+    it('restores stock via bulkWrite when transitioning to cancelled', async () => {
       const orderDoc = defaultOrderDoc({ status: 'pending' });
       setupOrderFindByIdForStatus(orderDoc);
 
@@ -1697,16 +1793,22 @@ describe('updateOrderStatus', () => {
 
       expect(orderDoc.status).toBe('cancelled');
       expect(orderDoc.cancelReason).toBe('Admin cancelled');
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
-        'product-1',
-        { $inc: { inStock: 2 } },
-        { session: mockSession }
-      );
-      expect(mockProductFindByIdAndUpdate).toHaveBeenCalledWith(
-        'product-2',
-        { $inc: { inStock: 1 } },
-        { session: mockSession }
-      );
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      expect(bulkOps).toHaveLength(2);
+      expect(bulkOps[0]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-1' },
+          update: { $inc: { inStock: 2 } }
+        }
+      });
+      expect(bulkOps[1]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-2' },
+          update: { $inc: { inStock: 1 } }
+        }
+      });
+      expect(mockProductBulkWrite.mock.calls[0][1]).toEqual({ session: mockSession });
     });
 
     it('restores stock from confirmed or processing states too', async () => {
@@ -1717,8 +1819,8 @@ describe('updateOrderStatus', () => {
         const next = jest.fn();
         await updateOrderStatus(makeReq({ body: { status: 'cancelled' } }), mockRes(), next);
 
-        expect(mockProductFindByIdAndUpdate).toHaveBeenCalled();
-        mockProductFindByIdAndUpdate.mockClear();
+        expect(mockProductBulkWrite).toHaveBeenCalled();
+        mockProductBulkWrite.mockClear();
       }
     });
 
@@ -1730,6 +1832,28 @@ describe('updateOrderStatus', () => {
       await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: 'Payment verified' } }), mockRes(), next);
 
       expect(mockOrderAddStatusHistory).toHaveBeenCalledWith('confirmed', 'Payment verified');
+    });
+
+    it('single-item order calls bulkWrite with one restoration operation', async () => {
+      const singleItemOrder = defaultOrderDoc({
+        status: 'pending',
+        items: [{ product: 'product-1', name: 'Solo Product', price: 500000, quantity: 5, color: 'Black', image: 'test.jpg' }],
+      });
+      setupOrderFindByIdForStatus(singleItemOrder);
+
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'cancelled', cancelReason: 'Admin cancelled' } }), mockRes(), next);
+
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      expect(bulkOps).toHaveLength(1);
+      expect(bulkOps[0]).toEqual({
+        updateOne: {
+          filter: { _id: 'product-1' },
+          update: { $inc: { inStock: 5 } }
+        }
+      });
+      expect(mockProductBulkWrite.mock.calls[0][1]).toEqual({ session: mockSession });
     });
   });
 
@@ -2135,16 +2259,24 @@ describe('getAllOrders', () => {
     };
   }
 
+  function setupOrderFindChain(result) {
+    const chain = {
+      populate: jest.fn().mockReturnThis(),
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue(result),
+    };
+    Order.find.mockReturnValue(chain);
+    Order.countDocuments.mockResolvedValue(Array.isArray(result) ? result.length : 0);
+    return chain;
+  }
+
   it('returns paginated orders with filters', async () => {
     const orders = [
       { _id: 'o1', orderNumber: 'ORD-001', status: 'pending', user: { _id: 'u1', name: 'User 1', email: 'u1@test.com' } },
       { _id: 'o2', orderNumber: 'ORD-002', status: 'delivered', user: { _id: 'u2', name: 'User 2', email: 'u2@test.com' } },
     ];
-    Order.find.mockReturnValue({
-      populate: jest.fn().mockReturnThis(),
-      sort: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue(orders),
-    });
+    setupOrderFindChain(orders);
 
     const next = jest.fn();
     await getAllOrders(makeReq(), mockRes(), next);
@@ -2158,18 +2290,173 @@ describe('getAllOrders', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('applies MongoDB skip and limit for pagination', async () => {
+    const allOrders = Array.from({ length: 25 }, (_, i) => ({ _id: `o${i}`, orderNumber: `ORD-${String(i).padStart(3, '0')}` }));
+    const page2Orders = allOrders.slice(10, 20);
+    setupOrderFindChain(page2Orders);
+    Order.countDocuments.mockResolvedValue(25);
+
+    const next = jest.fn();
+    await getAllOrders(makeReq({ query: { page: '2', limit: '10' } }), mockRes(), next);
+
+    const chain = Order.find.mock.results[0].value;
+    expect(chain.skip).toHaveBeenCalledWith(10);
+    expect(chain.limit).toHaveBeenCalledWith(10);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: true,
+      data: page2Orders,
+      pagination: { page: 2, limit: 10, total: 25, totalPages: 3 },
+    });
+  });
+
+  it('does NOT load all orders into memory for pagination', async () => {
+    const pageOrders = [{ _id: 'o1', orderNumber: 'ORD-001' }];
+    setupOrderFindChain(pageOrders);
+
+    const next = jest.fn();
+    await getAllOrders(makeReq({ query: { page: '1', limit: '10' } }), mockRes(), next);
+
+    // The chain should use skip/limit, not exec
+    const chain = Order.find.mock.results[0].value;
+    expect(chain.skip).toHaveBeenCalledWith(0);
+    expect(chain.limit).toHaveBeenCalledWith(10);
+    expect(chain.exec).toBeUndefined();
+  });
+
   it('forwards unexpected errors to next', async () => {
     const error = new Error('DB error');
     Order.find.mockReturnValue({
       populate: jest.fn().mockReturnThis(),
       sort: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockRejectedValue(error),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockRejectedValue(error),
     });
     const next = jest.fn();
 
     await getAllOrders(makeReq(), mockRes(), next);
 
     expect(next).toHaveBeenCalledWith(error);
+  });
+
+  it('treats regex-special search characters as literal text', async () => {
+    const orders = [
+      { _id: 'o1', orderNumber: 'ORD-001', user: { _id: 'u1', name: 'User 1', email: 'u1@test.com' } },
+    ];
+    setupOrderFindChain(orders);
+    mockUserFind.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+
+    const next = jest.fn();
+    const req = makeReq({ query: { search: '.*' } });
+    await getAllOrders(req, mockRes(), next);
+
+    // Should not throw — the regex-special input is escaped to literal ".*"
+    expect(next).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(200);
+  });
+
+  const regexSpecialSearches = [
+    { input: '.*', label: 'dot-star' },
+    { input: '^ORD', label: 'caret' },
+    { input: 'ORD$', label: 'dollar' },
+    { input: '(test)', label: 'parentheses' },
+    { input: '[0-9]', label: 'brackets' },
+    { input: 'ORD+', label: 'plus' },
+    { input: 'ORD?', label: 'question' },
+    { input: 'ORD\\d+', label: 'backslash' },
+  ];
+
+  for (const { input, label } of regexSpecialSearches) {
+    it(`search with regex-special input "${label}" does not throw`, async () => {
+      setupOrderFindChain([]);
+      mockUserFind.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([]),
+      });
+
+      const next = jest.fn();
+      const req = makeReq({ query: { search: input } });
+      await getAllOrders(req, mockRes(), next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(mockStatus).toHaveBeenCalledWith(200);
+    });
+  }
+
+  it('case-insensitive literal search still works', async () => {
+    const orders = [
+      { _id: 'o1', orderNumber: 'ORD-001', user: { _id: 'u1', name: 'Alice', email: 'a@test.com' } },
+    ];
+    setupOrderFindChain(orders);
+    mockUserFind.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+
+    const next = jest.fn();
+    const req = makeReq({ query: { search: 'ord-001' } });
+    await getAllOrders(req, mockRes(), next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(mockStatus).toHaveBeenCalledWith(200);
+    // The search should match via $or with orderNumber regex and user $in
+    const filter = Order.find.mock.calls[0][0];
+    expect(filter.$or).toBeDefined();
+    expect(filter.$or).toEqual([
+      { orderNumber: expect.any(RegExp) },
+      { user: { $in: [] } }
+    ]);
+  });
+
+  it('search by user name queries User collection and uses $in', async () => {
+    const orders = [{ _id: 'o1', orderNumber: 'ORD-001', user: { _id: 'u1', name: 'Alice', email: 'a@test.com' } }];
+    setupOrderFindChain(orders);
+    mockUserFind.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([{ _id: 'u1' }]),
+    });
+
+    const next = jest.fn();
+    const req = makeReq({ query: { search: 'Alice' } });
+    await getAllOrders(req, mockRes(), next);
+
+    expect(mockUserFind).toHaveBeenCalledWith({ name: expect.any(RegExp) });
+    const filter = Order.find.mock.calls[0][0];
+    expect(filter.$or).toEqual([
+      { orderNumber: expect.any(RegExp) },
+      { user: { $in: ['u1'] } }
+    ]);
+  });
+
+  it('combined status and search filters work together', async () => {
+    const orders = [{ _id: 'o1', orderNumber: 'ORD-001', status: 'pending' }];
+    setupOrderFindChain(orders);
+    mockUserFind.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
+
+    const next = jest.fn();
+    const req = makeReq({ query: { status: 'pending', search: 'ORD-001' } });
+    await getAllOrders(req, mockRes(), next);
+
+    const filter = Order.find.mock.calls[0][0];
+    expect(filter.status).toBe('pending');
+    expect(filter.$or).toBeDefined();
+  });
+
+  it('empty search returns results without user lookup', async () => {
+    const orders = [{ _id: 'o1', orderNumber: 'ORD-001' }];
+    setupOrderFindChain(orders);
+
+    const next = jest.fn();
+    await getAllOrders(makeReq({ query: { search: '' } }), mockRes(), next);
+
+    expect(mockUserFind).not.toHaveBeenCalled();
+    const filter = Order.find.mock.calls[0][0];
+    expect(filter.$or).toBeUndefined();
   });
 });
 
@@ -2360,7 +2647,7 @@ describe('cancelOrder regression', () => {
     const orderDoc = defaultOrderDoc({ status: 'pending' });
     setupOrderFindByIdForCancel(orderDoc);
     const error = new Error('Unexpected stock error');
-    mockProductFindByIdAndUpdate.mockRejectedValue(error);
+    mockProductBulkWrite.mockRejectedValue(error);
     const next = jest.fn();
 
     await cancelOrder(makeReq(), mockRes(), next);

@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
+const User = require('../models/User');
 const Promotion = require('../models/Promotion');
 const IdempotencyRecord = require('../models/IdempotencyRecord');
 const { computeRequestFingerprint, computeCheckoutFingerprint } = require('../utils/checkoutFingerprint');
@@ -14,6 +15,14 @@ const { AppError, BadRequestError, NotFoundError, ForbiddenError, ConflictError 
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
+
+/**
+ * Escape all regex metacharacters in a user-supplied string so it can be
+ * safely embedded in a RegExp constructor.
+ */
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /**
  * Create order from cart
@@ -349,10 +358,14 @@ const createOrder = asyncHandler(async (req, res, next) => {
       );
     }
 
-    for (const item of cart.items) {
-      await Product.findByIdAndUpdate(
-        item.product._id,
-        { $inc: { inStock: -item.quantity } },
+    if (cart.items.length > 0) {
+      await Product.bulkWrite(
+        cart.items.map(item => ({
+          updateOne: {
+            filter: { _id: item.product._id },
+            update: { $inc: { inStock: -item.quantity } }
+          }
+        })),
         { session }
       );
     }
@@ -524,43 +537,29 @@ const getAllOrders = asyncHandler(async (req, res, next) => {
   }
 
   // Search filter (Requirement 5.2) - search by orderNumber or customer name
-  let searchQuery = {};
   if (req.query.search) {
-    const searchRegex = new RegExp(req.query.search, 'i');
-    searchQuery = {
-      $or: [
-        { orderNumber: searchRegex }
-      ]
-    };
+    const searchRegex = new RegExp(escapeRegex(req.query.search), 'i');
+    // Find user IDs matching the search term by name
+    const matchingUsers = await User.find({ name: searchRegex }).select('_id').lean();
+    const userIds = matchingUsers.map(u => u._id);
+    filter.$or = [
+      { orderNumber: searchRegex },
+      { user: { $in: userIds } }
+    ];
   }
 
-  // Combine filters
-  const finalFilter = req.query.search
-    ? { $and: [filter, searchQuery] }
-    : filter;
-
-  // Get orders with user populated for search
-  let ordersQuery = Order.find(finalFilter)
-    .populate('user', 'name email')
-    .sort({ createdAt: -1 });
-
-  // If searching by customer name, we need to filter after populate
-  let orders = await ordersQuery.exec();
-
-  if (req.query.search) {
-    const searchLower = req.query.search.toLowerCase();
-    orders = orders.filter(order =>
-      order.orderNumber.toLowerCase().includes(searchLower) ||
-      (order.user && order.user.name && order.user.name.toLowerCase().includes(searchLower))
-    );
-  }
-
-  const total = orders.length;
-  const paginatedOrders = orders.slice(skip, skip + limit);
+  const [orders, total] = await Promise.all([
+    Order.find(filter)
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Order.countDocuments(filter)
+  ]);
 
   res.status(200).json({
     success: true,
-    data: paginatedOrders,
+    data: orders,
     pagination: {
       page,
       limit,
@@ -670,10 +669,14 @@ const updateOrderStatus = asyncHandler(async (req, res, next) => {
       }
 
       // Restore stock for cancelled orders
-      for (const item of order.items) {
-        await Product.findByIdAndUpdate(
-          item.product,
-          { $inc: { inStock: item.quantity } },
+      if (order.items.length > 0) {
+        await Product.bulkWrite(
+          order.items.map(item => ({
+            updateOne: {
+              filter: { _id: item.product },
+              update: { $inc: { inStock: item.quantity } }
+            }
+          })),
           { session }
         );
       }
@@ -764,10 +767,14 @@ const cancelOrder = asyncHandler(async (req, res, next) => {
     order.addStatusHistory('cancelled', `Khách hàng hủy đơn: ${finalReason}`);
 
     // Restore stock for all items (Requirement 1.4)
-    for (const item of order.items) {
-      await Product.findByIdAndUpdate(
-        item.product,
-        { $inc: { inStock: item.quantity } },
+    if (order.items.length > 0) {
+      await Product.bulkWrite(
+        order.items.map(item => ({
+          updateOne: {
+            filter: { _id: item.product },
+            update: { $inc: { inStock: item.quantity } }
+          }
+        })),
         { session }
       );
     }
