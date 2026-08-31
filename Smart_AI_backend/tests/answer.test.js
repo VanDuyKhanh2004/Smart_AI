@@ -16,13 +16,19 @@ const MISSING_ID = '507f191e810c19729de860ff';
 const mockAdmin = { _id: ADMIN_ID, email: 'admin@test.com', role: 'admin', name: 'Admin' };
 const mockUser = { _id: USER_ID, email: 'user@test.com', role: 'user', name: 'User' };
 
-jest.mock('../models/User', () => ({
-  findById: jest.fn((id) => {
-    if (id === ADMIN_ID) return Promise.resolve(mockAdmin);
-    if (id === USER_ID) return Promise.resolve(mockUser);
-    return Promise.resolve(null);
-  }),
-}));
+jest.mock('../models/User', () => {
+  const thenableChainable = (result) => ({
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  });
+  return {
+    findById: jest.fn((id) => {
+      if (id === ADMIN_ID) return thenableChainable(mockAdmin);
+      if (id === USER_ID) return thenableChainable(mockUser);
+      return thenableChainable(null);
+    }),
+  };
+});
 
 const mockQuestion = {
   _id: QUESTION_ID,

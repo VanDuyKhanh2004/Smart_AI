@@ -20,13 +20,19 @@ const mockUser = {
   name: 'Test User',
 };
 
-jest.mock('../models/User', () => ({
-  findById: jest.fn((id) => {
-    if (id === USER_ID) return Promise.resolve(mockUser);
-    if (id === OTHER_USER_ID) return Promise.resolve({ ...mockUser, _id: OTHER_USER_ID });
-    return Promise.resolve(null);
-  }),
-}));
+jest.mock('../models/User', () => {
+  const thenableChainable = (result) => ({
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  });
+  return {
+    findById: jest.fn((id) => {
+      if (id === USER_ID) return thenableChainable(mockUser);
+      if (id === OTHER_USER_ID) return thenableChainable({ ...mockUser, _id: OTHER_USER_ID });
+      return thenableChainable(null);
+    }),
+  };
+});
 
 const mockProduct1 = { _id: VALID_PRODUCT_1, name: 'Product 1', image: 'img1.jpg', price: 100 };
 const mockProduct2 = { _id: VALID_PRODUCT_2, name: 'Product 2', image: 'img2.jpg', price: 200 };

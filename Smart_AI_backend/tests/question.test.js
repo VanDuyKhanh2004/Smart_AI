@@ -19,14 +19,20 @@ const mockUser = { _id: USER_ID, email: 'user@test.com', role: 'user', name: 'Us
 const mockAdmin = { _id: ADMIN_ID, email: 'admin@test.com', role: 'admin', name: 'Admin' };
 const mockOther = { _id: OTHER_USER_ID, email: 'other@test.com', role: 'user', name: 'Other' };
 
-jest.mock('../models/User', () => ({
-  findById: jest.fn((id) => {
-    if (id === USER_ID) return Promise.resolve(mockUser);
-    if (id === ADMIN_ID) return Promise.resolve(mockAdmin);
-    if (id === OTHER_USER_ID) return Promise.resolve(mockOther);
-    return Promise.resolve(null);
-  }),
-}));
+jest.mock('../models/User', () => {
+  const thenableChainable = (result) => ({
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  });
+  return {
+    findById: jest.fn((id) => {
+      if (id === USER_ID) return thenableChainable(mockUser);
+      if (id === ADMIN_ID) return thenableChainable(mockAdmin);
+      if (id === OTHER_USER_ID) return thenableChainable(mockOther);
+      return thenableChainable(null);
+    }),
+  };
+});
 
 const mockProduct = { _id: PRODUCT_ID, name: 'Test Product', image: 'img.jpg', price: 100, toJSON: function () { return { _id: this._id, name: this.name, image: this.image, price: this.price }; } };
 

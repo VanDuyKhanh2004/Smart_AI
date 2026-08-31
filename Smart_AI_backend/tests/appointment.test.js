@@ -27,13 +27,19 @@ jest.mock('../services/emailQueueService', () => ({
   enqueueAppointmentCancelledEmail: (...args) => mockEnqueueAppointmentCancelled(...args),
 }));
 
-jest.mock('../models/User', () => ({
-  findById: jest.fn((id) => {
-    if (id === USER_ID) return Promise.resolve(mockUser);
-    if (id === ADMIN_ID) return Promise.resolve(mockAdmin);
-    return Promise.resolve(null);
-  }),
-}));
+jest.mock('../models/User', () => {
+  const thenableChainable = (result) => ({
+    select: jest.fn().mockResolvedValue(result),
+    then(resolve) { return Promise.resolve(result).then(resolve); },
+  });
+  return {
+    findById: jest.fn((id) => {
+      if (id === USER_ID) return thenableChainable(mockUser);
+      if (id === ADMIN_ID) return thenableChainable(mockAdmin);
+      return thenableChainable(null);
+    }),
+  };
+});
 
 const mockStore = {
   _id: STORE_ID,
