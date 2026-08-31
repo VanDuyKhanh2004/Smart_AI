@@ -2390,6 +2390,79 @@ describe('escapeRegex', () => {
 });
 
 /* ============================================================
+   createProduct regex injection regression
+   ============================================================ */
+describe('createProduct — regex injection prevention', () => {
+  const savedProduct = (name) => ({
+    _id: 'prod-regex',
+    name,
+    brand: 'test',
+    price: 500,
+    description: 'Test',
+    specs: {},
+    colors: [],
+    inStock: 0,
+    tags: [],
+    image: '',
+    embeddingStatus: 'pending',
+  });
+
+  const regexSpecialInputs = [
+    { input: '.*', label: 'dot-star' },
+    { input: '^$', label: 'caret-dollar' },
+    { input: '(test)', label: 'parentheses' },
+    { input: '[abc]', label: 'brackets' },
+    { input: 'test+', label: 'plus' },
+    { input: 'test?', label: 'question' },
+    { input: 'a\\b', label: 'backslash' },
+    { input: 'price.$100', label: 'dollar-dot' },
+  ];
+
+  for (const { input, label } of regexSpecialInputs) {
+    it(`treats regex-special input "${label}" as literal text`, async () => {
+      Product.findOne.mockResolvedValue(null);
+      const mockSave = new Product({}).save;
+      mockSave.mockResolvedValue(savedProduct(input));
+
+      const req = mockReq({ name: input, brand: 'test', price: 500, description: 'Test' });
+      const res = mockRes();
+      mockBuildEmbeddingContent.mockReturnValue('text');
+
+      await createProduct(req, res);
+
+      // Product.findOne should have been called — the regex-special name
+      // must not throw or match unrelated products.
+      expect(Product.findOne).toHaveBeenCalled();
+      const findOneCall = Product.findOne.mock.calls[0][0];
+      // The constructed RegExp must escape the input so it is treated literally.
+      const regex = findOneCall.name.$regex;
+      expect(regex.test(input)).toBe(true);
+      // Verify it does NOT match unrelated strings via regex metacharacters.
+      expect(regex.test('')).toBe(false);
+    });
+  }
+
+  it('still matches exact product name case-insensitively', async () => {
+    Product.findOne.mockResolvedValue(null);
+    const mockSave = new Product({}).save;
+    mockSave.mockResolvedValue(savedProduct('Galaxy S24'));
+
+    const req = mockReq({ name: 'Galaxy S24', brand: 'samsung', price: 899, description: 'Phone' });
+    const res = mockRes();
+    mockBuildEmbeddingContent.mockReturnValue('text');
+
+    await createProduct(req, res);
+
+    const findOneCall = Product.findOne.mock.calls[0][0];
+    const regex = findOneCall.name.$regex;
+    expect(regex.test('Galaxy S24')).toBe(true);
+    expect(regex.test('galaxy s24')).toBe(true);
+    expect(regex.test('GALAXY S24')).toBe(true);
+    expect(regex.test('Galaxy S24 Pro')).toBe(false);
+  });
+});
+
+/* ============================================================
    Prefix search integration tests
 ============================================================ */
 describe('getAllProducts prefix search', () => {
