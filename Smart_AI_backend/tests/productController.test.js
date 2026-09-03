@@ -1641,7 +1641,6 @@ describe('getAllProducts', () => {
 
   it('normalizes negative page to page 1 via parsePagination', async () => {
     Product.aggregate
-      .mockResolvedValueOnce([])  // prefixCount
       .mockResolvedValueOnce([])  // dataPipeline
       .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
 
@@ -1660,7 +1659,6 @@ describe('getAllProducts', () => {
 
   it('clamps unbounded limit to MAX_LIMIT (50) via parsePagination', async () => {
     Product.aggregate
-      .mockResolvedValueOnce([])  // prefixCount
       .mockResolvedValueOnce([])  // dataPipeline
       .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
 
@@ -1679,7 +1677,6 @@ describe('getAllProducts', () => {
 
   it('normalizes zero limit to default 10 via parsePagination', async () => {
     Product.aggregate
-      .mockResolvedValueOnce([])  // prefixCount
       .mockResolvedValueOnce([])  // dataPipeline
       .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
 
