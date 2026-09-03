@@ -2323,6 +2323,49 @@ describe('getAllOrders', () => {
     expect(chain.exec).toBeUndefined();
   });
 
+  it('normalizes negative page to page 1 via parsePagination', async () => {
+    setupOrderFindChain([]);
+    Order.countDocuments.mockResolvedValue(0);
+
+    const next = jest.fn();
+    await getAllOrders(makeReq({ query: { page: '-5', limit: '10' } }), mockRes(), next);
+
+    const chain = Order.find.mock.results[0].value;
+    expect(chain.skip).toHaveBeenCalledWith(0);
+    expect(chain.limit).toHaveBeenCalledWith(10);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({ pagination: expect.objectContaining({ page: 1, limit: 10 }) })
+    );
+  });
+
+  it('normalizes zero limit to default 10 via parsePagination', async () => {
+    setupOrderFindChain([]);
+    Order.countDocuments.mockResolvedValue(0);
+
+    const next = jest.fn();
+    await getAllOrders(makeReq({ query: { page: '1', limit: '0' } }), mockRes(), next);
+
+    const chain = Order.find.mock.results[0].value;
+    expect(chain.limit).toHaveBeenCalledWith(10);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({ pagination: expect.objectContaining({ limit: 10 }) })
+    );
+  });
+
+  it('clamps unbounded limit to MAX_LIMIT via parsePagination', async () => {
+    setupOrderFindChain([]);
+    Order.countDocuments.mockResolvedValue(0);
+
+    const next = jest.fn();
+    await getAllOrders(makeReq({ query: { page: '1', limit: '999999' } }), mockRes(), next);
+
+    const chain = Order.find.mock.results[0].value;
+    expect(chain.limit).toHaveBeenCalledWith(50);
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({ pagination: expect.objectContaining({ limit: 50 }) })
+    );
+  });
+
   it('forwards unexpected errors to next', async () => {
     const error = new Error('DB error');
     Order.find.mockReturnValue({

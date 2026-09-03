@@ -1639,6 +1639,60 @@ describe('getAllProducts', () => {
     expect(next).toHaveBeenCalledWith(dbError);
   });
 
+  it('normalizes negative page to page 1 via parsePagination', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '-5', limit: '10' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          pagination: expect.objectContaining({ currentPage: 1, limit: 10 }),
+        }),
+      }),
+    );
+  });
+
+  it('clamps unbounded limit to MAX_LIMIT (50) via parsePagination', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '999999' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          pagination: expect.objectContaining({ limit: 50 }),
+        }),
+      }),
+    );
+  });
+
+  it('normalizes zero limit to default 10 via parsePagination', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])  // dataPipeline
+      .mockResolvedValueOnce([{ total: 0 }]); // countPipeline
+
+    const req = mockReq({}, {}, { page: '1', limit: '0' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          pagination: expect.objectContaining({ limit: 10 }),
+        }),
+      }),
+    );
+  });
+
   it('normalizes search query: trims whitespace', async () => {
     // prefix-first: 3 calls (prefixCount + data + count)
     Product.aggregate

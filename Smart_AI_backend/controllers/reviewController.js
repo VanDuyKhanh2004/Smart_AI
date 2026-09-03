@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 
 /**
  * Check if user has a delivered order containing the product
@@ -100,9 +101,7 @@ const createReview = asyncHandler(async (req, res) => {
  */
 const getProductReviews = asyncHandler(async (req, res) => {
   const { id: productId } = req.params;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
 
   // Validate productId
   if (!mongoose.Types.ObjectId.isValid(productId)) {
@@ -285,9 +284,7 @@ const canReviewProduct = asyncHandler(async (req, res) => {
  * Requirements: 5.1
  */
 const getAllReviews = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
   const { status, productId, userId } = req.query;
 
   // Build filter query

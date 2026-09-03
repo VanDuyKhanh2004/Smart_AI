@@ -2,17 +2,18 @@ const Complaint = require('../models/Complaint');
 const Conversation = require('../models/Conversation');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 
 const getComplaints = async (req, res) => {
   const {
-    page = 1,
-    limit = 10,
     status,
     priority,
     sortBy = 'createdAt',
     sortOrder = 'desc',
     search
   } = req.query;
+
+  const { page, limit, skip } = parsePagination(req.query);
 
   const filter = {};
 
@@ -28,7 +29,6 @@ const getComplaints = async (req, res) => {
     filter.$text = { $search: search.trim() };
   }
 
-  const skip = (parseInt(page) - 1) * parseInt(limit);
   const sortDirection = sortOrder === 'asc' ? 1 : -1;
   const sortObject = { [sortBy]: sortDirection };
 
@@ -37,24 +37,24 @@ const getComplaints = async (req, res) => {
       .populate('conversationId', 'sessionId messageCount')
       .sort(sortObject)
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean(),
     Complaint.countDocuments(filter)
   ]);
 
-  const totalPages = Math.ceil(totalCount / parseInt(limit));
-  const hasNextPage = parseInt(page) < totalPages;
-  const hasPrevPage = parseInt(page) > 1;
+  const totalPages = Math.ceil(totalCount / limit);
+  const hasNextPage = page < totalPages;
+  const hasPrevPage = page > 1;
 
   res.json({
     success: true,
     data: {
       complaints,
       pagination: {
-        currentPage: parseInt(page),
+        currentPage: page,
         totalPages,
         totalCount,
-        limit: parseInt(limit),
+        limit,
         hasNextPage,
         hasPrevPage
       }
@@ -291,10 +291,10 @@ const searchComplaints = async (req, res) => {
     priority,
     dateFrom,
     dateTo,
-    hasContact,
-    page = 1,
-    limit = 10
+    hasContact
   } = req.query;
+
+  const { page, limit, skip } = parsePagination(req.query);
 
   const filter = {};
 
@@ -348,13 +348,12 @@ const searchComplaints = async (req, res) => {
     ];
   }
 
-  const skip = (parseInt(page) - 1) * parseInt(limit);
   const [complaints, totalCount] = await Promise.all([
     Complaint.find(filter)
       .populate('conversationId', 'sessionId messageCount')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean(),
     Complaint.countDocuments(filter)
   ]);
@@ -364,10 +363,10 @@ const searchComplaints = async (req, res) => {
     data: {
       complaints,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
+        currentPage: page,
+        totalPages: Math.ceil(totalCount / limit),
         totalCount,
-        limit: parseInt(limit)
+        limit
       },
       searchCriteria: {
         query: q,
