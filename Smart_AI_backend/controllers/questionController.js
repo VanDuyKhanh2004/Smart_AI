@@ -5,6 +5,7 @@ const Product = require('../models/Product');
 const { generateAISuggestion } = require('../services/aiSuggestionService');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 const logger = require('../utils/logger');
 
 /**
@@ -89,9 +90,7 @@ const createQuestion = asyncHandler(async (req, res) => {
  */
 const getProductQuestions = asyncHandler(async (req, res) => {
   const { productId } = req.params;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
 
   const currentUserId = req.user?._id;
 
@@ -224,9 +223,7 @@ const deleteQuestion = asyncHandler(async (req, res) => {
  * Requirements: 6.1
  */
 const getAllQuestions = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
   const { status, productId } = req.query;
 
   const filter = {};

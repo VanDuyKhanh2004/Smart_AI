@@ -2,6 +2,7 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 
 /**
  * Get date range based on period type
@@ -168,7 +169,7 @@ const getRevenueStats = asyncHandler(async (req, res) => {
  * @param limit - number of products (default 10)
  */
 const getTopSellingProducts = asyncHandler(async (req, res) => {
-  const limit = parseInt(req.query.limit) || 10;
+  const { limit } = parsePagination(req.query);
 
   // Aggregate order items from delivered orders (Requirement 4.3)
   const topProducts = await Order.aggregate([

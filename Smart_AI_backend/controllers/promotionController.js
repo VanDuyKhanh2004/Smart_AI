@@ -1,14 +1,13 @@
 const Promotion = require('../models/Promotion');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError, ConflictError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 
 /**
  * GET /api/promotions - Get all promotions with pagination (Admin)
  */
 const getPromotions = asyncHandler(async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
   const status = req.query.status;
 
   let filter = {};

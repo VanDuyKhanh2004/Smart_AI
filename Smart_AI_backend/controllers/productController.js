@@ -11,6 +11,7 @@ const { uploadProductImageIfNeeded, uploadProductImageBuffer, deleteImageFromClo
 const logger = require("../utils/logger");
 const asyncHandler = require("../utils/asyncHandler");
 const { AppError, BadRequestError, NotFoundError } = require("../utils/errors");
+const parsePagination = require("../utils/parsePagination");
 
 /**
  * Normalize a user search query for consistent text matching.
@@ -236,9 +237,7 @@ const createProduct = asyncHandler(async (req, res) => {
 
 // Lấy tất cả sản phẩm với pagination
 const getAllProducts = asyncHandler(async (req, res) => {
-  // Lấy parameters từ query string
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
+  const { page, limit, skip } = parsePagination(req.query);
 
   // Normalize search query for consistent matching and caching
   const normalizedSearch = normalizeSearchQuery(req.query.search);
@@ -265,7 +264,6 @@ const getAllProducts = asyncHandler(async (req, res) => {
   }
 
   logger.debug({ cacheKey }, 'Cache MISS');
-  const skip = (page - 1) * limit;
   const minRating = req.query.minRating
     ? parseFloat(req.query.minRating)
     : null;
@@ -501,14 +499,11 @@ const getProductMeta = asyncHandler(async (req, res) => {
 // Tìm kiếm ngữ nghĩa sản phẩm
 const searchSemantic = asyncHandler(async (req, res) => {
   const query = (req.query.q || '').trim();
-  let limit = parseInt(req.query.limit) || 10;
+  const { limit } = parsePagination(req.query);
 
   if (!query) {
     throw new BadRequestError('Vui lòng cung cấp từ khóa tìm kiếm (q)');
   }
-
-  if (limit < 1) limit = 10;
-  if (limit > 50) limit = 50;
 
   const result = await semanticSearch(query, limit);
 

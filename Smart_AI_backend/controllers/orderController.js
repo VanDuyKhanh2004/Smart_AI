@@ -12,6 +12,7 @@ const { enqueueOrderConfirmationEmail } = require('../services/emailQueueService
 const { STATUS_LIST, canTransition, getAllowedNextStatuses, isTerminal } = require('../services/orderStatusTransitions');
 const asyncHandler = require('../utils/asyncHandler');
 const { AppError, BadRequestError, NotFoundError, ForbiddenError, ConflictError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 
 // Default shipping fee
 const SHIPPING_FEE = 30000;
@@ -449,9 +450,7 @@ const createOrder = asyncHandler(async (req, res, next) => {
  */
 const getUserOrders = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
 
   const [orders, total] = await Promise.all([
     Order.find({ user: userId })
@@ -510,9 +509,7 @@ const getOrderById = asyncHandler(async (req, res, next) => {
  * Requirements: 3.1, 3.2, 5.1, 5.2, 5.3
  */
 const getAllOrders = asyncHandler(async (req, res, next) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = parsePagination(req.query);
 
   // Build filter query
   const filter = {};

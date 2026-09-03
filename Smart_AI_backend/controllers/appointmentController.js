@@ -2,6 +2,7 @@ const Appointment = require('../models/Appointment');
 const Store = require('../models/Store');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
+const parsePagination = require('../utils/parsePagination');
 const logger = require('../utils/logger');
 const {
   enqueueAppointmentCreatedEmail,
@@ -401,7 +402,8 @@ const getAppointmentsByStore = async (req, res) => {
 };
 
 const getAllAppointments = async (req, res) => {
-  const { status, storeId, date, startDate, endDate, page = 1, limit = 20 } = req.query;
+  const { status, storeId, date, startDate, endDate } = req.query;
+  const { page, limit, skip } = parsePagination(req.query);
 
   let filter = {};
 
@@ -432,15 +434,13 @@ const getAllAppointments = async (req, res) => {
     }
   }
 
-  const skip = (parseInt(page) - 1) * parseInt(limit);
-
   const [appointments, total] = await Promise.all([
     Appointment.find(filter)
       .populate('store', 'name address')
       .populate('user', 'name email phone')
       .sort({ date: -1, 'timeSlot.start': 1 })
       .skip(skip)
-      .limit(parseInt(limit)),
+      .limit(limit),
     Appointment.countDocuments(filter)
   ]);
 
@@ -449,10 +449,10 @@ const getAllAppointments = async (req, res) => {
     message: 'Lấy danh sách lịch hẹn thành công',
     data: appointments,
     pagination: {
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page,
+      limit,
       total,
-      totalPages: Math.ceil(total / parseInt(limit))
+      totalPages: Math.ceil(total / limit)
     }
   });
 };
