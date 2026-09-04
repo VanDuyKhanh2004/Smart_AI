@@ -308,6 +308,36 @@ describe('Email-action limiter (forgot-password, request-unlock) and dedicated r
   });
 });
 
+describe('Registration limiter (register)', () => {
+  let app;
+
+  beforeEach(() => {
+    resetRateLimiters();
+    app = buildApp();
+  });
+
+  it('allows 5 requests to POST /api/auth/register then returns 429', async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await request(app).post('/api/auth/register').send({});
+      expect(res.status).toBe(201);
+    }
+    const blocked = await request(app).post('/api/auth/register').send({});
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe('TOO_MANY_REQUESTS');
+  });
+
+  it('registration rate limiter has its own bucket (does not affect refresh)', async () => {
+    for (let i = 0; i < 5; i++) {
+      await request(app).post('/api/auth/register').send({});
+    }
+    const blocked = await request(app).post('/api/auth/register').send({});
+    expect(blocked.status).toBe(429);
+
+    const refresh = await request(app).post('/api/auth/refresh').send({});
+    expect(refresh.status).toBe(200);
+  });
+});
+
 describe('Token-action limiter (reset-password, unlock-account)', () => {
   let app;
 

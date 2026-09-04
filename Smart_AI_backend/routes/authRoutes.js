@@ -21,13 +21,14 @@ const { protect } = require('../middlewares/authMiddleware');
 const { loginRateLimit } = require('../middlewares/loginRateLimitMiddleware');
 const {
   authSessionLimiter,
+  registrationLimiter,
   emailActionLimiter,
   resendVerificationLimiter,
   tokenActionLimiter,
 } = require('../middlewares/rateLimiters');
 
 // Public routes
-router.post('/register', register);
+router.post('/register', registrationLimiter, register);
 router.post('/login', loginRateLimit, login);
 router.post('/google-login', authSessionLimiter, googleLogin);
 // Link/unlink Google to/from authenticated account
