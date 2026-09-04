@@ -36,6 +36,7 @@ const createRateLimiter = ({ windowMs, limit, store, code, message }) =>
 
 const stores = {
   authSession: new MemoryStore(),
+  registration: new MemoryStore(),
   emailAction: new MemoryStore(),
   resendVerification: new MemoryStore(),
   tokenAction: new MemoryStore(),
@@ -46,6 +47,12 @@ const authSessionLimiter = createRateLimiter({
   windowMs: WINDOW_MS,
   limit: readLimit('RATE_LIMIT_AUTH_SESSION_MAX', 15),
   store: stores.authSession,
+});
+
+const registrationLimiter = createRateLimiter({
+  windowMs: WINDOW_MS,
+  limit: readLimit('RATE_LIMIT_REGISTRATION_MAX', 5),
+  store: stores.registration,
 });
 
 const emailActionLimiter = createRateLimiter({
@@ -88,6 +95,7 @@ const resetRateLimiters = () => {
 module.exports = {
   createRateLimiter,
   authSessionLimiter,
+  registrationLimiter,
   emailActionLimiter,
   resendVerificationLimiter,
   tokenActionLimiter,
