@@ -13,6 +13,10 @@ const asyncHandler = require("../utils/asyncHandler");
 const { AppError, BadRequestError, NotFoundError } = require("../utils/errors");
 const parsePagination = require("../utils/parsePagination");
 
+const ALLOWED_PRODUCT_SORT_FIELDS = new Set([
+  'name', 'price', 'brand', 'createdAt', 'updatedAt'
+]);
+
 /**
  * Normalize a user search query for consistent text matching.
  * - Trims leading/trailing whitespace
@@ -330,7 +334,8 @@ const getAllProducts = asyncHandler(async (req, res) => {
   } else if (req.query.sortBy) {
     const sortField = req.query.sortBy;
     const sortOrder = req.query.sortOrder === "desc" ? -1 : 1;
-    sort[sortField] = sortOrder;
+    const safeSortField = ALLOWED_PRODUCT_SORT_FIELDS.has(sortField) ? sortField : 'createdAt';
+    sort[safeSortField] = sortOrder;
   } else {
     sort.createdAt = -1;
   }

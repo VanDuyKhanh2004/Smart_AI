@@ -1899,6 +1899,62 @@ describe('getAllProducts', () => {
     const sortStage = dataPipeline.find(s => s.$sort);
     expect(sortStage.$sort).toEqual({ price: 1 });
   });
+
+  it('rejects __proto__ sortBy and defaults to createdAt', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', sortBy: '__proto__', sortOrder: 'asc' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ createdAt: 1 });
+  });
+
+  it('rejects constructor sortBy and defaults to createdAt', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', sortBy: 'constructor', sortOrder: 'desc' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ createdAt: -1 });
+  });
+
+  it('rejects $where injection sortBy and defaults to createdAt', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', sortBy: '$where', sortOrder: 'asc' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ createdAt: 1 });
+  });
+
+  it('rejects internal field (embedding_vector) sortBy', async () => {
+    Product.aggregate
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const req = mockReq({}, {}, { page: '1', limit: '10', sortBy: 'embedding_vector', sortOrder: 'desc' });
+    const res = mockRes();
+    await getAllProducts(req, res);
+
+    const dataPipeline = Product.aggregate.mock.calls[0][0];
+    const sortStage = dataPipeline.find(s => s.$sort);
+    expect(sortStage.$sort).toEqual({ createdAt: -1 });
+  });
 });
 
 /* ============================================================

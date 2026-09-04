@@ -4,6 +4,10 @@ const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
 const parsePagination = require('../utils/parsePagination');
 
+const ALLOWED_COMPLAINT_SORT_FIELDS = new Set([
+  'status', 'priority', 'createdAt', 'updatedAt', 'resolvedAt', 'assignedTo'
+]);
+
 const getComplaints = async (req, res) => {
   const {
     status,
@@ -30,7 +34,8 @@ const getComplaints = async (req, res) => {
   }
 
   const sortDirection = sortOrder === 'asc' ? 1 : -1;
-  const sortObject = { [sortBy]: sortDirection };
+  const safeSortBy = ALLOWED_COMPLAINT_SORT_FIELDS.has(sortBy) ? sortBy : 'createdAt';
+  const sortObject = { [safeSortBy]: sortDirection };
 
   const [complaints, totalCount] = await Promise.all([
     Complaint.find(filter)
