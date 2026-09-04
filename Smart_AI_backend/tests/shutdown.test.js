@@ -150,6 +150,20 @@ describe('shutdownSocketIO', () => {
     expect(body).not.toContain('process.exit');
   });
 
+  it('unhandledRejection handler calls gracefulShutdown', () => {
+    const fs = require('fs');
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../index.js'),
+      'utf-8',
+    );
+    // Find the unhandledRejection handler
+    const handlerStart = source.indexOf("process.on('unhandledRejection'");
+    expect(handlerStart).not.toBe(-1);
+    // Extract the handler body (up to the closing });)
+    const handlerBody = source.slice(handlerStart, handlerStart + 300);
+    expect(handlerBody).toContain("gracefulShutdown('unhandledRejection')");
+  });
+
   it('shutdownSocketIO uses logger, not console', () => {
     const fs = require('fs');
     const source = fs.readFileSync(

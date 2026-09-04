@@ -288,6 +288,7 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'Unhandled rejection');
+  gracefulShutdown('unhandledRejection');
 });
 
 initializeServer();
