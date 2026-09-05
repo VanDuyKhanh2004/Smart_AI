@@ -4,6 +4,73 @@ const { authenticateSocket, SOCKET_AUTH_REQUIRED } = require('../middlewares/soc
 
 let _io = null;
 
+// ---------------------------------------------------------------------------
+// Per-user sendMessage rate limiter  (process-local, sliding window)
+// ---------------------------------------------------------------------------
+const RATE_WINDOW_MS = 60 * 1000;
+
+// Limits are read dynamically from env so tests can override per-file without
+// module-cache collisions across Jest workers.
+function getSendRateMax() {
+  const raw = parseInt(process.env.SOCKET_SEND_RATE_MAX, 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 20;
+}
+
+// userId -> { count, windowStart }
+const rateLimitStore = new Map();
+
+// userId -> Set of active generation ids (for concurrent-slot tracking)
+const concurrentStore = new Map();
+
+function getConcurrentMax() {
+  const raw = parseInt(process.env.SOCKET_SEND_CONCURRENT_MAX, 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 3;
+}
+
+const RATE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+function checkSendRateLimit(userId) {
+  const now = Date.now();
+  const max = getSendRateMax();
+  const entry = rateLimitStore.get(userId);
+  if (!entry || now - entry.windowStart >= RATE_WINDOW_MS) {
+    rateLimitStore.set(userId, { count: 1, windowStart: now });
+    return true;
+  }
+  if (entry.count >= max) return false;
+  entry.count += 1;
+  return true;
+}
+
+function acquireConcurrentSlot(userId, generationId) {
+  const max = getConcurrentMax();
+  let slots = concurrentStore.get(userId);
+  if (!slots) {
+    slots = new Set();
+    concurrentStore.set(userId, slots);
+  }
+  if (slots.size >= max) return false;
+  slots.add(generationId);
+  return true;
+}
+
+function releaseConcurrentSlot(userId, generationId) {
+  const slots = concurrentStore.get(userId);
+  if (!slots) return;
+  slots.delete(generationId);
+  if (slots.size === 0) concurrentStore.delete(userId);
+}
+
+function sweepRateLimitStores() {
+  const now = Date.now();
+  for (const [userId, entry] of rateLimitStore) {
+    if (now - entry.windowStart >= RATE_WINDOW_MS) rateLimitStore.delete(userId);
+  }
+}
+
+const _sweepTimer = setInterval(sweepRateLimitStores, RATE_SWEEP_INTERVAL_MS);
+if (_sweepTimer.unref) _sweepTimer.unref();
+
 const requireSocketAuth = (socket) => {
   if (socket.data && socket.data.user) {
     return true;
@@ -119,6 +186,19 @@ const handleSendMessage = async (socket, data, ack) => {
     userId = socket.data.user.id;
     sessionId = data?.sessionId;
 
+    // Per-user rate limit (sliding window, before any expensive work)
+    if (!checkSendRateLimit(userId)) {
+      const rateLimitClientMessageId =
+        typeof data?.clientMessageId === 'string' ? data.clientMessageId : null;
+      emitAck({ accepted: false, duplicate: false, status: 'rate_limited', clientMessageId: rateLimitClientMessageId });
+      socket.emit('error', {
+        type: 'RATE_LIMITED',
+        message: 'Bạn đã gửi quá nhiều tin nhắn. Vui lòng thử lại sau.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
     logger.info({
       socketId: socket.id,
       sessionId,
@@ -226,9 +306,22 @@ const handleSendMessage = async (socket, data, ack) => {
     }
 
     // The ack is a DELIVERY/DEDUP acknowledgement, not a completion signal.
-    // Deliver it FIRST (once, exactly once) after a successful claim, then the
-    // 'started' progress signal, then run the AI pipeline — so the ack never
-    // waits for generation and never follows the started event.
+    // Concurrent slot MUST be acquired before the ack so the client never sees
+    // accepted:true for a request that will be rejected for concurrency.
+    if (!acquireConcurrentSlot(userId, clientMessageId)) {
+      try {
+        const chatMessageDedup = require('../services/chatMessageDedupService');
+        await chatMessageDedup.release(userId, sessionId, clientMessageId);
+      } catch (_err) { /* release must not mask the concurrency rejection */ }
+      emitAck({ accepted: false, duplicate: false, status: 'too_many_active', clientMessageId });
+      socket.emit('error', {
+        type: 'TOO_MANY_ACTIVE',
+        message: 'Bạn có quá nhiều tin nhắn đang xử lý. Vui lòng đợi.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
     emitAck({ accepted: true, duplicate: false, status: 'accepted', clientMessageId });
 
     // The ONE AbortController for this accepted request. Created at the request
@@ -307,6 +400,9 @@ const handleSendMessage = async (socket, data, ack) => {
       // registry cleanup must never mask a successful generation
     }
 
+    // Release concurrent slot after generation completes (success path)
+    releaseConcurrentSlot(userId, clientMessageId);
+
     // NO second ack here: the 'accepted' ack was already delivered and the final
     // success is signaled via aiResponse + messageProcessing 'completed'.
 
@@ -336,6 +432,8 @@ const handleSendMessage = async (socket, data, ack) => {
       } catch (_err) {
         // registry cleanup must never mask the original failure
       }
+      // Release concurrent slot after generation failure/cancel
+      releaseConcurrentSlot(userId, clientMessageId);
     }
 
     // User-cancelled generation: the terminal signal is `messageProcessing
@@ -421,6 +519,17 @@ const handleRetryMessage = async (socket, data, ack) => {
     }
     clientMessageId = rawClientMessageId;
 
+    // Per-user rate limit (sliding window, before any expensive work)
+    if (!checkSendRateLimit(userId)) {
+      emitAck({ accepted: false, duplicate: false, status: 'rate_limited', clientMessageId });
+      socket.emit('error', {
+        type: 'RATE_LIMITED',
+        message: 'Bạn đã gửi quá nhiều tin nhắn. Vui lòng thử lại sau.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
     const chatController = require('../controllers/chatController');
     const chatActiveStreams = require('../services/chatActiveStreams');
 
@@ -463,6 +572,19 @@ const handleRetryMessage = async (socket, data, ack) => {
     if (!chatActiveStreams.claimLogical({ userId, sessionId, clientMessageId, generationId })) {
       try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
       emitAck({ accepted: false, duplicate: false, status: 'already_processing', clientMessageId, generationId });
+      return;
+    }
+
+    // Per-user concurrent generation limit (acquire slot BEFORE any AI work)
+    if (!acquireConcurrentSlot(userId, clientMessageId)) {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
+      chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+      emitAck({ accepted: false, duplicate: false, status: 'too_many_active', clientMessageId, generationId });
+      socket.emit('error', {
+        type: 'TOO_MANY_ACTIVE',
+        message: 'Bạn có quá nhiều tin nhắn đang xử lý. Vui lòng đợi.',
+        timestamp: new Date().toISOString()
+      });
       return;
     }
 
@@ -512,6 +634,8 @@ const handleRetryMessage = async (socket, data, ack) => {
     // streamed path already removed it via markCompleted). Idempotent, never
     // aborts; prevents a stale entry from acks 'stopped' after delivery.
     chatActiveStreams.remove({ userId, sessionId, clientMessageId, generationId });
+    // Release concurrent slot after generation completes (success path)
+    releaseConcurrentSlot(userId, clientMessageId);
   } catch (error) {
     const { throwIfCancelled, isCancellationError } = require('../utils/chatCancellation');
     const isCancellation = isCancellationError(error);
@@ -527,6 +651,8 @@ const handleRetryMessage = async (socket, data, ack) => {
         chatActiveStreams.remove({ userId, sessionId, clientMessageId });
         chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId: clientMessageId });
       } catch (_e) { /* ignore */ }
+      // Release concurrent slot after generation failure/cancel
+      releaseConcurrentSlot(userId, clientMessageId);
     }
 
     if (isCancellation) {
@@ -600,6 +726,17 @@ const handleRegenerateMessage = async (socket, data, ack) => {
     }
     clientMessageId = rawClientMessageId;
 
+    // Per-user rate limit (sliding window, before any expensive work)
+    if (!checkSendRateLimit(userId)) {
+      emitAck({ accepted: false, status: 'rate_limited', clientMessageId });
+      socket.emit('error', {
+        type: 'RATE_LIMITED',
+        message: 'Bạn đã gửi quá nhiều tin nhắn. Vui lòng thử lại sau.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
     const chatController = require('../controllers/chatController');
     const chatActiveStreams = require('../services/chatActiveStreams');
 
@@ -636,6 +773,19 @@ const handleRegenerateMessage = async (socket, data, ack) => {
     if (!chatActiveStreams.claimLogical({ userId, sessionId, clientMessageId, generationId })) {
       try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
       emitAck({ accepted: false, status: 'already_processing', clientMessageId, generationId });
+      return;
+    }
+
+    // Per-user concurrent generation limit (acquire slot BEFORE any AI work)
+    if (!acquireConcurrentSlot(userId, clientMessageId)) {
+      try { await chatMessageDedup.release(userId, sessionId, generationId); } catch (_e) { /* ignore */ }
+      chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
+      emitAck({ accepted: false, status: 'too_many_active', clientMessageId, generationId });
+      socket.emit('error', {
+        type: 'TOO_MANY_ACTIVE',
+        message: 'Bạn có quá nhiều tin nhắn đang xử lý. Vui lòng đợi.',
+        timestamp: new Date().toISOString()
+      });
       return;
     }
 
@@ -683,6 +833,8 @@ const handleRegenerateMessage = async (socket, data, ack) => {
     // Non-streaming success path: remove the active entry (idempotent, never
     // aborts) so a late stopGeneration does not ack 'stopped' after delivery.
     chatActiveStreams.remove({ userId, sessionId, clientMessageId, generationId });
+    // Release concurrent slot after generation completes (success path)
+    releaseConcurrentSlot(userId, clientMessageId);
   } catch (error) {
     const { isCancellationError } = require('../utils/chatCancellation');
     const isCancellation = isCancellationError(error);
@@ -704,6 +856,8 @@ const handleRegenerateMessage = async (socket, data, ack) => {
         });
         chatActiveStreams.releaseLogical({ userId, sessionId, clientMessageId, generationId });
       } catch (_e) { /* ignore */ }
+      // Release concurrent slot after generation failure/cancel
+      releaseConcurrentSlot(userId, clientMessageId);
     }
 
     if (isCancellation) {
@@ -992,5 +1146,13 @@ const shutdownSocketIO = () => {
 module.exports = {
   initializeSocketHandlers,
   getSocketStats,
-  shutdownSocketIO
+  shutdownSocketIO,
+  // test helpers
+  _checkSendRateLimit: checkSendRateLimit,
+  _acquireConcurrentSlot: acquireConcurrentSlot,
+  _releaseConcurrentSlot: releaseConcurrentSlot,
+  _resetRateLimitStore: () => rateLimitStore.clear(),
+  _resetConcurrentStore: () => concurrentStore.clear(),
+  _getRateLimitStoreSize: () => rateLimitStore.size,
+  _getConcurrentStoreSize: () => concurrentStore.size,
 };
