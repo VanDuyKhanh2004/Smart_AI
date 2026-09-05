@@ -648,6 +648,9 @@ const updateOrderStatus = asyncHandler(async (req, res, next) => {
       throw new BadRequestError(`Không thể chuyển từ trạng thái "${order.status}" sang "${status}"`, 'INVALID_STATUS_TRANSITION', { allowedNextStatuses: getAllowedNextStatuses(order.status) });
     }
 
+    // Capture previous status before update
+    const previousStatus = order.status;
+
     // Update status
     order.status = status;
 
@@ -687,6 +690,14 @@ const updateOrderStatus = asyncHandler(async (req, res, next) => {
 
     await order.save({ session });
     await session.commitTransaction();
+
+    logger.info({
+      orderId: order._id,
+      userId: req.user._id,
+      fromStatus: previousStatus,
+      toStatus: status,
+      note: trimmedNote || undefined,
+    }, 'Order status updated');
 
     // Populate user for response
     const updatedOrder = await Order.findById(id)
@@ -755,6 +766,9 @@ const cancelOrder = asyncHandler(async (req, res, next) => {
     // Determine the final cancel reason
     const finalReason = reason === 'other' && customReason ? customReason.trim() : reason;
 
+    // Capture previous status before cancellation
+    const previousStatus = order.status;
+
     // Update order status to 'cancelled' (Requirement 1.3)
     order.status = 'cancelled';
     order.cancelReason = finalReason;
@@ -778,6 +792,14 @@ const cancelOrder = asyncHandler(async (req, res, next) => {
 
     await order.save({ session });
     await session.commitTransaction();
+
+    logger.info({
+      orderId: order._id,
+      userId: req.user._id,
+      fromStatus: previousStatus,
+      toStatus: 'cancelled',
+      reason: finalReason,
+    }, 'Order cancelled');
 
     // Populate user for response
     const updatedOrder = await Order.findById(id)

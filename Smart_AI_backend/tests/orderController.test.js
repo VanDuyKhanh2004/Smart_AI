@@ -2102,6 +2102,118 @@ describe('updateOrderStatus', () => {
   });
 });
 
+describe('Order status transition logging', () => {
+  describe('updateOrderStatus', () => {
+    function makeReq(overrides = {}) {
+      return {
+        params: { id: 'order-123' },
+        body: { status: 'confirmed' },
+        user: { _id: 'admin-456', name: 'Admin User', email: 'admin@test.com', role: 'admin' },
+        requestId: 'test-cid',
+        ...overrides,
+      };
+    }
+
+    it('logs status transition with orderId, userId, fromStatus, toStatus', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: 'order-123',
+          userId: 'admin-456',
+          fromStatus: 'pending',
+          toStatus: 'confirmed',
+        }),
+        'Order status updated',
+      );
+    });
+
+    it('includes note in log when provided', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed', note: '  Approved by admin  ' } }), mockRes(), next);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: 'order-123',
+          fromStatus: 'pending',
+          toStatus: 'confirmed',
+          note: 'Approved by admin',
+        }),
+        'Order status updated',
+      );
+    });
+
+    it('omits note from log when empty', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForStatus(orderDoc);
+
+      const next = jest.fn();
+      await updateOrderStatus(makeReq({ body: { status: 'confirmed' } }), mockRes(), next);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          note: undefined,
+        }),
+        'Order status updated',
+      );
+    });
+  });
+
+  describe('cancelOrder', () => {
+    function makeReq(overrides = {}) {
+      return {
+        params: { id: 'order-123' },
+        body: { reason: 'Tôi không muốn mua nữa' },
+        user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'user' },
+        requestId: 'test-cid',
+        ...overrides,
+      };
+    }
+
+    it('logs cancellation with orderId, userId, fromStatus, toStatus, reason', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      setupOrderFindByIdForCancel(orderDoc);
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: 'order-123',
+          userId: 'user-123',
+          fromStatus: 'pending',
+          toStatus: 'cancelled',
+          reason: 'Tôi không muốn mua nữa',
+        }),
+        'Order cancelled',
+      );
+    });
+
+    it('logs cancellation from confirmed status', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'confirmed' });
+      setupOrderFindByIdForCancel(orderDoc);
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fromStatus: 'confirmed',
+          toStatus: 'cancelled',
+        }),
+        'Order cancelled',
+      );
+    });
+  });
+});
+
 describe('getUserOrders', () => {
   function makeReq(overrides = {}) {
     return {
