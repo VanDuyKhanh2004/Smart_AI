@@ -46,10 +46,10 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
   logger.warn('GOOGLE_CLIENT_ID chưa được cấu hình trong biến môi trường');
 }
-if (!JWT_SECRET || JWT_SECRET === 'YOUR_JWT_SECRET') {
+if (!JWT_SECRET || JWT_SECRET === 'YOUR_JWT_SECRET' || JWT_SECRET.startsWith('replace_with')) {
   logger.warn('JWT_SECRET chưa được cấu hình trong biến môi trường');
 }
-if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET === 'YOUR_REFRESH_SECRET') {
+if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET === 'YOUR_REFRESH_SECRET' || JWT_REFRESH_SECRET.startsWith('replace_with')) {
   logger.warn('JWT_REFRESH_SECRET chưa được cấu hình trong biến môi trường');
 }
 
