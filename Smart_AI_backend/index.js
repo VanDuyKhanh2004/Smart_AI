@@ -40,6 +40,7 @@ const path = require("path");
 const { startBullMQ, stopBullMQ } = require("./bullmq/bootstrap");
 const { shutdownStep } = require("./utils/shutdown");
 const sanitizeUrl = require("./utils/sanitizeUrl");
+const { validateJwtSecrets } = require("./utils/jwtValidation");
 
 const app = express();
 const server = http.createServer(app);
@@ -290,6 +291,27 @@ process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'Unhandled rejection');
   gracefulShutdown('unhandledRejection');
 });
+
+// ---------------------------------------------------------------------------
+// Fail-fast JWT secret validation — must run before any DB/Redis connection
+// ---------------------------------------------------------------------------
+function validateJwtOrExit() {
+  const errors = validateJwtSecrets({
+    secret: process.env.JWT_SECRET,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
+  });
+
+  if (errors.length > 0) {
+    for (const err of errors) {
+      logger.fatal(err);
+    }
+    process.exit(1);
+  }
+
+  logger.info('JWT secrets validated');
+}
+
+validateJwtOrExit();
 
 initializeServer();
 
