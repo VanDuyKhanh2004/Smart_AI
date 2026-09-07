@@ -28,6 +28,28 @@ const { classifyQuery, resolveFollowUpQuery, createContextFromParsed, sanitizeCo
 const contextService = require("../services/contextService");
 const { resolveProductSpec } = require("../utils/productSpecResolver");
 
+// ---------------------------------------------------------------------------
+// Conversation message cap  (prevents unbounded MongoDB document growth)
+// ---------------------------------------------------------------------------
+// Limits are read dynamically from env so tests can override per-file without
+// module-cache collisions across Jest workers.
+function getConversationMaxMessages() {
+  const raw = parseInt(process.env.CONVERSATION_MAX_MESSAGES, 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 500;
+}
+
+/**
+ * Remove the oldest messages when the embedded array exceeds the configured
+ * cap.  Keeps exactly the newest MAX_MESSAGES entries, preserving order.
+ * No-op when already within the cap.
+ */
+function enforceMessageCap(conversation) {
+  const max = getConversationMaxMessages();
+  if (conversation.messages.length > max) {
+    conversation.messages.splice(0, conversation.messages.length - max);
+  }
+}
+
 /**
  * Best-effort extraction of an email/phone from a chat message. Used to enrich
  * a pending complaint confirmation — never a gate on persistence.
@@ -393,6 +415,7 @@ class ChatController {
 
       if (!alreadyStored) {
         conversation.messages.push(userMessageObj);
+        enforceMessageCap(conversation);
         await conversation.save();
       }
 
@@ -1461,6 +1484,7 @@ class ChatController {
 
         if (!alreadyStored) {
           conversation.messages.push(aiMessageObj);
+          enforceMessageCap(conversation);
           await conversation.save();
         }
       }
