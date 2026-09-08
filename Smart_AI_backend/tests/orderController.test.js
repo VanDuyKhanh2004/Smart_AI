@@ -2810,3 +2810,258 @@ describe('cancelOrder regression', () => {
     expect(next).toHaveBeenCalledWith(error);
   });
 });
+
+describe('order number retry on duplicate key', () => {
+  const orderNumberCollisionError = {
+    code: 11000,
+    message: 'E11000 duplicate key error collection: test.orders index: orderNumber_1 dup key: { orderNumber: "ORD-20241209-001" }',
+  };
+
+  const nonOrderNumberCollisionError = {
+    code: 11000,
+    message: 'E11000 duplicate key error collection: test.orders index: userId_1 dup key: { userId: "user-123" }',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSession.startTransaction.mockReset();
+    mockSession.commitTransaction.mockReset();
+    mockSession.abortTransaction.mockReset();
+    mockSession.endSession.mockReset();
+    mockSession.startTransaction.mockReturnValue();
+    mockSession.commitTransaction.mockResolvedValue();
+    mockSession.abortTransaction.mockResolvedValue();
+    mockSession.endSession.mockResolvedValue();
+    mockOrderSave.mockResolvedValue();
+    mockProductBulkWrite.mockReset();
+    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0 });
+    mockIdempotencyFindOneAndUpdate.mockReset();
+    mockIdempotencyFindOneAndUpdate.mockResolvedValue({ _id: 'idempotency-123', status: 'processing', attemptId: 'mock-attempt' });
+    IdempotencyRecord.findOne.mockResolvedValue(null);
+    IdempotencyRecord.create.mockImplementation((data) =>
+      Promise.resolve({ ...data, _id: 'idempotency-123', save: mockIdempotencySave })
+    );
+    IdempotencyRecord.ttlMs.mockReturnValue(168 * 60 * 60 * 1000);
+    IdempotencyRecord.processingTimeoutMs.mockReturnValue(30000);
+    computeRequestFingerprint.mockReturnValue('request-fingerprint-hash');
+    computeCheckoutFingerprint.mockReturnValue('checkout-fingerprint-hash');
+  });
+
+  function makeReq(overrides = {}) {
+    const { body: bodyOverride, ...rest } = overrides;
+    return {
+      body: {
+        shippingAddress: {
+          fullName: 'Test User',
+          phone: '0123456789',
+          address: '123 Test St',
+          ward: 'Test Ward',
+          district: 'Test District',
+          city: 'Test City',
+        },
+        ...bodyOverride,
+      },
+      user: { _id: 'user-123', name: 'Test User', email: 'test@test.com', role: 'user' },
+      requestId: 'test-cid',
+      headers: {},
+      ...rest,
+    };
+  }
+
+  function setupCartFindOne(cartDoc) {
+    Cart.findOne.mockReturnValue({
+      populate: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
+      session: jest.fn().mockResolvedValue(cartDoc),
+      catch: jest.fn().mockResolvedValue(null),
+    });
+  }
+
+  function setupOrderFindByIdForCreate() {
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue({
+        _id: 'order-123',
+        user: { name: 'Test User', email: 'test@test.com', _id: 'user-123' },
+        orderNumber: 'ORD-20241209-001',
+      }),
+    });
+  }
+
+  function defaultCartDoc() {
+    return {
+      _id: 'cart-123',
+      user: 'user-123',
+      items: [
+        {
+          product: { _id: 'product-1', name: 'Test Product', price: 500000, inStock: 10, isActive: true, image: 'test.jpg' },
+          quantity: 2,
+          color: 'Black',
+        },
+      ],
+      save: mockCartSave,
+    };
+  }
+
+  it('first generated order number succeeds', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    const next = jest.fn();
+    await createOrder(makeReq(), mockRes(), next);
+
+    expect(mockOrderSave).toHaveBeenCalledTimes(1);
+    expect(mockSession.commitTransaction).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('orderNumber duplicate causes regeneration and retry on second attempt', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    // First save fails with orderNumber collision, second succeeds
+    mockOrderSave
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockResolvedValueOnce();
+
+    const next = jest.fn();
+    await createOrder(makeReq(), mockRes(), next);
+
+    // generateOrderNumber called twice (initial + retry)
+    expect(Order.generateOrderNumber).toHaveBeenCalledTimes(2);
+    // save called twice (first fail + retry success)
+    expect(mockOrderSave).toHaveBeenCalledTimes(2);
+    // Transaction committed on retry
+    expect(mockSession.commitTransaction).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('retries up to 3 total attempts then fails', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    // All 3 saves fail with orderNumber collision
+    mockOrderSave
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockRejectedValueOnce(orderNumberCollisionError);
+
+    const next = jest.fn();
+    await createOrder(makeReq(), mockRes(), next);
+
+    expect(Order.generateOrderNumber).toHaveBeenCalledTimes(3);
+    expect(mockOrderSave).toHaveBeenCalledTimes(3);
+    // All transactions aborted
+    expect(mockSession.abortTransaction).toHaveBeenCalledTimes(3);
+    // Idempotency marked as failed
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 500, code: 'ORDER_NUMBER_GENERATION_FAILED' })
+    );
+  });
+
+  it('final duplicate failure is surfaced correctly', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    mockOrderSave
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockRejectedValueOnce(orderNumberCollisionError);
+
+    const next = jest.fn();
+    await createOrder(makeReq(), mockRes(), next);
+
+    const err = next.mock.calls[0][0];
+    expect(err.statusCode).toBe(500);
+    expect(err.code).toBe('ORDER_NUMBER_GENERATION_FAILED');
+  });
+
+  it('non-orderNumber E11000 is NOT retried', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    mockOrderSave.mockRejectedValueOnce(nonOrderNumberCollisionError);
+
+    const next = jest.fn();
+    await createOrder(makeReq(), mockRes(), next);
+
+    // Only 1 save attempt — no retry
+    expect(mockOrderSave).toHaveBeenCalledTimes(1);
+    expect(Order.generateOrderNumber).toHaveBeenCalledTimes(1);
+    // Should be treated as a server error (not order number collision)
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 500 })
+    );
+  });
+
+  it('new session is created for each retry attempt', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    mockOrderSave
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockResolvedValueOnce();
+
+    await createOrder(makeReq(), mockRes(), jest.fn());
+
+    // startSession called twice (initial + retry)
+    expect(mongoose.startSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('session is properly ended after retry', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    mockOrderSave
+      .mockRejectedValueOnce(orderNumberCollisionError)
+      .mockResolvedValueOnce();
+
+    await createOrder(makeReq(), mockRes(), jest.fn());
+
+    // Session ended for failed attempt + successful attempt
+    expect(mockSession.endSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('endSession is called even when abortTransaction throws', async () => {
+    setupCartFindOne(defaultCartDoc());
+    setupOrderFindByIdForCreate();
+
+    // Trigger a non-retryable error path (validation) so catch block runs
+    // Make abortTransaction throw to simulate driver failure
+    mockSession.abortTransaction.mockRejectedValueOnce(new Error('driver disconnected'));
+
+    const next = jest.fn();
+    await createOrder(makeReq(), mockRes(), next);
+
+    // Despite abortTransaction throwing, endSession must still be called
+    expect(mockSession.endSession).toHaveBeenCalled();
+  });
+
+  it('existing idempotency behavior remains unchanged', async () => {
+    const completedRecord = {
+      _id: 'idempotency-123',
+      status: 'completed',
+      order: 'order-existing',
+      requestFingerprint: 'request-fingerprint-hash',
+    };
+    IdempotencyRecord.findOne.mockResolvedValue(completedRecord);
+    Order.findById.mockReturnValue({
+      populate: jest.fn().mockResolvedValue({
+        _id: 'order-existing',
+        user: { name: 'Test User', email: 'test@test.com' },
+        orderNumber: 'ORD-20241209-001',
+      }),
+    });
+
+    const req = makeReq({
+      headers: { 'idempotency-key': '11111111-1111-4111-8111-111111111111' },
+    });
+    const res = mockRes();
+    const next = jest.fn();
+    await createOrder(req, res, next);
+
+    // Should return 200 (replay), not create a new order
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mockOrderSave).not.toHaveBeenCalled();
+  });
+});

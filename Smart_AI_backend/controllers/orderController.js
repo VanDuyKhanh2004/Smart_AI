@@ -26,6 +26,19 @@ function escapeRegex(s) {
 }
 
 /**
+ * Determine whether a MongoDB duplicate-key error (code 11000) was caused
+ * by the orderNumber unique constraint.  The native driver message looks like:
+ *   E11000 duplicate key error collection: db.orders index: orderNumber_1 dup key: { orderNumber: "ORD-..." }
+ */
+function isOrderNumberDuplicateKey(err) {
+  if (!err || err.code !== 11000) return false;
+  const msg = err.message || '';
+  return msg.includes('orderNumber');
+}
+
+const MAX_ORDER_NUMBER_RETRIES = 3;
+
+/**
  * Create order from cart
  * Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 5.1 (promotion usage tracking)
  */
@@ -163,93 +176,94 @@ const createOrder = asyncHandler(async (req, res, next) => {
     logger.warn('Missing Idempotency-Key header');
   }
 
-  // --- Session + transaction ---
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // --- Session + transaction (with retry on order-number duplicate key) ---
+  for (let attempt = 1; attempt <= MAX_ORDER_NUMBER_RETRIES; attempt++) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-  const abortTransactionAndMarkFailed = async (errorCode, errorMessage) => {
-    await session.abortTransaction();
-    if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
-      await IdempotencyRecord.findOneAndUpdate(
-        { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
-        {
-          $set: {
-            status: 'failed',
-            errorCode,
-            errorMessage,
-            processingExpiresAt: null,
-          },
+    const abortTransactionAndMarkFailed = async (errorCode, errorMessage) => {
+      await session.abortTransaction();
+      if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
+        await IdempotencyRecord.findOneAndUpdate(
+          { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+          {
+            $set: {
+              status: 'failed',
+              errorCode,
+              errorMessage,
+              processingExpiresAt: null,
+            },
+          }
+        );
+      }
+    };
+
+    try {
+      const { shippingAddress, promotionCode } = req.body;
+      const userId = req.user._id;
+
+      // Validate shipping address
+      if (!shippingAddress) {
+        await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', 'Địa chỉ giao hàng là bắt buộc');
+        throw new BadRequestError('Địa chỉ giao hàng là bắt buộc', 'INVALID_SHIPPING_ADDRESS');
+      }
+
+      const requiredFields = ['fullName', 'phone', 'address', 'ward', 'district', 'city'];
+      for (const field of requiredFields) {
+        if (!shippingAddress[field] || !shippingAddress[field].trim()) {
+          await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', `${field} là bắt buộc`);
+          throw new BadRequestError(`${field} là bắt buộc`, 'INVALID_SHIPPING_ADDRESS');
         }
-      );
-    }
-  };
-
-  try {
-    const { shippingAddress, promotionCode } = req.body;
-    const userId = req.user._id;
-
-    // Validate shipping address
-    if (!shippingAddress) {
-      await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', 'Địa chỉ giao hàng là bắt buộc');
-      throw new BadRequestError('Địa chỉ giao hàng là bắt buộc', 'INVALID_SHIPPING_ADDRESS');
-    }
-
-    const requiredFields = ['fullName', 'phone', 'address', 'ward', 'district', 'city'];
-    for (const field of requiredFields) {
-      if (!shippingAddress[field] || !shippingAddress[field].trim()) {
-        await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', `${field} là bắt buộc`);
-        throw new BadRequestError(`${field} là bắt buộc`, 'INVALID_SHIPPING_ADDRESS');
-      }
-    }
-
-    // Validate phone format
-    if (!/^[0-9]{10,11}$/.test(shippingAddress.phone)) {
-      await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', 'Số điện thoại phải có 10-11 chữ số');
-      throw new BadRequestError('Số điện thoại phải có 10-11 chữ số', 'INVALID_SHIPPING_ADDRESS');
-    }
-
-    // Get user's cart (authoritative read inside transaction)
-    const cart = await Cart.findOne({ user: userId })
-      .populate('items.product')
-      .session(session);
-
-    if (!cart || !cart.items || cart.items.length === 0) {
-      await abortTransactionAndMarkFailed('CART_EMPTY', 'Giỏ hàng trống');
-      throw new BadRequestError('Giỏ hàng trống', 'CART_EMPTY');
-    }
-
-    // --- Compute checkoutFingerprint ONCE from authoritative cart ---
-    let checkoutFingerprint = null;
-    if (idempotencyRecord && requestFingerprint) {
-      checkoutFingerprint = computeCheckoutFingerprint(
-        requestFingerprint,
-        cart.items
-      );
-      const bound = await IdempotencyRecord.findOneAndUpdate(
-        { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
-        { $set: { checkoutFingerprint } },
-        { session }
-      );
-      if (!bound) {
-        await abortTransactionAndMarkFailed('IDEMPOTENCY_CONFLICT', 'Lỗi server khi tạo đơn hàng');
-        throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'IDEMPOTENCY_CONFLICT');
-      }
-    }
-
-    // Check stock for all items
-    const orderItems = [];
-    for (const item of cart.items) {
-      const product = item.product;
-
-      if (!product || !product.isActive) {
-        await abortTransactionAndMarkFailed('PRODUCT_NOT_FOUND', 'Sản phẩm không tồn tại');
-        throw new BadRequestError('Sản phẩm không tồn tại', 'PRODUCT_NOT_FOUND');
       }
 
-      if (product.inStock < item.quantity) {
-        await abortTransactionAndMarkFailed('INSUFFICIENT_STOCK', `Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`);
-        throw new BadRequestError(`Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`, 'INSUFFICIENT_STOCK');
+      // Validate phone format
+      if (!/^[0-9]{10,11}$/.test(shippingAddress.phone)) {
+        await abortTransactionAndMarkFailed('INVALID_SHIPPING_ADDRESS', 'Số điện thoại phải có 10-11 chữ số');
+        throw new BadRequestError('Số điện thoại phải có 10-11 chữ số', 'INVALID_SHIPPING_ADDRESS');
       }
+
+      // Get user's cart (authoritative read inside transaction)
+      const cart = await Cart.findOne({ user: userId })
+        .populate('items.product')
+        .session(session);
+
+      if (!cart || !cart.items || cart.items.length === 0) {
+        await abortTransactionAndMarkFailed('CART_EMPTY', 'Giỏ hàng trống');
+        throw new BadRequestError('Giỏ hàng trống', 'CART_EMPTY');
+      }
+
+      // --- Compute checkoutFingerprint ONCE from authoritative cart ---
+      let checkoutFingerprint = null;
+      if (idempotencyRecord && requestFingerprint) {
+        checkoutFingerprint = computeCheckoutFingerprint(
+          requestFingerprint,
+          cart.items
+        );
+        const bound = await IdempotencyRecord.findOneAndUpdate(
+          { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+          { $set: { checkoutFingerprint } },
+          { session }
+        );
+        if (!bound) {
+          await abortTransactionAndMarkFailed('IDEMPOTENCY_CONFLICT', 'Lỗi server khi tạo đơn hàng');
+          throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'IDEMPOTENCY_CONFLICT');
+        }
+      }
+
+      // Check stock for all items
+      const orderItems = [];
+      for (const item of cart.items) {
+        const product = item.product;
+
+        if (!product || !product.isActive) {
+          await abortTransactionAndMarkFailed('PRODUCT_NOT_FOUND', 'Sản phẩm không tồn tại');
+          throw new BadRequestError('Sản phẩm không tồn tại', 'PRODUCT_NOT_FOUND');
+        }
+
+        if (product.inStock < item.quantity) {
+          await abortTransactionAndMarkFailed('INSUFFICIENT_STOCK', `Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`);
+          throw new BadRequestError(`Sản phẩm "${product.name}" không đủ số lượng. Chỉ còn ${product.inStock} sản phẩm`, 'INSUFFICIENT_STOCK');
+        }
 
       orderItems.push({
         product: product._id,
@@ -259,188 +273,252 @@ const createOrder = asyncHandler(async (req, res, next) => {
         color: item.color,
         image: product.image
       });
-    }
-
-    // Calculate subtotal
-    const subtotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-
-    // Validate and apply promotion if provided
-    let promotionData = null;
-    let discountAmount = 0;
-
-    if (promotionCode) {
-      const promotion = await Promotion.findOne({
-        code: promotionCode.toUpperCase()
-      }).session(session);
-
-      if (!promotion) {
-        await abortTransactionAndMarkFailed('INVALID_PROMOTION', 'Mã khuyến mãi không hợp lệ');
-        throw new NotFoundError('Mã khuyến mãi không hợp lệ', 'INVALID_PROMOTION');
       }
 
-      if (!promotion.isActive) {
-        await abortTransactionAndMarkFailed('INACTIVE_PROMOTION', 'Mã khuyến mãi không còn hiệu lực');
-        throw new BadRequestError('Mã khuyến mãi không còn hiệu lực', 'INACTIVE_PROMOTION');
-      }
+      // Calculate subtotal
+      const subtotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-      const now = new Date();
+      // Validate and apply promotion if provided
+      let promotionData = null;
+      let discountAmount = 0;
 
-      if (promotion.startDate > now) {
-        await abortTransactionAndMarkFailed('PROMOTION_NOT_STARTED', 'Mã khuyến mãi chưa có hiệu lực');
-        throw new BadRequestError('Mã khuyến mãi chưa có hiệu lực', 'PROMOTION_NOT_STARTED');
-      }
+      if (promotionCode) {
+        const promotion = await Promotion.findOne({
+          code: promotionCode.toUpperCase()
+        }).session(session);
 
-      if (promotion.endDate < now) {
-        await abortTransactionAndMarkFailed('EXPIRED_PROMOTION', 'Mã khuyến mãi đã hết hạn');
-        throw new BadRequestError('Mã khuyến mãi đã hết hạn', 'EXPIRED_PROMOTION');
-      }
-
-      if (promotion.usedCount >= promotion.usageLimit) {
-        await abortTransactionAndMarkFailed('PROMOTION_USAGE_LIMIT', 'Mã khuyến mãi đã hết lượt sử dụng');
-        throw new BadRequestError('Mã khuyến mãi đã hết lượt sử dụng', 'PROMOTION_USAGE_LIMIT');
-      }
-
-      if (subtotal < promotion.minOrderValue) {
-        await abortTransactionAndMarkFailed('MIN_ORDER_NOT_MET', `Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`);
-        throw new BadRequestError(`Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`, 'MIN_ORDER_NOT_MET');
-      }
-
-      if (promotion.discountType === 'percentage') {
-        discountAmount = Math.round(subtotal * promotion.discountValue / 100);
-        if (promotion.maxDiscountAmount && discountAmount > promotion.maxDiscountAmount) {
-          discountAmount = promotion.maxDiscountAmount;
+        if (!promotion) {
+          await abortTransactionAndMarkFailed('INVALID_PROMOTION', 'Mã khuyến mãi không hợp lệ');
+          throw new NotFoundError('Mã khuyến mãi không hợp lệ', 'INVALID_PROMOTION');
         }
-      } else {
-        discountAmount = promotion.discountValue;
-        if (discountAmount > subtotal) {
-          discountAmount = subtotal;
+
+        if (!promotion.isActive) {
+          await abortTransactionAndMarkFailed('INACTIVE_PROMOTION', 'Mã khuyến mãi không còn hiệu lực');
+          throw new BadRequestError('Mã khuyến mãi không còn hiệu lực', 'INACTIVE_PROMOTION');
         }
-      }
 
-      promotionData = {
-        code: promotion.code,
-        discountType: promotion.discountType,
-        discountValue: promotion.discountValue,
-        discountAmount
-      };
-    }
+        const now = new Date();
 
-    // Calculate total (subtotal + shipping - discount)
-    const total = subtotal + SHIPPING_FEE - discountAmount;
+        if (promotion.startDate > now) {
+          await abortTransactionAndMarkFailed('PROMOTION_NOT_STARTED', 'Mã khuyến mãi chưa có hiệu lực');
+          throw new BadRequestError('Mã khuyến mãi chưa có hiệu lực', 'PROMOTION_NOT_STARTED');
+        }
 
-    // Generate order number
-    const orderNumber = await Order.generateOrderNumber();
+        if (promotion.endDate < now) {
+          await abortTransactionAndMarkFailed('EXPIRED_PROMOTION', 'Mã khuyến mãi đã hết hạn');
+          throw new BadRequestError('Mã khuyến mãi đã hết hạn', 'EXPIRED_PROMOTION');
+        }
 
-    // Create order
-    const orderData = {
-      user: userId,
-      orderNumber,
-      items: orderItems,
-      shippingAddress,
-      subtotal,
-      shippingFee: SHIPPING_FEE,
-      total,
-      status: 'pending'
-    };
+        if (promotion.usedCount >= promotion.usageLimit) {
+          await abortTransactionAndMarkFailed('PROMOTION_USAGE_LIMIT', 'Mã khuyến mãi đã hết lượt sử dụng');
+          throw new BadRequestError('Mã khuyến mãi đã hết lượt sử dụng', 'PROMOTION_USAGE_LIMIT');
+        }
 
-    if (promotionData) {
-      orderData.promotion = promotionData;
-    }
+        if (subtotal < promotion.minOrderValue) {
+          await abortTransactionAndMarkFailed('MIN_ORDER_NOT_MET', `Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`);
+          throw new BadRequestError(`Đơn hàng chưa đạt giá trị tối thiểu ${promotion.minOrderValue.toLocaleString('vi-VN')}đ để áp dụng mã này`, 'MIN_ORDER_NOT_MET');
+        }
 
-    const order = new Order(orderData);
-
-    await order.save({ session });
-
-    if (promotionCode) {
-      await Promotion.findOneAndUpdate(
-        { code: promotionCode.toUpperCase() },
-        { $inc: { usedCount: 1 } },
-        { session }
-      );
-    }
-
-    if (cart.items.length > 0) {
-      await Product.bulkWrite(
-        cart.items.map(item => ({
-          updateOne: {
-            filter: { _id: item.product._id },
-            update: { $inc: { inStock: -item.quantity } }
+        if (promotion.discountType === 'percentage') {
+          discountAmount = Math.round(subtotal * promotion.discountValue / 100);
+          if (promotion.maxDiscountAmount && discountAmount > promotion.maxDiscountAmount) {
+            discountAmount = promotion.maxDiscountAmount;
           }
-        })),
-        { session }
-      );
-    }
-
-    // Clear cart
-    cart.items = [];
-    await cart.save({ session });
-
-    // --- Atomic completion INSIDE transaction (reuses pre-computed checkoutFingerprint) ---
-    if (idempotencyRecord && requestFingerprint) {
-      const completedRecord = await IdempotencyRecord.findOneAndUpdate(
-        {
-          _id: idempotencyRecord._id,
-          attemptId,
-          status: 'processing',
-          requestFingerprint,
-          checkoutFingerprint,
-        },
-        {
-          $set: {
-            status: 'completed',
-            order: order._id,
-            responseStatus: 201,
-            responseOrderNumber: orderNumber,
-            processingExpiresAt: null,
-            errorCode: null,
-            errorMessage: null,
-          },
-        },
-        { session }
-      );
-      if (!completedRecord) {
-        await abortTransactionAndMarkFailed('IDEMPOTENCY_CONFLICT', 'Lỗi server khi tạo đơn hàng');
-        throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'IDEMPOTENCY_CONFLICT');
-      }
-    }
-
-    await session.commitTransaction();
-
-    // Populate user info for response
-    const populatedOrder = await Order.findById(order._id)
-      .populate('user', 'name email');
-
-    // Send order confirmation email (only after successful commit)
-    const orderUser = { name: populatedOrder.user.name, email: populatedOrder.user.email, _id: req.user?._id };
-    enqueueOrderConfirmationEmail(orderUser, populatedOrder, req.requestId);
-
-    res.status(201).json({
-      success: true,
-      message: 'Đặt hàng thành công',
-      data: populatedOrder
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
-      await IdempotencyRecord.findOneAndUpdate(
-        { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
-        {
-          $set: {
-            status: 'failed',
-            errorCode: error instanceof AppError ? error.code : 'SERVER_ERROR',
-            errorMessage: error.message,
-            processingExpiresAt: null,
-          },
+        } else {
+          discountAmount = promotion.discountValue;
+          if (discountAmount > subtotal) {
+            discountAmount = subtotal;
+          }
         }
-      );
+
+        promotionData = {
+          code: promotion.code,
+          discountType: promotion.discountType,
+          discountValue: promotion.discountValue,
+          discountAmount
+        };
+      }
+
+      // Calculate total (subtotal + shipping - discount)
+      const total = subtotal + SHIPPING_FEE - discountAmount;
+
+      // Generate order number
+      const orderNumber = await Order.generateOrderNumber();
+
+      // Create order
+      const orderData = {
+        user: userId,
+        orderNumber,
+        items: orderItems,
+        shippingAddress,
+        subtotal,
+        shippingFee: SHIPPING_FEE,
+        total,
+        status: 'pending'
+      };
+
+      if (promotionData) {
+        orderData.promotion = promotionData;
+      }
+
+      const order = new Order(orderData);
+
+      try {
+        await order.save({ session });
+      } catch (saveErr) {
+        if (isOrderNumberDuplicateKey(saveErr)) {
+          try {
+            await session.abortTransaction();
+            if (attempt < MAX_ORDER_NUMBER_RETRIES) {
+              logger.warn({ attempt, orderNumber }, 'Order number collision, retrying');
+              continue;
+            }
+            // Exhausted all retries
+            if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
+              await IdempotencyRecord.findOneAndUpdate(
+                { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+                {
+                  $set: {
+                    status: 'failed',
+                    errorCode: 'ORDER_NUMBER_COLLISION',
+                    errorMessage: 'Không thể tạo mã đơn hàng duy nhất sau nhiều lần thử',
+                    processingExpiresAt: null,
+                  },
+                }
+              );
+            }
+            throw new AppError('Không thể tạo mã đơn hàng duy nhất', 500, 'ORDER_NUMBER_GENERATION_FAILED');
+          } finally {
+            await session.endSession();
+          }
+        }
+        throw saveErr;
+      }
+
+      if (promotionCode) {
+        await Promotion.findOneAndUpdate(
+          { code: promotionCode.toUpperCase() },
+          { $inc: { usedCount: 1 } },
+          { session }
+        );
+      }
+
+      if (cart.items.length > 0) {
+        await Product.bulkWrite(
+          cart.items.map(item => ({
+            updateOne: {
+              filter: { _id: item.product._id },
+              update: { $inc: { inStock: -item.quantity } }
+            }
+          })),
+          { session }
+        );
+      }
+
+      // Clear cart
+      cart.items = [];
+      await cart.save({ session });
+
+      // --- Atomic completion INSIDE transaction (reuses pre-computed checkoutFingerprint) ---
+      if (idempotencyRecord && requestFingerprint) {
+        const completedRecord = await IdempotencyRecord.findOneAndUpdate(
+          {
+            _id: idempotencyRecord._id,
+            attemptId,
+            status: 'processing',
+            requestFingerprint,
+            checkoutFingerprint,
+          },
+          {
+            $set: {
+              status: 'completed',
+              order: order._id,
+              responseStatus: 201,
+              responseOrderNumber: orderNumber,
+              processingExpiresAt: null,
+              errorCode: null,
+              errorMessage: null,
+            },
+          },
+          { session }
+        );
+        if (!completedRecord) {
+          await abortTransactionAndMarkFailed('IDEMPOTENCY_CONFLICT', 'Lỗi server khi tạo đơn hàng');
+          throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'IDEMPOTENCY_CONFLICT');
+        }
+      }
+
+      await session.commitTransaction();
+      await session.endSession();
+
+      // Populate user info for response
+      const populatedOrder = await Order.findById(order._id)
+        .populate('user', 'name email');
+
+      // Send order confirmation email (only after successful commit)
+      const orderUser = { name: populatedOrder.user.name, email: populatedOrder.user.email, _id: req.user?._id };
+      enqueueOrderConfirmationEmail(orderUser, populatedOrder, req.requestId);
+
+      res.status(201).json({
+        success: true,
+        message: 'Đặt hàng thành công',
+        data: populatedOrder
+      });
+      return;
+    } catch (error) {
+      // ORDER_NUMBER_GENERATION_FAILED is thrown by the inner save catch after
+      // it already aborted + ended the session — do not touch the session again.
+      if (error instanceof AppError && error.code === 'ORDER_NUMBER_GENERATION_FAILED') {
+        throw error;
+      }
+      try {
+        if (isOrderNumberDuplicateKey(error)) {
+          await session.abortTransaction();
+          if (attempt < MAX_ORDER_NUMBER_RETRIES) {
+            logger.warn({ attempt }, 'Order number collision in catch, retrying');
+            continue;
+          }
+          if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
+            await IdempotencyRecord.findOneAndUpdate(
+              { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+              {
+                $set: {
+                  status: 'failed',
+                  errorCode: 'ORDER_NUMBER_COLLISION',
+                  errorMessage: 'Không thể tạo mã đơn hàng duy nhất sau nhiều lần thử',
+                  processingExpiresAt: null,
+                },
+              }
+            );
+          }
+          throw new AppError('Không thể tạo mã đơn hàng duy nhất', 500, 'ORDER_NUMBER_GENERATION_FAILED');
+        }
+        // Non-retryable error — abort and propagate
+        await session.abortTransaction();
+        if (idempotencyRecord && idempotencyRecord._id && attemptId && requestFingerprint) {
+          await IdempotencyRecord.findOneAndUpdate(
+            { _id: idempotencyRecord._id, attemptId, status: 'processing', requestFingerprint },
+            {
+              $set: {
+                status: 'failed',
+                errorCode: error instanceof AppError ? error.code : 'SERVER_ERROR',
+                errorMessage: error.message,
+                processingExpiresAt: null,
+              },
+            }
+          );
+        }
+      } finally {
+        await session.endSession();
+      }
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'SERVER_ERROR');
     }
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Lỗi server khi tạo đơn hàng', 500, 'SERVER_ERROR');
-  } finally {
-    session.endSession();
   }
+  // Safety net — should never be reached
+  throw new AppError('Không thể tạo mã đơn hàng duy nhất', 500, 'ORDER_NUMBER_GENERATION_FAILED');
 });
 
 
