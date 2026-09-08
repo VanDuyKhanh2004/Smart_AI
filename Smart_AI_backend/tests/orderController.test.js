@@ -1284,13 +1284,13 @@ describe('createOrder', () => {
     });
 
     it('increments promotion usedCount when transaction succeeds', async () => {
-      setupWithPromotion(defaultPromotionDoc({ discountType: 'fixed', discountValue: 50000 }));
+      setupWithPromotion(defaultPromotionDoc({ discountType: 'fixed', discountValue: 50000, usageLimit: 100 }));
       setupOrderFindByIdForCreate();
 
       const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes(), next);
 
       expect(Promotion.findOneAndUpdate).toHaveBeenCalledWith(
-        { code: 'FIXED50' },
+        { code: 'FIXED50', usedCount: { $lt: 100 } },
         { $inc: { usedCount: 1 } },
         { session: mockSession }
       );
@@ -1311,6 +1311,36 @@ describe('createOrder', () => {
       const next = jest.fn(); await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes(), next);
 
       expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('promotion increment uses usedCount < usageLimit filter', async () => {
+      const promoDoc = defaultPromotionDoc({ discountType: 'fixed', discountValue: 50000, usageLimit: 100 });
+      setupWithPromotion(promoDoc);
+      setupOrderFindByIdForCreate();
+
+      const next = jest.fn();
+      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'FIXED50' } }), mockRes(), next);
+
+      expect(Promotion.findOneAndUpdate).toHaveBeenCalledWith(
+        { code: 'FIXED50', usedCount: { $lt: 100 } },
+        { $inc: { usedCount: 1 } },
+        { session: mockSession }
+      );
+    });
+
+    it('rejects order when conditional increment finds no match (usage limit reached)', async () => {
+      const promoDoc = defaultPromotionDoc({ usageLimit: 100, usedCount: 99 });
+      setupWithPromotion(promoDoc);
+      setupOrderFindByIdForCreate();
+      Promotion.findOneAndUpdate.mockResolvedValue(null);
+
+      const next = jest.fn();
+      await createOrder(makeReq({ body: { shippingAddress: validShippingAddress, promotionCode: 'TEST10' } }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'PROMOTION_USAGE_LIMIT' })
+      );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
   });
 
@@ -1717,6 +1747,66 @@ describe('cancelOrder', () => {
       expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
       expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_FOR_CANCEL');
+    });
+
+    it('restores promotion usage when cancelling order with promotion', async () => {
+      const orderDoc = defaultOrderDoc({
+        status: 'pending',
+        promotion: { code: 'TEST10', discountType: 'percentage', discountValue: 10, discountAmount: 130000 },
+      });
+      setupOrderFindByIdForCancel(orderDoc);
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(Promotion.findOneAndUpdate).toHaveBeenCalledWith(
+        { code: 'TEST10' },
+        { $inc: { usedCount: -1 } },
+        { session: mockSession }
+      );
+      expect(mockStatus).toHaveBeenCalledWith(200);
+    });
+
+    it('does not touch promotion collection when cancelling order without promotion', async () => {
+      const orderDoc = defaultOrderDoc({ status: 'pending' });
+      delete orderDoc.promotion;
+      setupOrderFindByIdForCancel(orderDoc);
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockStatus).toHaveBeenCalledWith(200);
+    });
+
+    it('does not restore promotion usage when cancellation fails', async () => {
+      const orderDoc = defaultOrderDoc({
+        status: 'pending',
+        promotion: { code: 'TEST10', discountType: 'percentage', discountValue: 10, discountAmount: 130000 },
+      });
+      setupOrderFindByIdForCancel(orderDoc);
+      mockProductBulkWrite.mockRejectedValue(new Error('Stock restore failed'));
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('does not decrement promotion usage twice on already-cancelled order', async () => {
+      const orderDoc = defaultOrderDoc({
+        status: 'cancelled',
+        promotion: { code: 'TEST10', discountType: 'percentage', discountValue: 10, discountAmount: 130000 },
+      });
+      setupOrderFindByIdForCancel(orderDoc);
+
+      const next = jest.fn();
+      await cancelOrder(makeReq(), mockRes(), next);
+
+      expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalledWith(expect.any(BadRequestError));
       expect(next.mock.calls[0][0].code).toBe('INVALID_STATUS_FOR_CANCEL');
     });
   });

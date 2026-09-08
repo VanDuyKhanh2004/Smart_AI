@@ -281,9 +281,10 @@ const createOrder = asyncHandler(async (req, res, next) => {
       // Validate and apply promotion if provided
       let promotionData = null;
       let discountAmount = 0;
+      let promotion = null;
 
       if (promotionCode) {
-        const promotion = await Promotion.findOne({
+        promotion = await Promotion.findOne({
           code: promotionCode.toUpperCase()
         }).session(session);
 
@@ -396,11 +397,19 @@ const createOrder = asyncHandler(async (req, res, next) => {
       }
 
       if (promotionCode) {
-        await Promotion.findOneAndUpdate(
-          { code: promotionCode.toUpperCase() },
+        const usageUpdate = await Promotion.findOneAndUpdate(
+          {
+            code: promotionCode.toUpperCase(),
+            usedCount: { $lt: promotion.usageLimit }
+          },
           { $inc: { usedCount: 1 } },
           { session }
         );
+
+        if (!usageUpdate) {
+          await abortTransactionAndMarkFailed('PROMOTION_USAGE_LIMIT', 'Mã khuyến mãi đã hết lượt sử dụng');
+          throw new BadRequestError('Mã khuyến mãi đã hết lượt sử dụng', 'PROMOTION_USAGE_LIMIT');
+        }
       }
 
       if (cart.items.length > 0) {
@@ -864,6 +873,15 @@ const cancelOrder = asyncHandler(async (req, res, next) => {
             update: { $inc: { inStock: item.quantity } }
           }
         })),
+        { session }
+      );
+    }
+
+    // Restore promotion usage if a promotion was applied
+    if (order.promotion && order.promotion.code) {
+      await Promotion.findOneAndUpdate(
+        { code: order.promotion.code },
+        { $inc: { usedCount: -1 } },
         { session }
       );
     }
