@@ -1330,3 +1330,123 @@ const ExpressRouteToRegex = (route) => {
   const pattern = route.replace(/:id/g, "([^/]+)");
   return new RegExp(`^${pattern}$`);
 };
+
+/* ============================================================
+   Vector relevance threshold (MIN_VECTOR_SCORE = 0.40)
+   ============================================================ */
+describe("vector relevance threshold (MIN_VECTOR_SCORE = 0.40)", () => {
+  let Product;
+  let recommend;
+  let mockAggregate;
+  const validSourceId = new mongoose.Types.ObjectId().toString();
+  const mockSourceProduct = {
+    _id: validSourceId,
+    name: "Source Phone",
+    brand: "samsung",
+    price: 15000000,
+    embedding_vector: new Array(1536).fill(0.1),
+  };
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.doMock("../models/Product", () => ({
+      findById: jest.fn(),
+      aggregate: jest.fn(),
+      find: jest.fn(),
+    }));
+    jest.doMock("../services/productRecommendationService", () => {
+      const actual = jest.requireActual("../services/productRecommendationService");
+      return actual;
+    });
+    Product = require("../models/Product");
+    recommend = require("../services/productRecommendationService").recommend;
+    Product.findById.mockReturnValue({
+      lean: jest.fn().mockResolvedValue(mockSourceProduct),
+    });
+    mockAggregate = Product.aggregate;
+  });
+
+  const mockFindChain = (result) => ({
+    sort: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(result),
+  });
+
+  it("filters out results with score below 0.40", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "p1", name: "Good Match", brand: "samsung", price: 14000000, inStock: 5, isActive: true, score: 0.7 },
+      { _id: "p2", name: "Weak Match", brand: "samsung", price: 13000000, inStock: 3, isActive: true, score: 0.25 },
+    ]);
+
+    const result = await recommend(validSourceId);
+
+    expect(result.recommendationMode).toBe("vector");
+    expect(result.products).toHaveLength(1);
+    expect(result.products[0]._id).toBe("p1");
+  });
+
+  it("retains result with score exactly 0.40", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "p1", name: "Boundary", brand: "samsung", price: 14000000, inStock: 5, isActive: true, score: 0.40 },
+    ]);
+
+    const result = await recommend(validSourceId);
+
+    expect(result.recommendationMode).toBe("vector");
+    expect(result.products).toHaveLength(1);
+    expect(result.products[0].score).toBe(0.40);
+  });
+
+  it("retains results with score above 0.40", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "p1", name: "Strong", brand: "samsung", price: 14000000, inStock: 5, isActive: true, score: 0.85 },
+      { _id: "p2", name: "Good", brand: "samsung", price: 13000000, inStock: 3, isActive: true, score: 0.50 },
+    ]);
+
+    const result = await recommend(validSourceId);
+
+    expect(result.recommendationMode).toBe("vector");
+    expect(result.products).toHaveLength(2);
+  });
+
+  it("triggers brand_price fallback when all vector results are below threshold", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "p1", name: "Weak1", brand: "samsung", price: 14000000, inStock: 5, isActive: true, score: 0.15 },
+      { _id: "p2", name: "Weak2", brand: "samsung", price: 13000000, inStock: 3, isActive: true, score: 0.10 },
+    ]);
+    Product.find.mockReturnValue(mockFindChain([
+      { _id: "fb1", name: "Fallback Samsung", brand: "samsung", price: 14500000, inStock: 4 },
+    ]));
+
+    const result = await recommend(validSourceId);
+
+    expect(result.recommendationMode).not.toBe("vector");
+    expect(result.recommendationMode).toMatch(/brand_price|fallback/);
+  });
+
+  it("preserves score field in products above threshold", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "p1", name: "Scored", brand: "samsung", price: 14000000, inStock: 5, isActive: true, score: 0.73 },
+    ]);
+
+    const result = await recommend(validSourceId);
+
+    expect(result.products[0].score).toBe(0.73);
+  });
+
+  it("does not let products with missing/undefined score pass threshold", async () => {
+    mockAggregate.mockResolvedValue([
+      { _id: "p1", name: "No Score", brand: "samsung", price: 14000000, inStock: 5, isActive: true },
+      { _id: "p2", name: "Null Score", brand: "samsung", price: 13000000, inStock: 3, isActive: true, score: null },
+      { _id: "p3", name: "NaN Score", brand: "samsung", price: 12000000, inStock: 2, isActive: true, score: NaN },
+    ]);
+    Product.find.mockReturnValue(mockFindChain([
+      { _id: "fb1", name: "Fallback Samsung", brand: "samsung", price: 14500000, inStock: 4 },
+    ]));
+
+    const result = await recommend(validSourceId);
+
+    expect(result.recommendationMode).not.toBe("vector");
+  });
+});

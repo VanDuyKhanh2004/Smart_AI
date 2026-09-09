@@ -23,8 +23,8 @@ describe('productSearchService.search()', () => {
   });
 
   const mockProducts = [
-    { _id: 'p1', name: 'iPhone 15', brand: 'apple', price: 20000000, isActive: true, inStock: 10 },
-    { _id: 'p2', name: 'Galaxy S24', brand: 'samsung', price: 18000000, isActive: true, inStock: 5 },
+    { _id: 'p1', name: 'iPhone 15', brand: 'apple', price: 20000000, isActive: true, inStock: 10, score: 0.85 },
+    { _id: 'p2', name: 'Galaxy S24', brand: 'samsung', price: 18000000, isActive: true, inStock: 5, score: 0.72 },
   ];
 
   describe('vector search path', () => {
@@ -225,7 +225,7 @@ describe('productSearchService.search()', () => {
   describe('products without embedding_vector', () => {
     it('does not crash when aggregate omits embedding_vector', async () => {
       generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
-      const incompleteProduct = { _id: 'p1', name: 'No Embed', isActive: true };
+      const incompleteProduct = { _id: 'p1', name: 'No Embed', isActive: true, score: 0.6 };
       Product.aggregate.mockResolvedValue([incompleteProduct]);
 
       const result = await search('test');
@@ -358,7 +358,7 @@ describe('productSearchService.search()', () => {
     it('E. constrained query whose candidates all satisfy the constraint does not fall back', async () => {
       // Simulate Atlas applying the pre-filter: it returns only samsung products.
       Product.aggregate.mockResolvedValue([
-        { _id: 'p1', name: 'Galaxy S24', brand: 'samsung', price: 12_000_000, isActive: true, inStock: 10 },
+        { _id: 'p1', name: 'Galaxy S24', brand: 'samsung', price: 12_000_000, isActive: true, inStock: 10, score: 0.9 },
       ]);
 
       const result = await search('samsung duoi 15 trieu', 5, {
@@ -449,6 +449,98 @@ describe('productSearchService.search()', () => {
       });
       expect(buildVectorPostFilter({ brands: ['samsung'], maxPrice: 15_000_000 })).toBeNull();
       expect(buildVectorPostFilter(null)).toBeNull();
+    });
+  });
+
+  describe('vector relevance threshold (MIN_VECTOR_SCORE = 0.45)', () => {
+    it('filters out results with score below 0.45', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'Match', score: 0.6 },
+        { _id: 'p2', name: 'Weak', score: 0.3 },
+      ]);
+
+      const result = await search('test query');
+
+      expect(result.searchMode).toBe('vector');
+      expect(result.products).toHaveLength(1);
+      expect(result.products[0]._id).toBe('p1');
+    });
+
+    it('retains result with score exactly 0.45', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'Exact Boundary', score: 0.45 },
+      ]);
+
+      const result = await search('test query');
+
+      expect(result.searchMode).toBe('vector');
+      expect(result.products).toHaveLength(1);
+      expect(result.products[0].score).toBe(0.45);
+    });
+
+    it('retains results with score above 0.45', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'Strong', score: 0.9 },
+        { _id: 'p2', name: 'Good', score: 0.55 },
+      ]);
+
+      const result = await search('test query');
+
+      expect(result.searchMode).toBe('vector');
+      expect(result.products).toHaveLength(2);
+    });
+
+    it('triggers existing fallback when all results are below threshold', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'Weak1', score: 0.2 },
+        { _id: 'p2', name: 'Weak2', score: 0.1 },
+      ]);
+      Product.find.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(mockProducts),
+      });
+
+      const result = await search('test query');
+
+      expect(result.searchMode).toBe('text');
+      expect(result.products).toEqual(mockProducts);
+    });
+
+    it('preserves score field in returned products', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'Scored', score: 0.72 },
+      ]);
+
+      const result = await search('test query');
+
+      expect(result.products[0].score).toBe(0.72);
+    });
+
+    it('does not let products with missing/undefined score pass threshold', async () => {
+      generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
+      Product.aggregate.mockResolvedValue([
+        { _id: 'p1', name: 'No Score' },
+        { _id: 'p2', name: 'Null Score', score: null },
+        { _id: 'p3', name: 'NaN Score', score: NaN },
+      ]);
+      Product.find.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([]),
+      });
+
+      const result = await search('test query');
+
+      // All should be filtered out — none have a valid numeric score >= 0.45
+      expect(result.products).toHaveLength(0);
     });
   });
 });

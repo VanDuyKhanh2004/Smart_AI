@@ -236,19 +236,19 @@ const allProducts = [
 
 function setupVectorSearch(returnedProducts) {
   generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
-  Product.aggregate.mockResolvedValue(returnedProducts);
+  Product.aggregate.mockResolvedValue(returnedProducts.map(p => ({ ...p, score: p.score ?? 0.8 })));
 }
 
 function setupTextFallback(vectorResults, textResults) {
   generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
-  Product.aggregate.mockResolvedValue(vectorResults);
+  Product.aggregate.mockResolvedValue(vectorResults.map(p => ({ ...p, score: p.score ?? 0.8 })));
   const mockQuery = { select: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue(textResults) };
   Product.find.mockReturnValue(mockQuery);
 }
 
 function setupLatestFallback(vectorResults, textResults, latestResults) {
   generateEmbedding.mockResolvedValue(new Array(1536).fill(0.1));
-  Product.aggregate.mockResolvedValue(vectorResults);
+  Product.aggregate.mockResolvedValue(vectorResults.map(p => ({ ...p, score: p.score ?? 0.8 })));
   const textQuery = { select: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue(textResults) };
   Product.find.mockImplementationOnce(() => textQuery);
   const latestQuery = { sort: jest.fn().mockReturnThis(), select: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue(latestResults) };

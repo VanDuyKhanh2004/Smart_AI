@@ -302,7 +302,7 @@ function createRecommendationStore() {
           items = items.filter(p => matchesFilter(p, filter));
           items = items
             .filter(p => Array.isArray(p.embedding_vector))
-            .map(p => ({ ...p, score: cosine(queryVector, p.embedding_vector) }))
+            .map(p => ({ ...p, score: (cosine(queryVector, p.embedding_vector) + 1) / 2 }))
             .sort((a, b) => b.score - a.score)
             .slice(0, limit);
         } else if (stage.$match) {
