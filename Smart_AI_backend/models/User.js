@@ -94,6 +94,10 @@ const userSchema = new mongoose.Schema({
   unlockTokenExpires: {
     type: Date,
     select: false
+  },
+  tokenVersion: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true,

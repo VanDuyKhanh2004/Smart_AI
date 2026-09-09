@@ -128,6 +128,8 @@ const changePassword = async (req, res) => {
   }
 
   user.password = newPassword;
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  user.refreshToken = null;
   await user.save();
 
   res.status(200).json({

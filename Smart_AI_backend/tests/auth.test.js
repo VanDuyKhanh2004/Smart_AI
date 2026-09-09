@@ -156,6 +156,7 @@ describe('Auth Controller — centralized error handling', () => {
     mockUser.refreshToken = 'valid-refresh-token';
     mockUser.lockUntil = null;
     mockUser.loginAttempts = 0;
+    mockUser.tokenVersion = undefined;
     Object.defineProperty(mockUser, 'isLocked', {
       get() { return !!(this.lockUntil && this.lockUntil > Date.now()); },
     });

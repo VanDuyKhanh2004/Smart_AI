@@ -240,6 +240,13 @@ const refreshTokenFn = asyncHandler(async (req, res) => {
     throw new UnauthorizedError('Refresh token không hợp lệ', 'REFRESH_TOKEN_INVALID');
   }
 
+  // Enforce token version — rejects refresh tokens issued before password
+  // change/reset. Legacy tokens (no tokenVersion) are treated as version 0.
+  const decodedTokenVersion = decoded.tokenVersion ?? 0;
+  if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
+    throw new UnauthorizedError('Token đã bị thu hồi. Vui lòng đăng nhập lại.', 'TOKEN_REVOKED');
+  }
+
   const accessToken = generateAccessToken(user);
 
   res.status(200).json({
@@ -662,6 +669,7 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.passwordResetToken = undefined;
   user.passwordResetExpires = undefined;
   user.refreshToken = null;
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
 
   await user.save();
 

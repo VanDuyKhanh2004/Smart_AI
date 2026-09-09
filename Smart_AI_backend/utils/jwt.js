@@ -9,7 +9,8 @@ const generateAccessToken = (user) => {
   return jwt.sign(
     { 
       id: user._id, 
-      email: user.email 
+      email: user.email,
+      tokenVersion: user.tokenVersion ?? 0
     },
     process.env.JWT_SECRET,
     { 
@@ -27,7 +28,8 @@ const generateRefreshToken = (user) => {
   return jwt.sign(
     { 
       id: user._id, 
-      email: user.email 
+      email: user.email,
+      tokenVersion: user.tokenVersion ?? 0
     },
     process.env.JWT_REFRESH_SECRET,
     { 

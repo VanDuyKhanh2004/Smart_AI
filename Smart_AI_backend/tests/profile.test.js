@@ -109,6 +109,7 @@ describe('Profile Controller — centralized error handling', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    User.findById.mockReturnValue(thenableChainable({ ...mockUser }));
   });
 
   describe('GET /api/profile', () => {
