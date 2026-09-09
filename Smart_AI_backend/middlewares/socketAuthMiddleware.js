@@ -57,6 +57,13 @@ const authenticateSocket = async (socket, next) => {
       return next(createAuthError(SOCKET_USER_NOT_FOUND, 'Socket user not found'));
     }
 
+    // Enforce token version — rejects tokens issued before password change/reset.
+    // Legacy tokens (no tokenVersion) are treated as version 0.
+    const decodedTokenVersion = decoded.tokenVersion ?? 0;
+    if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
+      return next(createAuthError(SOCKET_AUTH_INVALID, 'Socket token revoked'));
+    }
+
     socket.data.user = {
       id: user.id,
       email: user.email,

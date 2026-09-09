@@ -81,6 +81,20 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Enforce token version — rejects tokens issued before password change/reset.
+    // Legacy tokens (no tokenVersion in payload) are treated as version 0, which
+    // matches the default user.tokenVersion of 0.
+    const decodedTokenVersion = decoded.tokenVersion ?? 0;
+    if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'TOKEN_REVOKED',
+          message: 'Token đã bị thu hồi. Vui lòng đăng nhập lại.'
+        }
+      });
+    }
+
     // Attach user to request
     req.user = user;
     next();
