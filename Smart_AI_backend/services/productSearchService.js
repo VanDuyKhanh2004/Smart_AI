@@ -6,6 +6,13 @@ const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 10;
 
 /**
+ * Minimum vector-search relevance score (vectorSearchScore from Atlas).
+ * Results below this threshold are treated as weak/noise matches and filtered
+ * out before the empty-result fallback decision.
+ */
+const MIN_VECTOR_SCORE = 0.45;
+
+/**
  * Build a MongoDB $match object from the constraints filters.
  * Returns null if no filter applies.
  */
@@ -170,6 +177,13 @@ const search = async (queryText, limit = DEFAULT_LIMIT, filters = null) => {
     }
 
     let products = await Product.aggregate(pipeline);
+
+    // Filter out weak semantic matches that fall below the relevance threshold.
+    // $vectorSearch always returns K nearest neighbors even for near-random
+    // similarity; without this gate, noise results enter search/RAG context.
+    products = products.filter(
+      (p) => typeof p.score === 'number' && isFinite(p.score) && p.score >= MIN_VECTOR_SCORE
+    );
 
     logger.debug({ resultCount: products.length }, '[Semantic Search] Vector results');
 

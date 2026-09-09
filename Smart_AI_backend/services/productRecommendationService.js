@@ -6,6 +6,13 @@ const { rankProducts } = require("../utils/productRanking");
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 20;
 
+/**
+ * Minimum vector-search relevance score for recommendations.
+ * Results below this threshold are treated as weak/noise matches and filtered
+ * out before the fallback decision in recommend().
+ */
+const MIN_VECTOR_SCORE = 0.40;
+
 const sanitizeLimit = (limit) => {
   const n = Number(limit);
   if (isNaN(n) || !isFinite(n)) return DEFAULT_LIMIT;
@@ -225,7 +232,13 @@ const recommendByVector = async (sourceProduct, safeLimit, constraints) => {
   ];
 
   const products = await Product.aggregate(pipeline);
-  return products;
+
+  // Filter out weak semantic matches below the relevance threshold.
+  // $vectorSearch always returns K nearest neighbors; without this gate,
+  // noise results enter the recommendation pool and RAG context.
+  return products.filter(
+    (p) => typeof p.score === 'number' && isFinite(p.score) && p.score >= MIN_VECTOR_SCORE
+  );
 };
 
 const recommendByBrandPrice = async (sourceProduct, safeLimit, constraints) => {
