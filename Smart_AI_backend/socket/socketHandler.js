@@ -71,6 +71,33 @@ function sweepRateLimitStores() {
 const _sweepTimer = setInterval(sweepRateLimitStores, RATE_SWEEP_INTERVAL_MS);
 if (_sweepTimer.unref) _sweepTimer.unref();
 
+
+// ---------------------------------------------------------------------------
+// Per-IP Socket.IO connection limiter  (process-local)
+// ---------------------------------------------------------------------------
+function getMaxConnectionsPerIp() {
+  const raw = parseInt(process.env.SOCKET_MAX_CONNECTIONS_PER_IP, 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 10;
+}
+
+// ip -> count
+const ipConnectionStore = new Map();
+
+function incrementIpConnection(ip) {
+  const count = (ipConnectionStore.get(ip) || 0) + 1;
+  ipConnectionStore.set(ip, count);
+  return count;
+}
+
+function decrementIpConnection(ip) {
+  const count = ipConnectionStore.get(ip) || 0;
+  if (count <= 1) {
+    ipConnectionStore.delete(ip);
+  } else {
+    ipConnectionStore.set(ip, count - 1);
+  }
+}
+
 const requireSocketAuth = (socket) => {
   if (socket.data && socket.data.user) {
     return true;
@@ -93,6 +120,23 @@ const initializeSocketHandlers = (io) => {
   io.on('connection', (socket) => {
     const clientIP = socket.handshake.address;
     const userAgent = socket.handshake.headers['user-agent'];
+
+    // Per-IP connection limit — enforce after authentication has succeeded
+    // (authenticateSocket middleware already ran and populated socket.data.user).
+    const ipCount = incrementIpConnection(clientIP);
+    const maxPerIp = getMaxConnectionsPerIp();
+    if (ipCount > maxPerIp) {
+      decrementIpConnection(clientIP);
+      logger.warn({ socketId: socket.id, clientIP, ipCount, maxPerIp }, 'Per-IP connection limit exceeded');
+      socket.emit('error', {
+        type: 'CONNECTION_LIMIT_EXCEEDED',
+        message: 'Too many connections from this IP.',
+        timestamp: new Date().toISOString(),
+      });
+      socket.disconnect(true);
+      return;
+    }
+    socket.data.ipCounted = true;
 
     logger.info({ socketId: socket.id, clientIP }, 'New client connected');
 
@@ -1063,6 +1107,11 @@ const handleDisconnect = (socket, reason) => {
     }, 'Disconnect details');
   }
 
+  // Decrement per-IP connection count only if this socket was counted
+  if (socket.data && socket.data.ipCounted) {
+    decrementIpConnection(socket.handshake.address);
+  }
+
   const clientCount = socket.server.sockets.sockets.size;
   socket.broadcast.emit('userCount', { count: clientCount });
 
@@ -1155,4 +1204,7 @@ module.exports = {
   _resetConcurrentStore: () => concurrentStore.clear(),
   _getRateLimitStoreSize: () => rateLimitStore.size,
   _getConcurrentStoreSize: () => concurrentStore.size,
+  _resetIpConnectionStore: () => ipConnectionStore.clear(),
+  _getIpConnectionStoreSize: () => ipConnectionStore.size,
+  _getIpConnectionCount: (ip) => ipConnectionStore.get(ip) || 0,
 };

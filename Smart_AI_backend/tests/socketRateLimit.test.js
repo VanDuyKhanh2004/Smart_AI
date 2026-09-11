@@ -237,6 +237,7 @@ beforeEach(() => {
   registry._resetLocal();
   socketHandler._resetRateLimitStore();
   socketHandler._resetConcurrentStore();
+  socketHandler._resetIpConnectionStore();
   User.findById.mockReset();
   User.findById.mockImplementation(async (id) => {
     if (id === OTHER_USER.id) return OTHER_USER;
