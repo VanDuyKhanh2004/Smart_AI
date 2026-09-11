@@ -53,6 +53,7 @@ const User = require('../models/User');
 const chatController = require('../controllers/chatController');
 const dedup = require('../services/chatMessageDedupService');
 const registry = require('../services/chatActiveStreams');
+const socketHandler = require('../socket/socketHandler');
 
 const mockUser = { id: 'user-123', email: 'test@example.com', role: 'user' };
 const VALID_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000';
@@ -216,6 +217,7 @@ afterAll(async () => {
 beforeEach(() => {
   dedup._resetLocal();
   registry._resetLocal();
+  socketHandler._resetIpConnectionStore();
   User.findById.mockReset();
   User.findById.mockResolvedValue(mockUser);
   chatController.processMessage.mockReset();
