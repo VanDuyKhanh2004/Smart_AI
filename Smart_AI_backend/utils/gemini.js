@@ -880,7 +880,7 @@ const generateResponse = async (prompt) => {
 
 const generateChatResponse = async (chatHistory, userMessage, productContext = [], userContext = null, appointmentContext = null, entityLabels = null) => {
   try {
-    const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext, entityLabels);
+    const systemPrompt = createSystemPrompt(productContext, userContext, appointmentContext, entityLabels);
     const messages = [
       { role: "system", content: systemPrompt },
       ...(Array.isArray(chatHistory)
@@ -921,7 +921,7 @@ const generateChatResponse = async (chatHistory, userMessage, productContext = [
   }
 };
 
-const createSystemPrompt = (productContext = [], chatHistory = [], userContext = null, appointmentContext = null, entityLabels = null) => {
+const createSystemPrompt = (productContext = [], userContext = null, appointmentContext = null, entityLabels = null) => {
   const contextText =
     Array.isArray(productContext) && productContext.length > 0
       ? productContext
@@ -938,13 +938,6 @@ ${product.specs ? `- Thông số: ${JSON.stringify(product.specs, null, 2)}` : "
           )
           .join("\n")
       : "HIỆN TẠI KHÔNG CÓ SẢN PHẨM LIÊN QUAN TRONG KHO.";
-
-  const historyText =
-    Array.isArray(chatHistory) && chatHistory.length > 0
-      ? chatHistory
-          .map((msg) => `${msg.role}: ${msg.content}`)
-          .join("\n")
-      : "";
 
   let userText = "";
   if (userContext && typeof userContext === "object") {
@@ -986,7 +979,6 @@ ${product.specs ? `- Thông số: ${JSON.stringify(product.specs, null, 2)}` : "
 3. Luôn nêu tên sản phẩm, hãng, giá, tồn kho; chỉ đưa thông số khi được hỏi.
 4. Nếu thiếu dữ liệu thì thừa nhận và gợi ý thay thế.
 ${userText ? `${userText}\n` : ""}${entityLabelsText ? `${entityLabelsText}\n\n` : ""}${appointmentText ? `DANH SÁCH LỊCH HẸN:\n${appointmentText}\n` : ""}${contextText ? `DANH SÁCH SẢN PHẨM:\n${contextText}` : ""}
-${historyText ? `LỊCH SỬ CHAT GẦN ĐÂY:\n${historyText}` : ""}
 Không cần chào lại nếu đã chào trước đó. Trả lời bằng tiếng Việt thân thiện.`;
 };
 
@@ -1091,7 +1083,7 @@ const streamGeminiChat = async ({ systemPrompt, chatHistory, userMessage, signal
  * error.partialContent set to whatever was emitted so far.
  */
 const generateChatResponseStream = async ({ userMessage, chatHistory = [], productContext = [], signal, onDelta, userContext = null, appointmentContext = null, entityLabels = null }) => {
-  const systemPrompt = createSystemPrompt(productContext, chatHistory, userContext, appointmentContext, entityLabels);
+  const systemPrompt = createSystemPrompt(productContext, userContext, appointmentContext, entityLabels);
   const messages = [
     { role: "system", content: systemPrompt },
     ...(Array.isArray(chatHistory) ? chatHistory.map((msg) => ({ role: msg.role, content: msg.content })) : []),

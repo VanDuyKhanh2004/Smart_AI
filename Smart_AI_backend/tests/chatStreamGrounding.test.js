@@ -100,4 +100,67 @@ describe('generateChatResponseStream() streaming grounding regression', () => {
       content: 'Gợi ý iPhone 16 Pro',
     });
   });
+
+  it('system prompt does NOT contain duplicated chat history text', async () => {
+    mockCreate.mockReturnValueOnce(asyncIterable(openAiChunks('ok')));
+
+    await generateChatResponseStream({
+      userMessage: 'iPhone 16 giá bao nhiêu?',
+      chatHistory: CHAT_HISTORY,
+      productContext: PRODUCT_CONTEXT,
+      onDelta: () => {},
+    });
+
+    const { messages } = mockCreate.mock.calls[0][0];
+    const systemContent = messages[0].content;
+
+    // The system prompt must NOT contain the old chat history section
+    expect(systemContent).not.toContain('LỊCH SỬ CHAT GẦN ĐÂY');
+    // It must NOT contain any chat history message content
+    expect(systemContent).not.toContain('Tôi muốn mua iPhone');
+    expect(systemContent).not.toContain('Bạn muốn phân khúc nào?');
+  });
+
+  it('chat history appears exactly once as structured messages', async () => {
+    mockCreate.mockReturnValueOnce(asyncIterable(openAiChunks('ok')));
+
+    await generateChatResponseStream({
+      userMessage: 'iPhone 16 giá bao nhiêu?',
+      chatHistory: CHAT_HISTORY,
+      productContext: PRODUCT_CONTEXT,
+      onDelta: () => {},
+    });
+
+    const { messages } = mockCreate.mock.calls[0][0];
+
+    // messages should be [system, history..., user]
+    // history entries appear exactly once each
+    const historyEntries = messages.filter(
+      (m) => m.content === 'Tôi muốn mua iPhone' || m.content === 'Bạn muốn phân khúc nào?'
+    );
+    expect(historyEntries.length).toBe(2);
+
+    // Current user query appears exactly once
+    const userQueries = messages.filter((m) => m.content === 'iPhone 16 giá bao nhiêu?');
+    expect(userQueries.length).toBe(1);
+  });
+
+  it('product/RAG context remains present in system prompt', async () => {
+    mockCreate.mockReturnValueOnce(asyncIterable(openAiChunks('ok')));
+
+    await generateChatResponseStream({
+      userMessage: 'Gợi ý điện thoại',
+      chatHistory: [],
+      productContext: PRODUCT_CONTEXT,
+      onDelta: () => {},
+    });
+
+    const { messages } = mockCreate.mock.calls[0][0];
+    const systemContent = messages[0].content;
+
+    expect(systemContent).toContain('SẢN PHẨM 1:');
+    expect(systemContent).toContain('iPhone 16 Pro');
+    expect(systemContent).toContain('apple');
+    expect(systemContent).toContain('29.990.000');
+  });
 });
