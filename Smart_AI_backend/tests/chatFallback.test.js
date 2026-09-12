@@ -219,4 +219,40 @@ describe('generateChatResponse() — provider fallback', () => {
       expect(result.text).toContain('chưa tìm thấy sản phẩm phù hợp');
     });
   });
+
+  describe('No chat history duplication', () => {
+    it('system prompt does not contain chat history text', async () => {
+      OpenAI.mockCreate.mockResolvedValueOnce({
+        choices: [{ message: { content: 'Reply' } }],
+      });
+
+      await generateChatResponse(mockHistory, 'iPhone 16 giá bao nhiêu?', mockProducts);
+
+      const { messages } = OpenAI.mockCreate.mock.calls[0][0];
+      const systemContent = messages[0].content;
+
+      expect(systemContent).not.toContain('LỊCH SỬ CHAT GẦN ĐÂY');
+      expect(systemContent).not.toContain('Tôi muốn mua điện thoại');
+    });
+
+    it('chat history appears exactly once as structured messages', async () => {
+      OpenAI.mockCreate.mockResolvedValueOnce({
+        choices: [{ message: { content: 'Reply' } }],
+      });
+
+      await generateChatResponse(mockHistory, 'iPhone 16 giá bao nhiêu?', mockProducts);
+
+      const { messages } = OpenAI.mockCreate.mock.calls[0][0];
+
+      // history entries appear exactly once each
+      const historyEntries = messages.filter(
+        (m) => m.content === 'Tôi muốn mua điện thoại' || m.content === 'Dạ, bạn muốn tìm loại điện thoại nào ạ?'
+      );
+      expect(historyEntries.length).toBe(2);
+
+      // Current user query appears exactly once
+      const userQueries = messages.filter((m) => m.content === 'iPhone 16 giá bao nhiêu?');
+      expect(userQueries.length).toBe(1);
+    });
+  });
 });
