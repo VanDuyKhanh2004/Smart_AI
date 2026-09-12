@@ -53,7 +53,7 @@ describe('cacheService — Redis readiness gate', () => {
   it('does not hang on a null client', async () => {
     getRedisClient.mockReturnValue(null);
     await expect(cache.get('foo')).resolves.toBeNull();
-    await expect(cache.set('foo', { a: 1 })).resolves.toBeUndefined();
+    await expect(cache.set('foo', { a: 1 })).resolves.toBe(false);
   });
 
   it('get returns parsed JSON when the client is ready', async () => {
@@ -72,15 +72,24 @@ describe('cacheService — Redis readiness gate', () => {
   it('set uses setEx with the provided TTL when ready', async () => {
     const client = makeReadyClient();
     getRedisClient.mockReturnValue(client);
-    await cache.set('k', { v: 1 }, 60);
+    const result = await cache.set('k', { v: 1 }, 60);
     expect(client.setEx).toHaveBeenCalledWith('k', 60, '{"v":1}');
+    expect(result).toBe(true);
   });
 
-  it('set no-ops (no Redis call) when the client is not ready', async () => {
+  it('set returns false when the client is not ready', async () => {
     const client = makeNotReadyClient();
     getRedisClient.mockReturnValue(client);
-    await cache.set('k', { v: 1 }, 60);
+    const result = await cache.set('k', { v: 1 }, 60);
     expect(client.setEx).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+  });
+
+  it('set returns false when setEx throws', async () => {
+    const client = makeReadyClient({ setEx: jest.fn().mockRejectedValue(new Error('REDIS_TIMEOUT')) });
+    getRedisClient.mockReturnValue(client);
+    const result = await cache.set('k', { v: 1 }, 60);
+    expect(result).toBe(false);
   });
 
   it('del skips the client when not ready', async () => {

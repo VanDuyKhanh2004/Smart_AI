@@ -35,12 +35,14 @@ const set = async (key, value, ttlSeconds = 300) => {
   try {
     const client = getReadyClient();
     if (!client) {
-      return;
+      return false;
     }
 
     await client.setEx(key, ttlSeconds, JSON.stringify(value));
+    return true;
   } catch (error) {
     logger.warn({ err: { message: error.message }, key, scope: 'cache:set' }, 'Cache set error');
+    return false;
   }
 };
 

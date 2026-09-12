@@ -131,13 +131,11 @@ async function saveContext(userId, sessionId, context) {
   safe.updatedAt = new Date().toISOString();
 
   // Try cacheService (Redis)
-  try {
-    await cache.set(key, safe, TTL_SECONDS);
-    return true;
-  } catch (err) {
-    // Redis failure — log safely and fall through to memory if allowed
-    logger.warn({ err, key }, 'Context cache set failed');
-  }
+  const saved = await cache.set(key, safe, TTL_SECONDS);
+  if (saved) return true;
+
+  // Redis failure — fall through to memory if allowed
+  logger.warn({ key }, 'Context cache set failed');
 
   // In-memory fallback (only in test/dev when explicitly enabled)
   if (memorySet(key, safe)) {

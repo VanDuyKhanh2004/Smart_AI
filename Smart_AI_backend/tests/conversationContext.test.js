@@ -4,7 +4,7 @@
  */
 jest.mock('../services/cacheService', () => ({
   get: jest.fn().mockResolvedValue(null),
-  set: jest.fn().mockRejectedValue(new Error('Redis unavailable')),
+  set: jest.fn().mockResolvedValue(false),
   del: jest.fn().mockResolvedValue(undefined),
   exists: jest.fn().mockResolvedValue(false),
   invalidatePattern: jest.fn().mockResolvedValue(0),
@@ -595,7 +595,7 @@ describe('Production mode (no memory fallback)', () => {
   });
 
   it('memory fallback is disabled by default outside test mode', async () => {
-    // cache.set rejects, cache.get returns null (via mock at top of file)
+    // cache.set returns false, cache.get returns null (via mock at top of file)
     // In production no memory fallback -> saveContext returns false
     const saveResult = await prodCtx.saveContext('user-1', 'prod-session', { filters: {} });
     expect(saveResult).toBe(false);
@@ -613,7 +613,7 @@ describe('Production mode (no memory fallback)', () => {
 
   it('no memory write after Redis failure in production', async () => {
     // Try to save via the production-mode service (which has no memory)
-    // The cache mock rejects, so saveContext returns false
+    // The cache mock returns false, so saveContext returns false
     const saveResult = await prodCtx.saveContext('user-1', 'prod-no-mem', { filters: { brands: ['samsung'] } });
     expect(saveResult).toBe(false);
 

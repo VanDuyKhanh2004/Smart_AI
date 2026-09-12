@@ -218,7 +218,7 @@ describe('getProductMeta', () => {
   it('still returns 200 when cache.set fails internally', async () => {
     Product.distinct.mockResolvedValue(['apple']);
     cache.get.mockResolvedValue(null);
-    cache.set.mockRejectedValue(new Error('redis down'));
+    cache.set.mockResolvedValue(false);
 
     await getProductMeta(mockReq({}, {}, {}), mockRes());
 
