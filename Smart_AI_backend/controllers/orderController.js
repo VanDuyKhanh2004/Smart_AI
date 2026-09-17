@@ -413,15 +413,19 @@ const createOrder = asyncHandler(async (req, res, next) => {
       }
 
       if (cart.items.length > 0) {
-        await Product.bulkWrite(
+        const stockResult = await Product.bulkWrite(
           cart.items.map(item => ({
             updateOne: {
-              filter: { _id: item.product._id },
+              filter: { _id: item.product._id, inStock: { $gte: item.quantity } },
               update: { $inc: { inStock: -item.quantity } }
             }
           })),
           { session }
         );
+        if (stockResult.matchedCount !== cart.items.length) {
+          await abortTransactionAndMarkFailed('INSUFFICIENT_STOCK', 'Sản phẩm không đủ số lượng');
+          throw new BadRequestError('Sản phẩm không đủ số lượng', 'INSUFFICIENT_STOCK');
+        }
       }
 
       // Clear cart

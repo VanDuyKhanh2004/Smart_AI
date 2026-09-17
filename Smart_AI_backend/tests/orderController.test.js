@@ -76,7 +76,7 @@ jest.mock('../models/Cart', () => {
 });
 
 const mockProductFindByIdAndUpdate = jest.fn().mockResolvedValue({});
-const mockProductBulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0 });
+const mockProductBulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0, matchedCount: 2 });
 
 jest.mock('../models/Product', () => {
   const MockProduct = jest.fn();
@@ -356,7 +356,7 @@ beforeEach(() => {
   mockOrderAddStatusHistory.mockReset();
   mockProductFindByIdAndUpdate.mockResolvedValue({});
   mockProductBulkWrite.mockReset();
-  mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0 });
+  mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0, matchedCount: 2 });
   mockUserFind.mockReset();
   mockUserFind.mockReturnValue({
     select: jest.fn().mockReturnThis(),
@@ -1063,6 +1063,7 @@ describe('createOrder', () => {
     it('decrements inStock for each item via bulkWrite inside the transaction', async () => {
       setupCartFindOne(defaultCartDoc());
       setupOrderFindByIdForCreate();
+      mockProductBulkWrite.mockResolvedValue({ modifiedCount: 2, matchedCount: 2 });
 
       const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
@@ -1071,13 +1072,13 @@ describe('createOrder', () => {
       expect(bulkOps).toHaveLength(2);
       expect(bulkOps[0]).toEqual({
         updateOne: {
-          filter: { _id: 'product-1' },
+          filter: { _id: 'product-1', inStock: { $gte: 2 } },
           update: { $inc: { inStock: -2 } }
         }
       });
       expect(bulkOps[1]).toEqual({
         updateOne: {
-          filter: { _id: 'product-2' },
+          filter: { _id: 'product-2', inStock: { $gte: 1 } },
           update: { $inc: { inStock: -1 } }
         }
       });
@@ -1111,6 +1112,7 @@ describe('createOrder', () => {
       };
       setupCartFindOne(singleItemCart);
       setupOrderFindByIdForCreate();
+      mockProductBulkWrite.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
 
       const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
 
@@ -1119,7 +1121,7 @@ describe('createOrder', () => {
       expect(bulkOps).toHaveLength(1);
       expect(bulkOps[0]).toEqual({
         updateOne: {
-          filter: { _id: 'product-1' },
+          filter: { _id: 'product-1', inStock: { $gte: 3 } },
           update: { $inc: { inStock: -3 } }
         }
       });
@@ -1135,6 +1137,80 @@ describe('createOrder', () => {
       expect(next).toHaveBeenCalledWith(
         expect.objectContaining({ statusCode: 400, code: 'CART_EMPTY' })
       );
+      expect(mockProductBulkWrite).not.toHaveBeenCalled();
+    });
+
+    it('atomic guard filter includes inStock $gte condition for every item', async () => {
+      const cart = defaultCartDoc();
+      setupCartFindOne(cart);
+      setupOrderFindByIdForCreate();
+      mockProductBulkWrite.mockResolvedValue({ modifiedCount: 2, matchedCount: 2 });
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      const bulkOps = mockProductBulkWrite.mock.calls[0][0];
+      for (const op of bulkOps) {
+        expect(op.updateOne.filter).toHaveProperty('inStock');
+        expect(op.updateOne.filter.inStock).toHaveProperty('$gte');
+      }
+      expect(bulkOps[0].updateOne.filter.inStock).toEqual({ $gte: 2 });
+      expect(bulkOps[1].updateOne.filter.inStock).toEqual({ $gte: 1 });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('succeeds when atomic bulkWrite matchedCount equals cart items length', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+      mockProductBulkWrite.mockResolvedValue({ modifiedCount: 2, matchedCount: 2 });
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      expect(mockProductBulkWrite).toHaveBeenCalledTimes(1);
+      expect(mockSession.commitTransaction).toHaveBeenCalled();
+      expect(mockStatus).toHaveBeenCalledWith(201);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('atomic insufficient stock: matchedCount 0 triggers INSUFFICIENT_STOCK', async () => {
+      setupCartFindOne(defaultCartDoc());
+      mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0, matchedCount: 0 });
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INSUFFICIENT_STOCK' })
+      );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
+    });
+
+    it('partial bulkWrite match: matchedCount less than cart items triggers INSUFFICIENT_STOCK', async () => {
+      setupCartFindOne(defaultCartDoc());
+      setupOrderFindByIdForCreate();
+      mockProductBulkWrite.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INSUFFICIENT_STOCK' })
+      );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(Promotion.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockEnqueueOrderConfirmationEmail).not.toHaveBeenCalled();
+    });
+
+    it('preserves existing insufficient stock read-time validation', async () => {
+      const cartDoc = defaultCartDoc();
+      cartDoc.items[0].product.inStock = 1;
+      cartDoc.items[0].quantity = 2;
+      setupCartFindOne(cartDoc);
+
+      const next = jest.fn(); await createOrder(makeReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 400, code: 'INSUFFICIENT_STOCK' })
+      );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
       expect(mockProductBulkWrite).not.toHaveBeenCalled();
     });
   });
@@ -2924,7 +3000,7 @@ describe('order number retry on duplicate key', () => {
     mockSession.endSession.mockResolvedValue();
     mockOrderSave.mockResolvedValue();
     mockProductBulkWrite.mockReset();
-    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0 });
+    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 0, matchedCount: 2 });
     mockIdempotencyFindOneAndUpdate.mockReset();
     mockIdempotencyFindOneAndUpdate.mockResolvedValue({ _id: 'idempotency-123', status: 'processing', attemptId: 'mock-attempt' });
     IdempotencyRecord.findOne.mockResolvedValue(null);
@@ -2996,6 +3072,7 @@ describe('order number retry on duplicate key', () => {
   it('first generated order number succeeds', async () => {
     setupCartFindOne(defaultCartDoc());
     setupOrderFindByIdForCreate();
+    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
 
     const next = jest.fn();
     await createOrder(makeReq(), mockRes(), next);
@@ -3008,6 +3085,7 @@ describe('order number retry on duplicate key', () => {
   it('orderNumber duplicate causes regeneration and retry on second attempt', async () => {
     setupCartFindOne(defaultCartDoc());
     setupOrderFindByIdForCreate();
+    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
 
     // First save fails with orderNumber collision, second succeeds
     mockOrderSave
@@ -3087,6 +3165,7 @@ describe('order number retry on duplicate key', () => {
   it('new session is created for each retry attempt', async () => {
     setupCartFindOne(defaultCartDoc());
     setupOrderFindByIdForCreate();
+    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
 
     mockOrderSave
       .mockRejectedValueOnce(orderNumberCollisionError)
@@ -3101,6 +3180,7 @@ describe('order number retry on duplicate key', () => {
   it('session is properly ended after retry', async () => {
     setupCartFindOne(defaultCartDoc());
     setupOrderFindByIdForCreate();
+    mockProductBulkWrite.mockResolvedValue({ modifiedCount: 1, matchedCount: 1 });
 
     mockOrderSave
       .mockRejectedValueOnce(orderNumberCollisionError)
