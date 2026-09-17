@@ -34,6 +34,9 @@ const createRateLimiter = ({ windowMs, limit, store, code, message }) =>
     store,
   });
 
+// Per-user order creation store — declared before `stores` so it can be referenced.
+const orderCreationStore = new MemoryStore();
+
 const stores = {
   authSession: new MemoryStore(),
   registration: new MemoryStore(),
@@ -41,6 +44,7 @@ const stores = {
   resendVerification: new MemoryStore(),
   tokenAction: new MemoryStore(),
   semanticSearch: new MemoryStore(),
+  orderCreation: orderCreationStore,
 };
 
 const authSessionLimiter = createRateLimiter({
@@ -84,6 +88,25 @@ const semanticSearchLimiter = createRateLimiter({
   store: stores.semanticSearch,
 });
 
+// Per-user order creation limiter — keyed on authenticated user ID, not IP.
+// Requires the `protect` middleware to have run first so req.user is available.
+const orderCreationLimiter = rateLimit({
+  windowMs: WINDOW_MS,
+  limit: readLimit('RATE_LIMIT_ORDER_CREATION_MAX', 5),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const userId = req.user && req.user._id;
+    if (!userId) return '_anonymous_fallback';
+    return `user:${userId}`;
+  },
+  handler: makeRateLimitHandler({
+    code: 'ORDER_CREATION_RATE_LIMITED',
+    message: 'Ban da tao qua nhieu don hang. Vui long thu lai sau.',
+  }),
+  store: orderCreationStore,
+});
+
 const resetRateLimiters = () => {
   Object.values(stores).forEach((store) => {
     if (typeof store.resetAll === 'function') {
@@ -100,6 +123,7 @@ module.exports = {
   resendVerificationLimiter,
   tokenActionLimiter,
   semanticSearchLimiter,
+  orderCreationLimiter,
   resetRateLimiters,
   handleRateLimitExceeded,
 };
