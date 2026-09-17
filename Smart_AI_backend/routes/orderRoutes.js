@@ -11,6 +11,7 @@ const {
 } = require('../controllers/orderController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { orderCreationLimiter } = require('../middlewares/rateLimiters');
 
 // All order routes require authentication
 router.use(protect);
@@ -23,8 +24,8 @@ router.get('/admin/all', adminMiddleware, getAllOrders);
 router.get('/admin/stats', adminMiddleware, getOrderStats);
 
 // User routes
-// POST /api/orders - Create new order
-router.post('/', createOrder);
+// POST /api/orders - Create new order (rate limited per user)
+router.post('/', orderCreationLimiter, createOrder);
 
 // GET /api/orders - Get user's orders
 router.get('/', getUserOrders);
