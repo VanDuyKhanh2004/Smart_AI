@@ -32,6 +32,10 @@ const addItem = asyncHandler(async (req, res) => {
     );
   }
 
+  if (!Number.isInteger(quantity)) {
+    throw new BadRequestError('Số lượng phải là số nguyên', 'INVALID_QUANTITY');
+  }
+
   if (quantity < 1) {
     throw new BadRequestError('Số lượng phải lớn hơn 0', 'INVALID_QUANTITY');
   }

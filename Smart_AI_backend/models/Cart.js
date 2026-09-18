@@ -10,6 +10,10 @@ const cartItemSchema = new mongoose.Schema({
     type: Number,
     required: [true, 'Số lượng là bắt buộc'],
     min: [1, 'Số lượng phải ít nhất là 1'],
+    validate: {
+      validator: Number.isInteger,
+      message: 'Số lượng phải là số nguyên'
+    },
     default: 1
   },
   color: {
