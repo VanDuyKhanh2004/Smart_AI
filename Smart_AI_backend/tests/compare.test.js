@@ -55,6 +55,21 @@ const mockPopulatedEntry = {
   updatedAt: new Date('2026-01-01'),
 };
 
+const mockSession = {
+  startTransaction: jest.fn(),
+  commitTransaction: jest.fn().mockResolvedValue(true),
+  abortTransaction: jest.fn().mockResolvedValue(true),
+  endSession: jest.fn().mockResolvedValue(true),
+  withTransaction: jest.fn(async (fn) => fn(mockSession)),
+};
+
+jest.mock('mongoose', () => ({
+  startSession: jest.fn().mockResolvedValue(mockSession),
+  Schema: jest.requireActual('mongoose').Schema,
+  model: jest.requireActual('mongoose').model,
+  Types: jest.requireActual('mongoose').Types,
+}));
+
 jest.mock('../models/CompareHistory', () => {
   const MockCompareHistory = jest.fn().mockImplementation(function (data) {
     Object.assign(this, data);
@@ -67,6 +82,7 @@ jest.mock('../models/CompareHistory', () => {
   MockCompareHistory.findOne = jest.fn();
   MockCompareHistory.findByIdAndDelete = jest.fn();
   MockCompareHistory.countDocuments = jest.fn();
+  MockCompareHistory.create = jest.fn();
   return MockCompareHistory;
 });
 
@@ -74,6 +90,7 @@ jest.mock('../models/Product', () => ({
   find: jest.fn(),
 }));
 
+const mongoose = require('mongoose');
 const CompareHistory = require('../models/CompareHistory');
 const Product = require('../models/Product');
 const compareRoutes = require('../routes/compareRoutes');
@@ -98,6 +115,12 @@ const chainableFind = (result) => ({
 
 const chainableById = (result) => ({
   populate: jest.fn(function () { return this; }),
+  then: jest.fn(function (resolve) { resolve(result); }),
+});
+
+const withSession = (result) => ({
+  sort: jest.fn(function () { return this; }),
+  session: jest.fn().mockResolvedValue(result),
   then: jest.fn(function (resolve) { resolve(result); }),
 });
 
@@ -177,8 +200,10 @@ describe('Compare Controller — centralized error handling', () => {
    * ================================== */
   describe('POST /api/compare/history', () => {
     it('should save a comparison and return 201', async () => {
-      CompareHistory.findOne.mockResolvedValue(null);
-      CompareHistory.countDocuments.mockResolvedValue(0);
+      CompareHistory.findOne.mockReturnValue(withSession(null));
+      CompareHistory.countDocuments.mockReturnValue(withSession(0));
+      CompareHistory.findByIdAndDelete.mockReturnValue(withSession(true));
+      CompareHistory.create.mockResolvedValue([mockCompareEntry]);
       CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
       Product.find.mockReturnValue(chainableFind([
         { _id: VALID_PRODUCT_1 },
@@ -263,7 +288,7 @@ describe('Compare Controller — centralized error handling', () => {
         updatedAt: new Date('2026-01-01'),
         save: jest.fn().mockResolvedValue(true),
       };
-      CompareHistory.findOne.mockResolvedValue(existing);
+      CompareHistory.findOne.mockReturnValue(withSession(existing));
       CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
       Product.find.mockReturnValue(chainableFind([
         { _id: VALID_PRODUCT_1 },
@@ -278,6 +303,191 @@ describe('Compare Controller — centralized error handling', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.message).toBe('Đã cập nhật lịch sử so sánh');
+    });
+
+    it('uses withTransaction for compare-history writes (race-safe)', async () => {
+      CompareHistory.findOne.mockReturnValue(withSession(null));
+      CompareHistory.countDocuments.mockReturnValue(withSession(2));
+      CompareHistory.findByIdAndDelete.mockReturnValue(withSession(true));
+      CompareHistory.create.mockResolvedValue([mockCompareEntry]);
+      CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(mongoose.startSession).toHaveBeenCalled();
+      expect(mockSession.withTransaction).toHaveBeenCalled();
+      expect(CompareHistory.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ user: USER_ID, productsKey: expect.any(String) })
+      );
+      expect(CompareHistory.countDocuments).toHaveBeenCalledWith(
+        expect.objectContaining({ user: USER_ID })
+      );
+      expect(CompareHistory.create).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ user: USER_ID })]),
+        expect.objectContaining({ session: expect.any(Object) })
+      );
+      expect(mockSession.endSession).toHaveBeenCalled();
+    });
+
+    it('creates a new comparison when no duplicate exists (count < 20)', async () => {
+      CompareHistory.findOne.mockReturnValue(withSession(null));
+      CompareHistory.countDocuments.mockReturnValue(withSession(5));
+      CompareHistory.findByIdAndDelete.mockReturnValue(withSession(true));
+      CompareHistory.create.mockResolvedValue([mockCompareEntry]);
+      CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      const res = await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(CompareHistory.create).toHaveBeenCalled();
+    });
+
+    it('evicts the oldest entry when history count reaches 20', async () => {
+      const oldestEntry = { _id: '507f191e810c19729de860ff' };
+      CompareHistory.findOne
+        .mockReturnValueOnce(withSession(null))
+        .mockReturnValueOnce(withSession(oldestEntry));
+      CompareHistory.countDocuments.mockReturnValue(withSession(20));
+      CompareHistory.findByIdAndDelete.mockReturnValue(withSession(true));
+      CompareHistory.create.mockResolvedValue([mockCompareEntry]);
+      CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(CompareHistory.findByIdAndDelete).toHaveBeenCalledWith(oldestEntry._id);
+      expect(CompareHistory.create).toHaveBeenCalled();
+    });
+
+    it('does not evict when history count is below 20', async () => {
+      CompareHistory.findOne.mockReturnValue(withSession(null));
+      CompareHistory.countDocuments.mockReturnValue(withSession(10));
+      CompareHistory.findByIdAndDelete.mockReturnValue(withSession(true));
+      CompareHistory.create.mockResolvedValue([mockCompareEntry]);
+      CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(CompareHistory.findByIdAndDelete).not.toHaveBeenCalled();
+      expect(CompareHistory.create).toHaveBeenCalled();
+    });
+
+    it('aborts transaction and rethrows when create fails', async () => {
+      CompareHistory.findOne.mockReturnValue(withSession(null));
+      CompareHistory.countDocuments.mockReturnValue(withSession(5));
+
+      CompareHistory.create.mockRejectedValue(new Error('DB write failed'));
+
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      const res = await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(res.status).toBe(500);
+      expect(mockSession.withTransaction).toHaveBeenCalled();
+      expect(mockSession.endSession).toHaveBeenCalled();
+    });
+
+    it('uses productsKey for duplicate lookup (index-backed)', async () => {
+      const existing = {
+        _id: '507f191e810c19729de860f1',
+        user: USER_ID,
+        products: [VALID_PRODUCT_1, VALID_PRODUCT_2],
+        updatedAt: new Date('2026-01-01'),
+        save: jest.fn().mockResolvedValue(true),
+      };
+      CompareHistory.findOne.mockReturnValue(withSession(existing));
+      CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(CompareHistory.findOne).toHaveBeenCalledWith({
+        user: USER_ID,
+        productsKey: [VALID_PRODUCT_1, VALID_PRODUCT_2].sort().join('|'),
+      });
+    });
+
+    it('retries on transient error and finds duplicate on re-read', async () => {
+      const existing = {
+        _id: '507f191e810c19729de860f1',
+        user: USER_ID,
+        products: [VALID_PRODUCT_1, VALID_PRODUCT_2],
+        updatedAt: new Date('2026-01-01'),
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      let callCount = 0;
+      mockSession.withTransaction.mockImplementationOnce(async (fn) => {
+        const result = await fn(mockSession);
+        return result;
+      });
+
+      CompareHistory.findOne.mockReturnValue(withSession(existing));
+      CompareHistory.findById.mockReturnValue(chainableById(mockPopulatedEntry));
+      Product.find.mockReturnValue(chainableFind([
+        { _id: VALID_PRODUCT_1 },
+        { _id: VALID_PRODUCT_2 },
+      ]));
+
+      const res = await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: [VALID_PRODUCT_1, VALID_PRODUCT_2] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(existing.save).toHaveBeenCalled();
+    });
+
+    it('returns 400 when products is not an array (before transaction)', async () => {
+      const res = await request(app)
+        .post('/api/compare/history')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({ products: 'not-an-array' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('INVALID_PRODUCTS');
+      expect(mockSession.withTransaction).not.toHaveBeenCalled();
     });
   });
 
