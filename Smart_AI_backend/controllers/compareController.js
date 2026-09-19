@@ -39,58 +39,61 @@ const saveComparison = asyncHandler(async (req, res) => {
     throw new BadRequestError('Một hoặc nhiều sản phẩm không tồn tại', 'INVALID_PRODUCTS');
   }
 
-  const sortedProductIds = [...products].sort();
+  const productsKey = [...products].sort().join('|');
 
-  const existingComparison = await CompareHistory.findOne({
-    user: userId,
-    $expr: {
-      $setEquals: ['$products', sortedProductIds.map(id => new mongoose.Types.ObjectId(id))]
-    }
-  });
+  const session = await mongoose.startSession();
 
-  if (existingComparison) {
-    existingComparison.updatedAt = new Date();
-    await existingComparison.save();
+  let result;
+  try {
+    result = await session.withTransaction(async (session) => {
+      const existingComparison = await CompareHistory.findOne({
+        user: userId,
+        productsKey
+      }).session(session);
 
-    const populated = await CompareHistory.findById(existingComparison._id)
-      .populate({
-        path: 'products',
-        select: 'name image price'
-      });
+      if (existingComparison) {
+        existingComparison.updatedAt = new Date();
+        await existingComparison.save({ session });
 
-    return res.status(200).json({
-      success: true,
-      message: 'Đã cập nhật lịch sử so sánh',
-      data: populated
+        const populated = await CompareHistory.findById(existingComparison._id)
+          .populate({
+            path: 'products',
+            select: 'name image price'
+          });
+
+        return { status: 200, message: 'Đã cập nhật lịch sử so sánh', data: populated };
+      }
+
+      const historyCount = await CompareHistory.countDocuments({ user: userId }).session(session);
+      if (historyCount >= 20) {
+        const oldest = await CompareHistory.findOne({ user: userId })
+          .sort({ createdAt: 1 }).session(session);
+        if (oldest) {
+          await CompareHistory.findByIdAndDelete(oldest._id).session(session);
+        }
+      }
+
+      const [newComparison] = await CompareHistory.create([{
+        user: userId,
+        products: products
+      }], { session });
+
+      const populated = await CompareHistory.findById(newComparison._id)
+        .populate({
+          path: 'products',
+          select: 'name image price'
+        });
+
+      return { status: 201, message: 'Đã lưu lịch sử so sánh', data: populated };
     });
+  } finally {
+    session.endSession();
   }
 
-  const historyCount = await CompareHistory.countDocuments({ user: userId });
-  if (historyCount >= 20) {
-    const oldest = await CompareHistory.findOne({ user: userId })
-      .sort({ createdAt: 1 });
-    if (oldest) {
-      await CompareHistory.findByIdAndDelete(oldest._id);
-    }
-  }
-
-  const newComparison = new CompareHistory({
-    user: userId,
-    products: products
-  });
-
-  await newComparison.save();
-
-  const populated = await CompareHistory.findById(newComparison._id)
-    .populate({
-      path: 'products',
-      select: 'name image price'
-    });
-
-  res.status(201).json({
+  res.status(result.status).json({
     success: true,
-    message: 'Đã lưu lịch sử so sánh',
-    data: populated
+    message: result.message,
+    data: result.data
   });
 });
 
