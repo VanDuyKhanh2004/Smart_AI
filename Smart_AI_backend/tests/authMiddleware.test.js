@@ -284,4 +284,79 @@ describe('optionalAuth', () => {
     expect(next).toHaveBeenCalledTimes(1);
     expect(req.user).toBeUndefined();
   });
+
+  it('attaches req.user when tokenVersion matches (current token)', async () => {
+    const fakeUser = { _id: 'u1', email: 'a@b.com', role: 'user', tokenVersion: 2 };
+    verifyAccessToken.mockReturnValue({ id: 'u1', email: 'a@b.com', tokenVersion: 2 });
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ authorization: 'Bearer current-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.user).toBe(fakeUser);
+  });
+
+  it('skips authentication when tokenVersion is stale', async () => {
+    const fakeUser = { _id: 'u1', email: 'a@b.com', role: 'user', tokenVersion: 3 };
+    verifyAccessToken.mockReturnValue({ id: 'u1', email: 'a@b.com', tokenVersion: 1 });
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ authorization: 'Bearer stale-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.user).toBeUndefined();
+  });
+
+  it('skips authentication when token has no tokenVersion but user has tokenVersion > 0', async () => {
+    const fakeUser = { _id: 'u1', email: 'a@b.com', role: 'user', tokenVersion: 1 };
+    verifyAccessToken.mockReturnValue({ id: 'u1', email: 'a@b.com' });
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ authorization: 'Bearer legacy-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.user).toBeUndefined();
+  });
+
+  it('attaches req.user when both token and user have tokenVersion 0 (default)', async () => {
+    const fakeUser = { _id: 'u1', email: 'a@b.com', role: 'user', tokenVersion: 0 };
+    verifyAccessToken.mockReturnValue({ id: 'u1', email: 'a@b.com', tokenVersion: 0 });
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ authorization: 'Bearer default-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.user).toBe(fakeUser);
+  });
+
+  it('attaches req.user when legacy token (no tokenVersion) and user has tokenVersion 0', async () => {
+    const fakeUser = { _id: 'u1', email: 'a@b.com', role: 'user', tokenVersion: 0 };
+    verifyAccessToken.mockReturnValue({ id: 'u1', email: 'a@b.com' });
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ authorization: 'Bearer legacy-token' });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.user).toBe(fakeUser);
+  });
 });

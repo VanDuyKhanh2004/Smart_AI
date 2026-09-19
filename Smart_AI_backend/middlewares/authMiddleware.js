@@ -129,7 +129,13 @@ const optionalAuth = async (req, res, next) => {
       const decoded = verifyAccessToken(token);
       const user = await User.findById(decoded.id);
       if (user) {
-        req.user = user;
+        // Enforce token version — skip authentication if token is stale
+        const decodedTokenVersion = decoded.tokenVersion ?? 0;
+        if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
+          // Stale token — continue without authenticating
+        } else {
+          req.user = user;
+        }
       }
     } catch (err) {
       // Token invalid, continue without user
