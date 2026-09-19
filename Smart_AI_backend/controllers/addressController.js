@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Address = require('../models/Address');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
@@ -17,30 +18,44 @@ const getAddresses = async (req, res) => {
 const createAddress = async (req, res) => {
   const { label, fullName, phone, address, ward, district, city } = req.body;
 
-  const addressCount = await Address.countDocuments({ user: req.user._id });
-  if (addressCount >= MAX_ADDRESSES) {
-    throw new BadRequestError('Bạn chỉ có thể lưu tối đa 5 địa chỉ', 'MAX_ADDRESSES', undefined, 'legacy-top-level-message');
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const addressCount = await Address.countDocuments({ user: req.user._id }).session(session);
+    if (addressCount >= MAX_ADDRESSES) {
+      await session.abortTransaction();
+      session.endSession();
+      throw new BadRequestError('Bạn chỉ có thể lưu tối đa 5 địa chỉ', 'MAX_ADDRESSES', undefined, 'legacy-top-level-message');
+    }
+
+    const isDefault = addressCount === 0;
+
+    const [newAddress] = await Address.create([{
+      user: req.user._id,
+      label,
+      fullName,
+      phone,
+      address,
+      ward,
+      district,
+      city,
+      isDefault
+    }], { session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json({
+      success: true,
+      message: 'Đã thêm địa chỉ mới',
+      data: newAddress
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
   }
-
-  const isDefault = addressCount === 0;
-
-  const newAddress = await Address.create({
-    user: req.user._id,
-    label,
-    fullName,
-    phone,
-    address,
-    ward,
-    district,
-    city,
-    isDefault
-  });
-
-  res.status(201).json({
-    success: true,
-    message: 'Đã thêm địa chỉ mới',
-    data: newAddress
-  });
 };
 
 const updateAddress = async (req, res) => {
