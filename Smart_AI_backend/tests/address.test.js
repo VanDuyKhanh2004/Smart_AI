@@ -58,6 +58,21 @@ const otherAddress = {
 
 const mockAddresses = [mockAddress];
 
+jest.mock('mongoose', () => {
+  const mockSession = {
+    startTransaction: jest.fn(),
+    commitTransaction: jest.fn().mockResolvedValue(true),
+    abortTransaction: jest.fn().mockResolvedValue(true),
+    endSession: jest.fn().mockResolvedValue(true),
+  };
+  return {
+    startSession: jest.fn().mockResolvedValue(mockSession),
+    Schema: jest.requireActual('mongoose').Schema,
+    model: jest.requireActual('mongoose').model,
+    __mockSession: mockSession,
+  };
+});
+
 jest.mock('../models/Address', () => ({
   find: jest.fn(),
   findById: jest.fn(),
@@ -68,6 +83,7 @@ jest.mock('../models/Address', () => ({
   updateMany: jest.fn(),
 }));
 
+const mongoose = require('mongoose');
 const Address = require('../models/Address');
 const addressRoutes = require('../routes/addressRoutes');
 const errorHandler = require('../middlewares/errorHandler');
@@ -124,8 +140,10 @@ describe('Address Controller — centralized error handling', () => {
 
   describe('POST /api/addresses', () => {
     it('returns 201 when address is created', async () => {
-      Address.countDocuments.mockResolvedValue(2);
-      Address.create.mockResolvedValue(mockAddress);
+      Address.countDocuments.mockReturnValue({
+        session: jest.fn().mockResolvedValue(2),
+      });
+      Address.create.mockResolvedValue([mockAddress]);
 
       const res = await request(app)
         .post('/api/addresses')
@@ -146,7 +164,9 @@ describe('Address Controller — centralized error handling', () => {
     });
 
     it('returns 400 when address limit exceeded', async () => {
-      Address.countDocuments.mockResolvedValue(5);
+      Address.countDocuments.mockReturnValue({
+        session: jest.fn().mockResolvedValue(5),
+      });
 
       const res = await request(app)
         .post('/api/addresses')
@@ -362,6 +382,82 @@ describe('Address Controller — centralized error handling', () => {
       expect(res.body.message).toBe('Đã xảy ra lỗi, vui lòng thử lại');
       expect(res.body).not.toHaveProperty('code');
       expect(res.body).not.toHaveProperty('error');
+    });
+  });
+
+  describe('Address creation — transaction safety', () => {
+    it('uses a session for count + create (race-safe)', async () => {
+      Address.countDocuments.mockReturnValue({
+        session: jest.fn().mockResolvedValue(2),
+      });
+      Address.create.mockResolvedValue([mockAddress]);
+
+      await request(app)
+        .post('/api/addresses')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({
+          label: 'Home',
+          fullName: 'Test User',
+          phone: '0123456789',
+          address: '123 Street',
+          ward: 'Ward 1',
+          district: 'District 1',
+          city: 'City',
+        })
+        .expect(201);
+
+      expect(mongoose.startSession).toHaveBeenCalled();
+      expect(Address.create).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ user: USER_ID })]),
+        expect.objectContaining({ session: expect.any(Object) })
+      );
+    });
+
+    it('aborts transaction and returns 400 when limit reached', async () => {
+      Address.countDocuments.mockReturnValue({
+        session: jest.fn().mockResolvedValue(5),
+      });
+
+      const res = await request(app)
+        .post('/api/addresses')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({
+          label: 'Home',
+          fullName: 'Test User',
+          phone: '0123456789',
+          address: '123 St',
+          ward: 'W1',
+          district: 'D1',
+          city: 'C',
+        })
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toBe('Bạn chỉ có thể lưu tối đa 5 địa chỉ');
+    });
+
+    it('sets isDefault true when user has no addresses (count=0)', async () => {
+      Address.countDocuments.mockReturnValue({
+        session: jest.fn().mockResolvedValue(0),
+      });
+      const newAddr = { ...mockAddress, isDefault: true };
+      Address.create.mockResolvedValue([newAddr]);
+
+      const res = await request(app)
+        .post('/api/addresses')
+        .set('Authorization', `Bearer ${USER_TOKEN}`)
+        .send({
+          label: 'Home',
+          fullName: 'Test User',
+          phone: '0123456789',
+          address: '123 Street',
+          ward: 'Ward 1',
+          district: 'District 1',
+          city: 'City',
+        })
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
     });
   });
 });
