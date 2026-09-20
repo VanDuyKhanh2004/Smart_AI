@@ -12,6 +12,7 @@ const {
 } = require('../controllers/appointmentController');
 const { protect, optionalAuth } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { adminLimiter } = require('../middlewares/rateLimiters');
 const errorResponseFormat = require('../middlewares/errorResponseFormat');
 
 // Set legacy error response format for all appointment routes
@@ -37,12 +38,12 @@ router.patch('/:id/cancel', protect, cancelAppointment);
 
 // Admin protected routes
 // GET all appointments with filters
-router.get('/admin/all', protect, adminMiddleware, getAllAppointments);
+router.get('/admin/all', protect, adminMiddleware, adminLimiter, getAllAppointments);
 
 // GET appointments by store
-router.get('/admin/store/:storeId', protect, adminMiddleware, getAppointmentsByStore);
+router.get('/admin/store/:storeId', protect, adminMiddleware, adminLimiter, getAppointmentsByStore);
 
 // Update appointment status (confirm, complete, cancel)
-router.patch('/admin/:id/status', protect, adminMiddleware, updateAppointmentStatus);
+router.patch('/admin/:id/status', protect, adminMiddleware, adminLimiter, updateAppointmentStatus);
 
 module.exports = router;

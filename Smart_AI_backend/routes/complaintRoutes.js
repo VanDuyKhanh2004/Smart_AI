@@ -3,9 +3,10 @@ const router = express.Router();
 const complaintController = require('../controllers/complaintController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { adminLimiter } = require('../middlewares/rateLimiters');
 
 // All complaint routes require authentication and admin role
-router.use(protect, adminMiddleware);
+router.use(protect, adminMiddleware, adminLimiter);
 
 /**
  * @route GET /api/complaints

@@ -14,6 +14,7 @@ const {
 } = require('../controllers/answerController');
 const { protect, optionalAuth } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { adminLimiter } = require('../middlewares/rateLimiters');
 
 // ============================================
 // Question Routes
@@ -35,10 +36,10 @@ router.delete('/:id', protect, deleteQuestion);
 
 // Admin routes
 // GET /api/questions/admin - Get all questions (admin)
-router.get('/admin', protect, adminMiddleware, getAllQuestions);
+router.get('/admin', protect, adminMiddleware, adminLimiter, getAllQuestions);
 
 // PUT /api/questions/admin/:id/status - Update status (admin)
-router.put('/admin/:id/status', protect, adminMiddleware, updateQuestionStatus);
+router.put('/admin/:id/status', protect, adminMiddleware, adminLimiter, updateQuestionStatus);
 
 // ============================================
 // Answer Routes
@@ -46,9 +47,9 @@ router.put('/admin/:id/status', protect, adminMiddleware, updateQuestionStatus);
 
 // Admin routes
 // POST /api/answers - Create answer (admin)
-router.post('/answers', protect, adminMiddleware, createAnswer);
+router.post('/answers', protect, adminMiddleware, adminLimiter, createAnswer);
 
 // DELETE /api/answers/:id - Delete answer (admin)
-router.delete('/answers/:id', protect, adminMiddleware, deleteAnswer);
+router.delete('/answers/:id', protect, adminMiddleware, adminLimiter, deleteAnswer);
 
 module.exports = router;
