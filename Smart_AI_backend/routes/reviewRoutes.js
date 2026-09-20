@@ -11,6 +11,7 @@ const {
 } = require('../controllers/reviewController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { adminLimiter } = require('../middlewares/rateLimiters');
 
 // Public routes
 // GET /api/reviews/product/:id - Get product reviews (public)
@@ -31,9 +32,9 @@ router.delete('/:id', protect, deleteReview);
 
 // Admin routes
 // GET /api/reviews/admin - Get all reviews (admin)
-router.get('/admin', protect, adminMiddleware, getAllReviews);
+router.get('/admin', protect, adminMiddleware, adminLimiter, getAllReviews);
 
 // PUT /api/reviews/admin/:id/status - Update status (admin)
-router.put('/admin/:id/status', protect, adminMiddleware, updateReviewStatus);
+router.put('/admin/:id/status', protect, adminMiddleware, adminLimiter, updateReviewStatus);
 
 module.exports = router;

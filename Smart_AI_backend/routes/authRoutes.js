@@ -25,6 +25,7 @@ const {
   emailActionLimiter,
   resendVerificationLimiter,
   tokenActionLimiter,
+  adminLimiter,
 } = require('../middlewares/rateLimiters');
 
 // Public routes
@@ -46,6 +47,6 @@ router.post('/unlock-account', tokenActionLimiter, unlockAccount);
 // Protected routes
 router.post('/logout', protect, logout);
 router.get('/me', protect, getMe);
-router.post('/admin-unlock', protect, adminUnlockAccount);
+router.post('/admin-unlock', protect, adminLimiter, adminUnlockAccount);
 
 module.exports = router;

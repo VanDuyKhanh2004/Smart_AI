@@ -9,10 +9,12 @@ const {
 } = require('../controllers/dashboardController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
+const { adminLimiter } = require('../middlewares/rateLimiters');
 
 // All dashboard routes require authentication and admin role
 router.use(protect);
 router.use(adminMiddleware);
+router.use(adminLimiter);
 
 // GET /api/dashboard/revenue - Get revenue statistics (Requirements: 3.1, 3.2, 3.3, 3.4, 3.5)
 router.get('/revenue', getRevenueStats);

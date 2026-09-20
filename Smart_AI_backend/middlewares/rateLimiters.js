@@ -37,6 +37,9 @@ const createRateLimiter = ({ windowMs, limit, store, code, message }) =>
 // Per-user order creation store — declared before `stores` so it can be referenced.
 const orderCreationStore = new MemoryStore();
 
+// Per-admin-user store for admin endpoint rate limiting.
+const adminStore = new MemoryStore();
+
 const stores = {
   authSession: new MemoryStore(),
   registration: new MemoryStore(),
@@ -45,6 +48,7 @@ const stores = {
   tokenAction: new MemoryStore(),
   semanticSearch: new MemoryStore(),
   orderCreation: orderCreationStore,
+  admin: adminStore,
 };
 
 const authSessionLimiter = createRateLimiter({
@@ -107,6 +111,27 @@ const orderCreationLimiter = rateLimit({
   store: orderCreationStore,
 });
 
+// Per-admin-user rate limiter — keyed on authenticated user ID, not IP.
+// Requires the `protect` middleware to have run first so req.user is available.
+// Covers all admin-only endpoints: CRUD operations, dashboard aggregations,
+// and security-sensitive actions like admin-unlock.
+const adminLimiter = rateLimit({
+  windowMs: WINDOW_MS,
+  limit: readLimit('RATE_LIMIT_ADMIN_MAX', 120),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const userId = req.user && req.user._id;
+    if (!userId) return '_anonymous_fallback';
+    return `user:${userId}`;
+  },
+  handler: makeRateLimitHandler({
+    code: 'ADMIN_RATE_LIMITED',
+    message: 'Ban da gui qua nhieu yeu cau admin. Vui long thu lai sau.',
+  }),
+  store: adminStore,
+});
+
 const resetRateLimiters = () => {
   Object.values(stores).forEach((store) => {
     if (typeof store.resetAll === 'function') {
@@ -124,6 +149,7 @@ module.exports = {
   tokenActionLimiter,
   semanticSearchLimiter,
   orderCreationLimiter,
+  adminLimiter,
   resetRateLimiters,
   handleRateLimitExceeded,
 };

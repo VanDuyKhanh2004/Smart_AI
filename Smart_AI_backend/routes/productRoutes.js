@@ -12,7 +12,7 @@ const {
 } = require('../controllers/productController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
-const { semanticSearchLimiter } = require('../middlewares/rateLimiters');
+const { semanticSearchLimiter, adminLimiter } = require('../middlewares/rateLimiters');
 const { uploadProductImage } = require('../middlewares/uploadMiddleware');
 
 // Public routes
@@ -23,8 +23,8 @@ router.get('/:id/recommendations', getRecommendations);
 router.get('/:id', getProductById);
 
 // Admin protected routes
-router.post('/', protect, adminMiddleware, uploadProductImage, createProduct);
-router.put('/:id', protect, adminMiddleware, uploadProductImage, updateProduct);
-router.delete('/:id', protect, adminMiddleware, deleteProduct);
+router.post('/', protect, adminMiddleware, adminLimiter, uploadProductImage, createProduct);
+router.put('/:id', protect, adminMiddleware, adminLimiter, uploadProductImage, updateProduct);
+router.delete('/:id', protect, adminMiddleware, adminLimiter, deleteProduct);
 
 module.exports = router;

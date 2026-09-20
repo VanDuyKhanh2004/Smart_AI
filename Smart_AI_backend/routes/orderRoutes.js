@@ -11,17 +11,17 @@ const {
 } = require('../controllers/orderController');
 const { protect } = require('../middlewares/authMiddleware');
 const { adminMiddleware } = require('../middlewares/adminMiddleware');
-const { orderCreationLimiter } = require('../middlewares/rateLimiters');
+const { orderCreationLimiter, adminLimiter } = require('../middlewares/rateLimiters');
 
 // All order routes require authentication
 router.use(protect);
 
 // Admin routes (must be defined before :id routes to avoid conflicts)
 // GET /api/orders/admin/all - Get all orders (admin)
-router.get('/admin/all', adminMiddleware, getAllOrders);
+router.get('/admin/all', adminMiddleware, adminLimiter, getAllOrders);
 
 // GET /api/orders/admin/stats - Get order statistics (admin)
-router.get('/admin/stats', adminMiddleware, getOrderStats);
+router.get('/admin/stats', adminMiddleware, adminLimiter, getOrderStats);
 
 // User routes
 // POST /api/orders - Create new order (rate limited per user)
@@ -38,6 +38,6 @@ router.post('/:id/cancel', cancelOrder);
 
 // Admin route for status update
 // PATCH /api/orders/:id/status - Update order status (admin)
-router.patch('/:id/status', adminMiddleware, updateOrderStatus);
+router.patch('/:id/status', adminMiddleware, adminLimiter, updateOrderStatus);
 
 module.exports = router;
