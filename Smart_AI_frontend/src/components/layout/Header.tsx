@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, Home } from 'lucide-react';
+import { Menu, Home, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
 import MainNavigation from './MainNavigation';
@@ -63,7 +63,8 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
               <Menu className="h-5 w-5" />
             </Button>
 
-            <Link to="/" className="flex items-center gap-2">
+            <Link to="/" className="flex items-center gap-2" aria-label="Smart AI - Trang chủ">
+              <Sparkles className="h-6 w-6 text-primary" aria-hidden="true" />
               <span className="font-bold text-xl">Smart AI</span>
             </Link>
           </div>

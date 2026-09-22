@@ -65,6 +65,13 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-background">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+      >
+        Bỏ qua đến nội dung chính
+      </a>
+
       {/* Header */}
       <Header />
 
@@ -95,6 +102,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
         {/* Main Content Area - Requirements: 1.3 */}
         <main
+          id="main-content"
+          tabIndex={-1}
           className={cn(
             // min-w-0 lets the main content shrink below its intrinsic width so
             // wide tables scroll inside their own overflow wrapper instead of
