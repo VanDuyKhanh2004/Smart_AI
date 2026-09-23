@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ShoppingBag, ArrowLeft } from 'lucide-react';
+import { ShoppingBag, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -246,7 +246,7 @@ const CheckoutPage: React.FC = () => {
 
   if (items.length === 0 && !isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <div className="flex flex-col items-center justify-center py-16">
           <ShoppingBag className="h-16 w-16 text-muted-foreground mb-4" />
           <h2 className="text-xl font-semibold mb-2">Giỏ hàng trống</h2>
@@ -265,7 +265,7 @@ const CheckoutPage: React.FC = () => {
   const showAddressSelector = !isLoadingAddresses && addresses.length > 0 && !useManualEntry;
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="py-8">
       {/* Header */}
       <div className="mb-6">
         <Link 
@@ -318,7 +318,7 @@ const CheckoutPage: React.FC = () => {
                 >
                   {isLoading ? (
                     <>
-                      <span className="animate-spin mr-2">⏳</span>
+                      <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
                       Đang xử lý...
                     </>
                   ) : (

@@ -97,7 +97,7 @@ const CompareHistoryPage: React.FC = () => {
   // Not authenticated state
   if (!isAuthenticated) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <div className="flex flex-col items-center justify-center py-16">
           <History className="h-16 w-16 text-muted-foreground mb-4" />
           <h2 className="text-xl font-semibold mb-2">Vui lòng đăng nhập</h2>
@@ -115,7 +115,7 @@ const CompareHistoryPage: React.FC = () => {
   // Loading state
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <h1 className="text-2xl font-bold mb-6 flex items-center gap-2">
           <History className="h-6 w-6" />
           Lịch sử so sánh
@@ -133,7 +133,7 @@ const CompareHistoryPage: React.FC = () => {
   const isEmpty = historyItems.length === 0;
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="py-8">
       <h1 className="text-2xl font-bold mb-6 flex items-center gap-2">
         <History className="h-6 w-6" />
         Lịch sử so sánh

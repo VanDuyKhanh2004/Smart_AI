@@ -79,7 +79,7 @@ const CompareBar: React.FC = () => {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t shadow-lg">
-      <div className="container mx-auto px-4 py-3">
+      <div className="container mx-auto px-4 py-3 md:px-8">
         <div className="flex items-center justify-between gap-4">
           {/* Product thumbnails */}
           <div className="flex items-center gap-2 flex-1 overflow-x-auto">

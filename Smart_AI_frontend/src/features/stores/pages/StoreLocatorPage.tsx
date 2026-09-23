@@ -172,7 +172,7 @@ export function StoreLocatorPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-6">
+    <div className="py-6">
       {/* Page header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">

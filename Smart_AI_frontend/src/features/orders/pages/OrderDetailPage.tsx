@@ -53,7 +53,7 @@ export function OrderDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto py-6 space-y-6">
+      <div className="py-6 space-y-6">
         <Skeleton className="h-8 w-64" />
         <div className="space-y-4">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -66,7 +66,7 @@ export function OrderDetailPage() {
 
   if (error) {
     return (
-      <div className="container mx-auto py-6">
+      <div className="py-6">
         <div className="text-center py-16">
           <AlertCircle className="h-12 w-12 mx-auto text-destructive mb-4" />
           <h2 className="text-xl font-semibold mb-2">Lỗi</h2>
@@ -85,7 +85,7 @@ export function OrderDetailPage() {
   }
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="py-6">
       <OrderDetailDialog
         order={order}
         isOpen={true}

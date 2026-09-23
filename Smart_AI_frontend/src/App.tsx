@@ -1,5 +1,6 @@
 import { useEffect, lazy, Suspense } from 'react'
 import AppRouter from '@/routes/AppRouter'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import { useAuthStore } from '@/stores/authStore'
 import { useCompareStore } from '@/stores/compareStore'
 import './App.css'
@@ -24,12 +25,12 @@ function App() {
   }, [initialize, loadCompareFromStorage])
 
   return (
-    <>
+    <ErrorBoundary>
       <AppRouter />
       <Suspense fallback={null}>
         <FloatingChat />
       </Suspense>
-    </>
+    </ErrorBoundary>
   )
 }
 

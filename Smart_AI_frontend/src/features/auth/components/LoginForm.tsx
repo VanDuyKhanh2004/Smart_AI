@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -156,27 +158,27 @@ const LoginForm: React.FC = () => {
           </div>
           
           {error && (
-            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
 
           {resendMessage && (
-            <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
-              {resendMessage}
-            </div>
+            <Alert variant="success">
+              <AlertDescription>{resendMessage}</AlertDescription>
+            </Alert>
           )}
 
           {resendError && (
-            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
-              {resendError}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{resendError}</AlertDescription>
+            </Alert>
           )}
-          
+
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
               <>
-                <span className="animate-spin mr-2">⏳</span>
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
                 Đang đăng nhập...
               </>
             ) : (

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -260,7 +261,7 @@ const RegisterForm: React.FC = () => {
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
               <>
-                <span className="animate-spin mr-2">⏳</span>
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
                 Đang đăng ký...
               </>
             ) : (
