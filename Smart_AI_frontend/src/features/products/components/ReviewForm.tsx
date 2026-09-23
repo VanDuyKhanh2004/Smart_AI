@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { Send, AlertCircle } from 'lucide-react';
+import { Send, AlertCircle, Loader2 } from 'lucide-react';
 
 const MAX_COMMENT_LENGTH = 1000;
 
@@ -152,7 +152,7 @@ export function ReviewForm({
           >
             {isSubmitting ? (
               <>
-                <span className="animate-spin mr-2">⏳</span>
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
                 Đang gửi...
               </>
             ) : (

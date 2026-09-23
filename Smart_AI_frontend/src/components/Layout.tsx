@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
 import CompareBar from '@/components/CompareBar';
+import { PageLoader } from '@/components/ui/page-loader';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,8 +26,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <Header />
 
       {/* Main Content */}
-      <main id="main-content" tabIndex={-1} className="container mx-auto flex-1 px-8 focus:outline-none">
-        {children}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="container mx-auto flex-1 px-4 focus:outline-none md:px-8"
+      >
+        <Suspense fallback={<PageLoader />}>{children}</Suspense>
       </main>
 
       {/* CompareBar - Requirements: 1.4, 2.3 */}

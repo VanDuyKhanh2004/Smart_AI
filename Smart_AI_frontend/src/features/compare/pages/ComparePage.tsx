@@ -211,7 +211,7 @@ const ComparePage: React.FC = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
@@ -225,7 +225,7 @@ const ComparePage: React.FC = () => {
   // Error state
   if (error || products.length < 2) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <p className="text-red-500 mb-4">{error || 'Không đủ sản phẩm để so sánh'}</p>
@@ -241,7 +241,7 @@ const ComparePage: React.FC = () => {
 
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="py-8">
       {/* Breadcrumb and actions */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">

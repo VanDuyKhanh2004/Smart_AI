@@ -49,7 +49,7 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
           ${className}
         `}
       >
-        <div className="container mx-auto px-4 flex h-16 items-center justify-between">
+        <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-8">
           {/* Left Section: Logo / Brand */}
           <div className="flex items-center gap-4">
             {/* Mobile Menu Trigger - Requirements: 3.1 */}

@@ -255,7 +255,7 @@ const ProductDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
@@ -268,7 +268,7 @@ const ProductDetailPage: React.FC = () => {
 
   if (error || !product) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <p className="text-red-500 mb-4">{error || 'Không tìm thấy sản phẩm'}</p>
@@ -287,7 +287,7 @@ const ProductDetailPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="py-8">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 mb-6">
         <Button variant="ghost" size="sm" onClick={() => navigate('/products')}>
