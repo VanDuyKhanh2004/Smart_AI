@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { PackageSearch } from 'lucide-react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import {
   Pagination,
@@ -312,6 +314,36 @@ const ProductListPage: React.FC = () => {
             >
               Thử lại
             </button>
+          </div>
+        </div>
+      ) : products.length === 0 ? (
+        /* Explicit empty/no-results state (EMPTY-01) */
+        <div
+          className="flex items-center justify-center min-h-[400px]"
+          data-testid="product-empty-state"
+        >
+          <div className="text-center max-w-md">
+            <PackageSearch
+              className="h-16 w-16 mx-auto text-muted-foreground mb-4"
+              aria-hidden="true"
+            />
+            <h2 className="text-xl font-semibold mb-2">
+              Không tìm thấy sản phẩm nào
+            </h2>
+            <p className="text-muted-foreground mb-6">
+              Hãy thử thay đổi từ khóa hoặc bộ lọc để tìm được sản phẩm phù hợp
+              hơn.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {isFilterActive && (
+                <Button variant="outline" onClick={handleClearFilters}>
+                  Xóa bộ lọc
+                </Button>
+              )}
+              <Button asChild>
+                <Link to="/products">Xem tất cả sản phẩm</Link>
+              </Button>
+            </div>
           </div>
         </div>
       ) : (
