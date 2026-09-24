@@ -3,6 +3,8 @@ import { ComplaintStats } from "../components/ComplaintStats";
 import { ComplaintFilters } from "../components/ComplaintFilters";
 import { ComplaintTable } from "../components/ComplaintTable";
 import { ComplaintDetailDialog } from "../components/ComplaintDetailDialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertCircle } from "lucide-react";
 import {
   useComplaints,
   useComplaintStats,
@@ -54,6 +56,15 @@ export function ComplaintListPage() {
 
   // Mutation for updating complaints
   const updateComplaint = useUpdateComplaint();
+
+  // Surface mutation failure (ERR-04): API message when safe, else VI fallback
+  const mutationErrorMessage =
+    updateComplaint.isError && updateComplaint.error
+      ? ((updateComplaint.error as { response?: { data?: { message?: string } } })
+          .response?.data?.message ??
+        (updateComplaint.error instanceof Error && updateComplaint.error.message) ??
+        "Không thể cập nhật khiếu nại. Vui lòng thử lại.")
+      : null;
 
   // Handle filter changes
   const handleFilterChange = useCallback((newFilters: FiltersType) => {
@@ -137,6 +148,15 @@ export function ComplaintListPage() {
 
       {/* Statistics Cards */}
       <ComplaintStats stats={stats} isLoading={isLoadingStats} />
+
+      {/* Mutation error (ERR-04) — dialog stays open only until user retries; alert is page-level */}
+      {updateComplaint.isError && mutationErrorMessage && (
+        <Alert variant="destructive" role="alert">
+          <AlertCircle className="size-4" aria-hidden="true" />
+          <AlertTitle>Không thể cập nhật khiếu nại</AlertTitle>
+          <AlertDescription>{mutationErrorMessage}</AlertDescription>
+        </Alert>
+      )}
 
       {/* Filters */}
       <ComplaintFilters

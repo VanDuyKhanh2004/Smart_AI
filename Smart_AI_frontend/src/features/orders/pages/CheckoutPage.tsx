@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ShoppingBag, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PageLoader } from '@/components/ui/page-loader';
 import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
 import { orderService } from '@/services/order.service';
@@ -25,7 +26,8 @@ interface AppliedPromotion {
 const CheckoutPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
-  const { items, fetchCart, clearCart } = useCartStore();
+  const { items, isLoading: isCartLoading, fetchCart, clearCart } = useCartStore();
+  // Local isLoading = order submission only (not cart hydration)
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -108,11 +110,11 @@ const CheckoutPage: React.FC = () => {
 
 
   useEffect(() => {
-    // Redirect to cart if empty
-    if (!isLoading && items.length === 0) {
+    // Redirect to cart only after cart hydration completes (not while pending)
+    if (!isCartLoading && !isLoading && items.length === 0) {
       navigate('/cart');
     }
-  }, [items, isLoading, navigate]);
+  }, [items, isCartLoading, isLoading, navigate]);
 
   // Handle address selection (Requirements 6.3)
   const handleSelectAddress = useCallback((address: Address | null) => {
@@ -244,7 +246,17 @@ const CheckoutPage: React.FC = () => {
   };
 
 
-  if (items.length === 0 && !isLoading) {
+  // Cart still hydrating: show loader (prevents premature empty redirect)
+  if (isCartLoading && items.length === 0 && !isLoading) {
+    return (
+      <div className="py-8">
+        <PageLoader />
+      </div>
+    );
+  }
+
+  // Empty cart UI only after hydration completes
+  if (!isCartLoading && !isLoading && items.length === 0) {
     return (
       <div className="py-8">
         <div className="flex flex-col items-center justify-center py-16">

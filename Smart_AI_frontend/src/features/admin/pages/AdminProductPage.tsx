@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
@@ -63,7 +64,8 @@ export function AdminProductPage() {
   }, [fetchProducts]);
 
   useEffect(() => {
-    if (notification) {
+    // Auto-dismiss success only; errors persist until dismissed/replaced (ERR-03)
+    if (notification?.type === 'success') {
       const timer = setTimeout(() => setNotification(null), 3000);
       return () => clearTimeout(timer);
     }
@@ -178,15 +180,20 @@ export function AdminProductPage() {
       </div>
 
       {notification && (
-        <div
-          className={`p-4 rounded-md ${
-            notification.type === 'success'
-              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-          }`}
+        <Alert
+          variant={notification.type === 'success' ? 'success' : 'destructive'}
+          className="relative"
         >
-          {notification.message}
-        </div>
+          <AlertDescription className="pr-8">{notification.message}</AlertDescription>
+          <button
+            type="button"
+            onClick={() => setNotification(null)}
+            className="absolute right-2 top-2 rounded-md p-1 text-current/70 hover:text-current"
+            aria-label="Đóng thông báo"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </Alert>
       )}
 
       <AdminProductTable

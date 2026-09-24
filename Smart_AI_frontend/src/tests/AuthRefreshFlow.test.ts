@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/auth.service';
 import apiClient from '@/lib/axios';
+import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 
 vi.mock('@/services/auth.service', () => ({
@@ -231,7 +232,7 @@ describe('Axios response interceptor', () => {
     await expect(handler!(error)).rejects.toBe(error);
   });
 
-  it('redirects to /login when no refresh token is in localStorage', async () => {
+  it('redirects to /login?expired=1 when no refresh token is in localStorage', async () => {
     const originalLocation = window.location.href;
     const handler = getResponseErrorHandler();
     expect(handler).toBeDefined();
@@ -240,15 +241,44 @@ describe('Axios response interceptor', () => {
       response: { status: 401 },
       config: { url: '/auth/me', headers: {} },
     };
-    window.location.href = '/login';
+    const locationMock = { href: '/login' };
     Object.defineProperty(window, 'location', {
-      value: { href: '/login' },
+      value: locationMock,
       writable: true,
+      configurable: true,
     });
     await expect(handler!(error)).rejects.toBe(error);
+    expect(locationMock.href).toBe('/login?expired=1');
     Object.defineProperty(window, 'location', {
       value: { href: originalLocation },
       writable: true,
+      configurable: true,
+    });
+  });
+
+  it('redirects to /login?expired=1 when refresh fails', async () => {
+    const originalLocation = window.location.href;
+    const handler = getResponseErrorHandler();
+    expect(handler).toBeDefined();
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'bad-refresh');
+    const postSpy = vi.spyOn(axios, 'post').mockRejectedValue(new Error('refresh failed'));
+    const error = {
+      response: { status: 401 },
+      config: { url: '/auth/me', headers: {} },
+    };
+    const locationMock = { href: '/login' };
+    Object.defineProperty(window, 'location', {
+      value: locationMock,
+      writable: true,
+      configurable: true,
+    });
+    await expect(handler!(error)).rejects.toBeInstanceOf(Error);
+    expect(locationMock.href).toBe('/login?expired=1');
+    postSpy.mockRestore();
+    Object.defineProperty(window, 'location', {
+      value: { href: originalLocation },
+      writable: true,
+      configurable: true,
     });
   });
 });

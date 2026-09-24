@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { OrderCard } from "../components/OrderCard";
 import { OrderDetailDialog } from "../components/OrderDetailDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Pagination,
   PaginationContent,
@@ -14,7 +16,7 @@ import {
 import { orderService } from "@/services/order.service";
 import type { Order } from "@/types/order.type";
 import type { Pagination as PaginationType } from "@/types/api.type";
-import { PackageOpen, RefreshCw } from "lucide-react";
+import { PackageOpen, RefreshCw, CheckCircle2, X } from "lucide-react";
 
 const DEFAULT_PAGINATION: PaginationType = {
   currentPage: 1,
@@ -32,6 +34,8 @@ const DEFAULT_PAGINATION: PaginationType = {
  * Requirements 2.1, 2.4, 2.5: Display orders sorted by date, loading and empty states
  */
 export function OrderHistoryPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [pagination, setPagination] = useState<PaginationType>(DEFAULT_PAGINATION);
   const [isLoading, setIsLoading] = useState(true);
@@ -121,6 +125,18 @@ export function OrderHistoryPage() {
     fetchOrders(page);
   }, [fetchOrders, page]);
 
+  // Post-purchase confirmation from CheckoutPage navigation state (ECOM-01)
+  const confirmationState = (location.state ?? null) as {
+    orderCreated?: boolean;
+    orderNumber?: string;
+  } | null;
+  const orderCreated = confirmationState?.orderCreated === true;
+  const orderNumber = confirmationState?.orderNumber;
+
+  const handleDismissConfirmation = useCallback(() => {
+    navigate("/orders", { replace: true });
+  }, [navigate]);
+
   // Generate page numbers for pagination
   const getPageNumbers = () => {
     const pages: number[] = [];
@@ -143,6 +159,40 @@ export function OrderHistoryPage() {
 
   return (
     <div className="py-6 space-y-6">
+      {/* Post-purchase confirmation (ECOM-01) */}
+      {orderCreated && (
+        <Alert variant="success" className="relative">
+          <CheckCircle2 className="size-4" aria-hidden="true" />
+          <AlertTitle>Đặt hàng thành công</AlertTitle>
+          <AlertDescription>
+            Cảm ơn bạn đã mua hàng!
+            {orderNumber ? (
+              <>
+                {" "}
+                Mã đơn hàng:{" "}
+                <span className="font-medium text-foreground">{orderNumber}</span>.
+              </>
+            ) : null}{" "}
+            Đơn hàng của bạn đã được ghi nhận.
+          </AlertDescription>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/products">Tiếp tục mua sắm</Link>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={handleDismissConfirmation}
+              aria-label="Đóng thông báo đặt hàng thành công"
+            >
+              <X className="size-4" aria-hidden="true" />
+              Đóng
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Đơn hàng của tôi</h1>
         <Button

@@ -150,7 +150,7 @@ apiClient.interceptors.response.use(
       if (!refreshToken) {
         isRefreshing = false;
         clearAuthStorage();
-        window.location.href = '/login';
+        window.location.href = '/login?expired=1';
         return Promise.reject(error);
       }
 
@@ -172,7 +172,7 @@ apiClient.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError as Error, null);
         clearAuthStorage();
-        window.location.href = '/login';
+        window.location.href = '/login?expired=1';
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

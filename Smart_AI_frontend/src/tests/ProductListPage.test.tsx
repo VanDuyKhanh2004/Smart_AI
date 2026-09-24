@@ -469,4 +469,84 @@ describe('ProductListPage', () => {
     expect(screen.getByText('Product page 2')).toBeInTheDocument();
     expect(screen.queryByText('Product page 1')).toBeNull();
   });
+
+  it('shows empty state (not error, not blank) when list succeeds with zero products', async () => {
+    mockGetAllProducts.mockResolvedValue(makeListResponse([]));
+
+    renderPage();
+
+    const empty = await screen.findByTestId('product-empty-state');
+    expect(empty).toBeInTheDocument();
+    expect(
+      screen.getByText('Không tìm thấy sản phẩm nào')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Không thể tải danh sách sản phẩm/)).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Xem tất cả sản phẩm' })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Xóa bộ lọc' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows clear-filter CTA when empty results are due to active search', async () => {
+    mockGetAllProducts.mockResolvedValue(makeListResponse([]));
+
+    renderPage();
+    await screen.findByTestId('product-empty-state');
+
+    typeSearch('zzzz-no-match');
+    // ProductFilters debounces 300ms before applying search
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole('button', { name: 'Xóa bộ lọc' })
+        ).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+
+    expect(screen.getByTestId('product-empty-state')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa bộ lọc' }));
+
+    await waitFor(() => {
+      const lastCall =
+        mockGetAllProducts.mock.calls[
+          mockGetAllProducts.mock.calls.length - 1
+        ]?.[0] as Record<string, unknown> | undefined;
+      expect(lastCall?.search === undefined || lastCall?.search === '').toBe(
+        true
+      );
+    });
+  });
+
+  it('does not show empty state while the first page is still loading', async () => {
+    const { promise, resolve } = deferred<Awaited<
+      ReturnType<typeof makeListResponse>
+    >>();
+    mockGetAllProducts.mockReturnValue(promise);
+
+    renderPage();
+
+    expect(screen.queryByTestId('product-empty-state')).not.toBeInTheDocument();
+
+    resolve(makeListResponse([]));
+
+    expect(await screen.findByTestId('product-empty-state')).toBeInTheDocument();
+  });
+
+  it('shows error state (not empty state) when the product list fetch fails', async () => {
+    mockGetAllProducts.mockRejectedValue(new Error('network'));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Không thể tải danh sách sản phẩm/)
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByTestId('product-empty-state')
+    ).not.toBeInTheDocument();
+  });
 });
