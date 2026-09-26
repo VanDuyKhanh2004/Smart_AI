@@ -1,4 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { DashboardSummary } from "@/types/dashboard.type";
 import {
   DollarSign,
@@ -12,6 +14,9 @@ import {
 interface SummaryCardsProps {
   summary: DashboardSummary | null;
   isLoading?: boolean;
+  /** H15: fetch failure is reported with a retry instead of endless skeletons */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 interface SummaryCardProps {
@@ -83,8 +88,39 @@ function SummaryCardSkeleton() {
   );
 }
 
-export function SummaryCards({ summary, isLoading }: SummaryCardsProps) {
-  if (isLoading || !summary) {
+export function SummaryCards({
+  summary,
+  isLoading,
+  isError = false,
+  onRetry,
+}: SummaryCardsProps) {
+  if (isLoading) {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <SummaryCardSkeleton key={i} />
+        ))}
+      </div>
+    );
+  }
+
+  // H15: without this branch a failed dashboard fetch left 4 skeletons forever
+  if (isError && !summary) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8">
+        <Alert variant="destructive" className="max-w-md">
+          <AlertDescription>Không thể tải số liệu tổng quan.</AlertDescription>
+        </Alert>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            Thử lại
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (!summary) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (

@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -19,6 +18,8 @@ import {
 import { AddressList } from "../components/AddressList";
 import { AddressForm } from "../components/AddressForm";
 import { addressService } from "@/services/address.service";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { Address, CreateAddressRequest } from "@/types/address.type";
 import { MapPin } from "lucide-react";
 
@@ -40,10 +41,14 @@ export function AddressManagementPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Form submit failures are rendered inside the dialog (H03): a floating
+  // toast sits behind the dialog overlay and cannot be read.
+  const [formError, setFormError] = useState<string | null>(null);
   
   // Delete confirmation state
   const [deleteAddress, setDeleteAddress] = useState<Address | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -79,17 +84,20 @@ export function AddressManagementPage() {
   // Handle add button click
   const handleAdd = () => {
     setEditingAddress(undefined);
+    setFormError(null);
     setIsFormOpen(true);
   };
 
   // Handle edit button click
   const handleEdit = (address: Address) => {
     setEditingAddress(address);
+    setFormError(null);
     setIsFormOpen(true);
   };
 
   // Handle delete button click
   const handleDelete = (address: Address) => {
+    setDeleteError(null);
     setDeleteAddress(address);
   };
 
@@ -109,6 +117,7 @@ export function AddressManagementPage() {
   const handleFormSubmit = async (data: CreateAddressRequest) => {
     try {
       setIsSubmitting(true);
+      setFormError(null);
       if (editingAddress) {
         // Update existing address
         await addressService.updateAddress(editingAddress.id, data);
@@ -120,12 +129,13 @@ export function AddressManagementPage() {
       }
       setIsFormOpen(false);
       setEditingAddress(undefined);
+      setFormError(null);
       fetchAddresses();
     } catch (err: unknown) {
       const errorMessage = err instanceof Error 
         ? err.message 
         : (err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Không thể lưu địa chỉ";
-      showToast(errorMessage, "error");
+      setFormError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -135,21 +145,23 @@ export function AddressManagementPage() {
   const handleFormCancel = () => {
     setIsFormOpen(false);
     setEditingAddress(undefined);
+    setFormError(null);
   };
 
-  // Confirm delete
+  // Confirm delete — the dialog only closes after a successful request (H03)
   const handleConfirmDelete = async () => {
-    if (!deleteAddress) return;
+    if (!deleteAddress || isDeleting) return;
     
     try {
       setIsDeleting(true);
+      setDeleteError(null);
       await addressService.deleteAddress(deleteAddress.id);
       showToast("Xóa địa chỉ thành công", "success");
       setDeleteAddress(null);
       fetchAddresses();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Không thể xóa địa chỉ";
-      showToast(errorMessage, "error");
+      setDeleteError(errorMessage);
     } finally {
       setIsDeleting(false);
     }
@@ -158,21 +170,19 @@ export function AddressManagementPage() {
   // Cancel delete
   const handleCancelDelete = () => {
     setDeleteAddress(null);
+    setDeleteError(null);
   };
 
   return (
     <div className="py-6">
-      {/* Toast notification */}
+      {/* Notification (Wave 0 Alert instead of a hand-rolled toast, H09) */}
       {toast && (
-        <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg ${
-            toast.type === "success"
-              ? "bg-green-100 text-green-800 border border-green-200"
-              : "bg-red-100 text-red-800 border border-red-200"
-          }`}
+        <Alert
+          variant={toast.type === "success" ? "success" : "destructive"}
+          className="mb-4"
         >
-          {toast.message}
-        </div>
+          <AlertDescription>{toast.message}</AlertDescription>
+        </Alert>
       )}
 
       <Card>
@@ -207,13 +217,24 @@ export function AddressManagementPage() {
       </Card>
 
       {/* Address Form Dialog */}
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog
+        open={isFormOpen}
+        onOpenChange={(open) => {
+          if (!open) setFormError(null);
+          setIsFormOpen(open);
+        }}
+      >
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>
               {editingAddress ? "Chỉnh sửa địa chỉ" : "Thêm địa chỉ mới"}
             </DialogTitle>
           </DialogHeader>
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
           <AddressForm
             address={editingAddress}
             onSubmit={handleFormSubmit}
@@ -224,7 +245,12 @@ export function AddressManagementPage() {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deleteAddress} onOpenChange={() => setDeleteAddress(null)}>
+      <AlertDialog
+        open={!!deleteAddress}
+        onOpenChange={(open) => {
+          if (!open) handleCancelDelete();
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Xác nhận xóa địa chỉ</AlertDialogTitle>
@@ -232,17 +258,23 @@ export function AddressManagementPage() {
               Bạn có chắc chắn muốn xóa địa chỉ này? Hành động này không thể hoàn tác.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel onClick={handleCancelDelete} disabled={isDeleting}>
               Hủy
             </AlertDialogCancel>
-            <AlertDialogAction
+            <Button
+              variant="destructive"
               onClick={handleConfirmDelete}
               disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? "Đang xóa..." : "Xóa"}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

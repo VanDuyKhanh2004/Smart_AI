@@ -59,6 +59,10 @@ export function AdminPromotionPage() {
   const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(null);
   const [deletingPromotion, setDeletingPromotion] = useState<Promotion | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // Dialog mutation errors are rendered inside their dialog (H03): a page-level
+  // banner is hidden behind the dialog overlay.
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
@@ -96,15 +100,16 @@ export function AdminPromotionPage() {
 
   const handleCreatePromotion = async (data: CreatePromotionRequest | UpdatePromotionRequest) => {
     setIsSubmitting(true);
+    setFormError(null);
     try {
       await promotionService.createPromotion(data as CreatePromotionRequest);
       setNotification({ type: 'success', message: 'Tạo mã khuyến mãi thành công' });
       setIsFormOpen(false);
+      setFormError(null);
       fetchPromotions();
     } catch (error: unknown) {
       const err = error as { response?: { data?: { message?: string } } };
-      const message = err.response?.data?.message || 'Không thể tạo mã khuyến mãi';
-      setNotification({ type: 'error', message });
+      setFormError(err.response?.data?.message || 'Không thể tạo mã khuyến mãi');
     } finally {
       setIsSubmitting(false);
     }
@@ -113,15 +118,16 @@ export function AdminPromotionPage() {
   const handleUpdatePromotion = async (data: CreatePromotionRequest | UpdatePromotionRequest) => {
     if (!editingPromotion) return;
     setIsSubmitting(true);
+    setFormError(null);
     try {
       await promotionService.updatePromotion(editingPromotion._id, data as UpdatePromotionRequest);
       setNotification({ type: 'success', message: 'Cập nhật mã khuyến mãi thành công' });
       setEditingPromotion(null);
+      setFormError(null);
       fetchPromotions();
     } catch (error: unknown) {
       const err = error as { response?: { data?: { message?: string } } };
-      const message = err.response?.data?.message || 'Không thể cập nhật mã khuyến mãi';
-      setNotification({ type: 'error', message });
+      setFormError(err.response?.data?.message || 'Không thể cập nhật mã khuyến mãi');
     } finally {
       setIsSubmitting(false);
     }
@@ -130,6 +136,7 @@ export function AdminPromotionPage() {
   const handleDeletePromotion = async () => {
     if (!deletingPromotion) return;
     setDeletingId(deletingPromotion._id);
+    setDeleteError(null);
     try {
       await promotionService.deletePromotion(deletingPromotion._id);
       setNotification({ type: 'success', message: 'Xóa mã khuyến mãi thành công' });
@@ -137,7 +144,7 @@ export function AdminPromotionPage() {
       setDeletingPromotion(null);
       fetchPromotions();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể xóa mã khuyến mãi' });
+      setDeleteError('Không thể xóa mã khuyến mãi');
     } finally {
       setDeletingId(null);
     }
@@ -160,12 +167,30 @@ export function AdminPromotionPage() {
   };
 
   const handleEdit = (promotion: Promotion) => {
+    setFormError(null);
     setEditingPromotion(promotion);
   };
 
   const handleDelete = (promotion: Promotion) => {
+    setDeleteError(null);
     setDeletingPromotion(promotion);
     setIsDeleteDialogOpen(true);
+  };
+
+  const handleFormOpenChange = (open: boolean) => {
+    setFormError(null);
+    setIsFormOpen(open);
+  };
+
+  const handleEditOpenChange = (open: boolean) => {
+    setFormError(null);
+    if (!open) setEditingPromotion(null);
+  };
+
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    setDeleteError(null);
+    setIsDeleteDialogOpen(open);
+    if (!open) setDeletingPromotion(null);
   };
 
   const handlePageChange = (newPage: number) => {
@@ -206,7 +231,7 @@ export function AdminPromotionPage() {
     <div className="w-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Quản lý mã khuyến mãi</h1>
-        <Button onClick={() => setIsFormOpen(true)}>
+        <Button onClick={() => handleFormOpenChange(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Tạo mã mới
         </Button>
@@ -289,36 +314,46 @@ export function AdminPromotionPage() {
       )}
 
       {/* Create Dialog */}
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog open={isFormOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Tạo mã khuyến mãi mới</DialogTitle>
           </DialogHeader>
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
           <PromotionForm
             onSubmit={handleCreatePromotion}
-            onCancel={() => setIsFormOpen(false)}
+            onCancel={() => handleFormOpenChange(false)}
             isLoading={isSubmitting}
           />
         </DialogContent>
       </Dialog>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editingPromotion} onOpenChange={(open) => !open && setEditingPromotion(null)}>
+      <Dialog open={!!editingPromotion} onOpenChange={handleEditOpenChange}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Chỉnh sửa mã khuyến mãi</DialogTitle>
           </DialogHeader>
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
           <PromotionForm
             promotion={editingPromotion}
             onSubmit={handleUpdatePromotion}
-            onCancel={() => setEditingPromotion(null)}
+            onCancel={() => handleEditOpenChange(false)}
             isLoading={isSubmitting}
           />
         </DialogContent>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <Dialog open={isDeleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Xác nhận xóa</DialogTitle>
@@ -327,13 +362,15 @@ export function AdminPromotionPage() {
               Hành động này không thể hoàn tác.
             </DialogDescription>
           </DialogHeader>
+          {deleteError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => {
-                setIsDeleteDialogOpen(false);
-                setDeletingPromotion(null);
-              }}
+              onClick={() => handleDeleteDialogOpenChange(false)}
             >
               Hủy
             </Button>

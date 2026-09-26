@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { X, Minimize2, RotateCcw, Square } from 'lucide-react';
 import type { ChatMessage as ChatMessageType } from '@/services/chat.service';
 import ChatMessage from './ChatMessage';
@@ -95,23 +96,41 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               onClick={onReset}
               disabled={!isConnected}
               title="Bắt đầu cuộc trò chuyện mới"
+              aria-label="Bắt đầu cuộc trò chuyện mới"
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onMinimize}>
-              <Minimize2 className="h-4 w-4" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onMinimize}
+              aria-label="Thu nhỏ cửa sổ chat"
+            >
+              <Minimize2 className="h-4 w-4" aria-hidden="true" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="h-4 w-4" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              aria-label="Đóng cửa sổ chat"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
         </CardHeader>
 
-        <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Live region: new messages are announced to screen readers (H13) */}
+        <CardContent
+          className="flex-1 overflow-y-auto p-4 space-y-4"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Lịch sử trò chuyện với CSKH"
+        >
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           
           {isHydrating && messages.length === 0 && (
@@ -181,9 +200,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   onClick={onStopGeneration}
                   disabled={!isConnected}
                   title="Dừng trả lời"
+                  aria-label="Dừng trả lời"
                   className="rounded-full shrink-0"
                 >
-                  <Square className="size-4" />
+                  <Square className="size-4" aria-hidden="true" />
                 </Button>
               ) : (
                 <PromptInputSubmit

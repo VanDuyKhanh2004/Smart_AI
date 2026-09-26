@@ -40,27 +40,71 @@ function PaginationItem({ ...props }: React.ComponentProps<"li">) {
 
 type PaginationLinkProps = {
   isActive?: boolean
-} & Pick<React.ComponentProps<typeof Button>, "size"> &
-  React.ComponentProps<"a">
+  /**
+   * Disabled state (H05). Rendered as `disabled` on the button variant and as
+   * `aria-disabled` + ignored activation on the anchor variant, so keyboard
+   * users get real disabled semantics instead of a decorative overlay.
+   */
+  disabled?: boolean
+} & Pick<React.ComponentProps<typeof Button>, "size"> & {
+    href?: string
+    className?: string
+    children?: React.ReactNode
+    onClick?: React.MouseEventHandler<HTMLElement>
+    "aria-label"?: string
+  }
 
 function PaginationLink({
   className,
   isActive,
   size = "icon",
+  href,
+  disabled,
+  onClick,
   ...props
 }: PaginationLinkProps) {
+  const classes = cn(
+    buttonVariants({
+      variant: isActive ? "outline" : "ghost",
+      size,
+    }),
+    className
+  )
+
+  // A real href keeps the anchor semantics (H05)...
+  if (href !== undefined) {
+    return (
+      <a
+        href={href}
+        aria-current={isActive ? "page" : undefined}
+        aria-disabled={disabled || undefined}
+        data-slot="pagination-link"
+        data-active={isActive}
+        onClick={
+          disabled
+            ? (event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }
+            : onClick
+        }
+        className={cn(classes, disabled && "pointer-events-none opacity-50")}
+        {...props}
+      />
+    )
+  }
+
+  // ...otherwise pagination items are plain in-page controls and render as
+  // buttons so they are focusable and activatable with the keyboard.
   return (
-    <a
+    <button
+      type="button"
       aria-current={isActive ? "page" : undefined}
       data-slot="pagination-link"
       data-active={isActive}
-      className={cn(
-        buttonVariants({
-          variant: isActive ? "outline" : "ghost",
-          size,
-        }),
-        className
-      )}
+      disabled={disabled}
+      onClick={onClick}
+      className={classes}
       {...props}
     />
   )

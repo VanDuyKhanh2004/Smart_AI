@@ -1,6 +1,8 @@
 import { StarRating } from '@/components/ui/StarRating';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import type { Review, ProductReviewStats } from '@/types/review.type';
 import { MessageSquare } from 'lucide-react';
 
@@ -8,6 +10,9 @@ interface ReviewListProps {
   reviews: Review[];
   stats: ProductReviewStats;
   isLoading?: boolean;
+  /** H15: fetch failure is shown separately from the "no reviews yet" state */
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 function formatDate(dateString: string): string {
@@ -28,7 +33,13 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export function ReviewList({ reviews, stats, isLoading = false }: ReviewListProps) {
+export function ReviewList({
+  reviews,
+  stats,
+  isLoading = false,
+  error = null,
+  onRetry,
+}: ReviewListProps) {
   if (isLoading) {
     return (
       <Card>
@@ -65,7 +76,18 @@ export function ReviewList({ reviews, stats, isLoading = false }: ReviewListProp
         </div>
       </CardHeader>
       <CardContent>
-        {reviews.length === 0 ? (
+        {error ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+            <Alert variant="destructive" className="max-w-md">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+            {onRetry && (
+              <Button variant="outline" size="sm" onClick={onRetry}>
+                Thử lại
+              </Button>
+            )}
+          </div>
+        ) : reviews.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
             <p className="text-muted-foreground">

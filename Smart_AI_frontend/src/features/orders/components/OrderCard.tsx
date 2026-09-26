@@ -33,7 +33,21 @@ export function OrderCard({ order, onClick }: OrderCardProps) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold">
-            {order.orderNumber}
+            {/* Keyboard entry point for the clickable card (H04) */}
+            {onClick && (
+              <button
+                type="button"
+                aria-label={`Xem chi tiết đơn hàng ${order.orderNumber}`}
+                className="rounded-sm text-left hover:underline focus-visible:underline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClick();
+                }}
+              >
+                {order.orderNumber}
+              </button>
+            )}
+            {!onClick && order.orderNumber}
           </CardTitle>
           <OrderStatusBadge status={order.status} />
         </div>

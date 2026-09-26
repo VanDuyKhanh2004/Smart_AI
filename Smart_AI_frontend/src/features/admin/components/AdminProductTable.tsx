@@ -26,6 +26,9 @@ interface AdminProductTableProps {
   onDelete: (productId: string) => void;
   isLoading?: boolean;
   isDeleting?: boolean;
+  /** H15: list fetch failure (shown instead of the empty state) */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 export function AdminProductTable({
@@ -34,6 +37,8 @@ export function AdminProductTable({
   onDelete,
   isLoading = false,
   isDeleting = false,
+  isError = false,
+  onRetry,
 }: AdminProductTableProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
@@ -75,6 +80,22 @@ export function AdminProductTable({
   }
 
   if (products.length === 0) {
+    // H15: a failed fetch must never read as "no products"
+    if (isError) {
+      return (
+        <div className="text-center py-8 space-y-3">
+          <p className="text-destructive">Không thể tải danh sách sản phẩm.</p>
+          {onRetry && (
+            <div>
+              <Button variant="outline" size="sm" onClick={onRetry}>
+                Thử lại
+              </Button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div className="text-center py-8 text-muted-foreground">
         Không có sản phẩm nào

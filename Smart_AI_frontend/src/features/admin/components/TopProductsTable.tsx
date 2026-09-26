@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -13,6 +15,9 @@ import type { TopProduct } from "@/types/dashboard.type";
 interface TopProductsTableProps {
   products: TopProduct[];
   isLoading?: boolean;
+  /** H15: fetch failure is reported instead of "Không có dữ liệu" */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 function formatCurrency(value: number): string {
@@ -23,7 +28,12 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-export function TopProductsTable({ products, isLoading }: TopProductsTableProps) {
+export function TopProductsTable({
+  products,
+  isLoading,
+  isError = false,
+  onRetry,
+}: TopProductsTableProps) {
   const navigate = useNavigate();
 
   const handleRowClick = (productId: string) => {
@@ -60,9 +70,23 @@ export function TopProductsTable({ products, isLoading }: TopProductsTableProps)
           <CardTitle>Top sản phẩm bán chạy</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-[200px] flex items-center justify-center text-muted-foreground">
-            Không có dữ liệu
-          </div>
+          {/* H15: a failed dashboard fetch must never read as "no data" */}
+          {isError ? (
+            <div className="h-[200px] flex flex-col items-center justify-center gap-3">
+              <Alert variant="destructive" className="max-w-md">
+                <AlertDescription>Không thể tải top sản phẩm bán chạy.</AlertDescription>
+              </Alert>
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  Thử lại
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+              Không có dữ liệu
+            </div>
+          )}
         </CardContent>
       </Card>
     );
@@ -102,9 +126,17 @@ export function TopProductsTable({ products, isLoading }: TopProductsTableProps)
                         e.currentTarget.src = '/images/product-placeholder.svg';
                       }}
                     />
-                    <span className="font-medium line-clamp-1">
+                    {/* Keyboard entry point for the clickable row (H04) */}
+                    <button
+                      type="button"
+                      className="rounded-sm text-left font-medium line-clamp-1 hover:underline focus-visible:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleRowClick(item.product._id);
+                      }}
+                    >
                       {item.product.name}
-                    </span>
+                    </button>
                   </div>
                 </TableCell>
                 <TableCell className="text-right">

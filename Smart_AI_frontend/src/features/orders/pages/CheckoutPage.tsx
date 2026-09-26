@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShoppingBag, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageLoader } from '@/components/ui/page-loader';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
 import { orderService } from '@/services/order.service';
@@ -116,6 +117,23 @@ const CheckoutPage: React.FC = () => {
     }
   }, [items, isCartLoading, isLoading, navigate]);
 
+  // Post-order cleanup. Order creation already succeeded here, so a cart
+  // cleanup failure must never be reported back as an order failure (H01).
+  const finalizeSuccessfulOrder = useCallback(
+    async (orderNumber: string) => {
+      try {
+        await clearCart();
+      } catch (cartErr) {
+        console.error('Order created but failed to clear cart:', cartErr);
+      }
+      rotateKey();
+      navigate(`/orders`, {
+        state: { orderCreated: true, orderNumber },
+      });
+    },
+    [clearCart, rotateKey, navigate]
+  );
+
   // Handle address selection (Requirements 6.3)
   const handleSelectAddress = useCallback((address: Address | null) => {
     setSelectedAddress(address);
@@ -149,17 +167,9 @@ const CheckoutPage: React.FC = () => {
         promotionCode: appliedPromotion?.promotion.code,
       }, idempotencyKey);
       
-      // Clear cart after successful order
-      await clearCart();
-      rotateKey();
-      
-      // Navigate to order confirmation/history
-      navigate(`/orders`, { 
-        state: { 
-          orderCreated: true, 
-          orderNumber: response.data.orderNumber 
-        } 
-      });
+      // Clear cart + rotate idempotency key after successful order.
+      // Cart cleanup failures are swallowed by finalizeSuccessfulOrder.
+      await finalizeSuccessfulOrder(response.data.orderNumber);
     } catch (err: unknown) {
       const axiosError = err as { response?: { data?: { message?: string } } };
       setError(
@@ -192,17 +202,9 @@ const CheckoutPage: React.FC = () => {
         promotionCode: appliedPromotion?.promotion.code,
       }, idempotencyKey);
       
-      // Clear cart after successful order
-      await clearCart();
-      rotateKey();
-      
-      // Navigate to order confirmation/history
-      navigate(`/orders`, { 
-        state: { 
-          orderCreated: true, 
-          orderNumber: response.data.orderNumber 
-        } 
-      });
+      // Clear cart + rotate idempotency key after successful order.
+      // Cart cleanup failures are swallowed by finalizeSuccessfulOrder.
+      await finalizeSuccessfulOrder(response.data.orderNumber);
     } catch (err: unknown) {
       const axiosError = err as { response?: { data?: { message?: string } } };
       setError(
@@ -224,17 +226,9 @@ const CheckoutPage: React.FC = () => {
         promotionCode: appliedPromotion?.promotion.code,
       }, idempotencyKey);
       
-      // Clear cart after successful order
-      await clearCart();
-      rotateKey();
-      
-      // Navigate to order confirmation/history
-      navigate(`/orders`, { 
-        state: { 
-          orderCreated: true, 
-          orderNumber: response.data.orderNumber 
-        } 
-      });
+      // Clear cart + rotate idempotency key after successful order.
+      // Cart cleanup failures are swallowed by finalizeSuccessfulOrder.
+      await finalizeSuccessfulOrder(response.data.orderNumber);
     } catch (err: unknown) {
       const axiosError = err as { response?: { data?: { message?: string } } };
       setError(
@@ -295,8 +289,10 @@ const CheckoutPage: React.FC = () => {
 
       {/* Error Message */}
       {error && (
-        <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
-          {error}
+        <div className="mb-6">
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         </div>
       )}
 

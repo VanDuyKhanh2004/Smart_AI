@@ -4,6 +4,8 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminRoute from '@/components/AdminRoute';
 import Layout from '@/components/Layout';
 import AdminLayout from '@/components/AdminLayout';
+import ScrollToTop from '@/components/ScrollToTop';
+import NotFound from '@/pages/NotFound';
 import { PageLoader } from '@/components/ui/page-loader';
 
 const LoginPage = lazy(() => import('@/features/auth/pages/LoginPage'));
@@ -85,6 +87,8 @@ const AdminAppointmentsPage = lazy(() =>
 const AppRouter: React.FC = () => {
   return (
     <Router>
+      {/* Reset scroll position on every path change (H11) */}
+      <ScrollToTop />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Public routes */}
@@ -321,8 +325,15 @@ const AppRouter: React.FC = () => {
             }
           />
 
-          {/* 404 */}
-          <Route path="*" element={<div className="text-center py-8">Page not found</div>} />
+          {/* 404 — inside the standard layout (H12) */}
+          <Route
+            path="*"
+            element={
+              <Layout>
+                <NotFound />
+              </Layout>
+            }
+          />
         </Routes>
       </Suspense>
     </Router>

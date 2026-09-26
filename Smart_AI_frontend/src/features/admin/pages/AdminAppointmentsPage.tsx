@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/table';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -95,6 +94,10 @@ export function AdminAppointmentsPage() {
   const [confirmDialog, setConfirmDialog] = useState<{ appointment: Appointment; action: 'confirm' | 'complete' } | null>(null);
   const [cancelDialog, setCancelDialog] = useState<Appointment | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  // Dialog mutation errors are rendered inside the dialog (H03): a page-level
+  // banner is hidden behind the overlay.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isActionSubmitting, setIsActionSubmitting] = useState(false);
 
   // Fetch stores for filter dropdown
   const fetchStores = useCallback(async () => {
@@ -152,11 +155,13 @@ export function AdminAppointmentsPage() {
 
   // Handle status update (confirm/complete)
   const handleStatusUpdate = async () => {
-    if (!confirmDialog) return;
+    if (!confirmDialog || isActionSubmitting) return;
     
     const { appointment, action } = confirmDialog;
     const newStatus: AppointmentStatus = action === 'confirm' ? 'confirmed' : 'completed';
     
+    setIsActionSubmitting(true);
+    setActionError(null);
     try {
       await appointmentService.updateAppointmentStatus(appointment.id, { status: newStatus });
       setNotification({
@@ -164,16 +169,21 @@ export function AdminAppointmentsPage() {
         message: action === 'confirm' ? 'Đã xác nhận lịch hẹn' : 'Đã hoàn thành lịch hẹn',
       });
       setConfirmDialog(null);
+      setActionError(null);
       fetchAppointments();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể cập nhật trạng thái' });
+      setActionError('Không thể cập nhật trạng thái');
+    } finally {
+      setIsActionSubmitting(false);
     }
   };
 
   // Handle cancel appointment
   const handleCancelAppointment = async () => {
-    if (!cancelDialog) return;
+    if (!cancelDialog || isActionSubmitting) return;
     
+    setIsActionSubmitting(true);
+    setActionError(null);
     try {
       await appointmentService.updateAppointmentStatus(cancelDialog.id, {
         status: 'cancelled',
@@ -182,10 +192,24 @@ export function AdminAppointmentsPage() {
       setNotification({ type: 'success', message: 'Đã hủy lịch hẹn' });
       setCancelDialog(null);
       setCancelReason('');
+      setActionError(null);
       fetchAppointments();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể hủy lịch hẹn' });
+      setActionError('Không thể hủy lịch hẹn');
+    } finally {
+      setIsActionSubmitting(false);
     }
+  };
+
+  const closeConfirmDialog = () => {
+    setConfirmDialog(null);
+    setActionError(null);
+  };
+
+  const closeCancelDialog = () => {
+    setCancelDialog(null);
+    setCancelReason('');
+    setActionError(null);
   };
 
   // Reset filters
@@ -417,7 +441,7 @@ export function AdminAppointmentsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setConfirmDialog({ appointment, action: 'confirm' })}
+                            onClick={() => { setActionError(null); setConfirmDialog({ appointment, action: 'confirm' }); }}
                             title="Xác nhận"
                             className="text-green-600 hover:text-green-700 hover:bg-green-100"
                           >
@@ -428,7 +452,7 @@ export function AdminAppointmentsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setConfirmDialog({ appointment, action: 'complete' })}
+                            onClick={() => { setActionError(null); setConfirmDialog({ appointment, action: 'complete' }); }}
                             title="Hoàn thành"
                             className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
                           >
@@ -439,7 +463,7 @@ export function AdminAppointmentsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setCancelDialog(appointment)}
+                            onClick={() => { setActionError(null); setCancelDialog(appointment); }}
                             title="Hủy"
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
                           >
@@ -457,7 +481,12 @@ export function AdminAppointmentsPage() {
       </div>
 
       {/* Confirm/Complete Dialog */}
-      <AlertDialog open={!!confirmDialog} onOpenChange={() => setConfirmDialog(null)}>
+      <AlertDialog
+        open={!!confirmDialog}
+        onOpenChange={(open) => {
+          if (!open) closeConfirmDialog();
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -469,21 +498,40 @@ export function AdminAppointmentsPage() {
                 : 'Bạn có chắc chắn muốn đánh dấu lịch hẹn này là hoàn thành?'}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {actionError && (
+            <Alert variant="destructive">
+              <AlertDescription>{actionError}</AlertDescription>
+            </Alert>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel>Hủy</AlertDialogCancel>
-            <AlertDialogAction onClick={handleStatusUpdate}>
-              {confirmDialog?.action === 'confirm' ? 'Xác nhận' : 'Hoàn thành'}
-            </AlertDialogAction>
+            <AlertDialogCancel disabled={isActionSubmitting}>Hủy</AlertDialogCancel>
+            <Button onClick={handleStatusUpdate} disabled={isActionSubmitting}>
+              {isActionSubmitting
+                ? 'Đang xử lý...'
+                : confirmDialog?.action === 'confirm'
+                  ? 'Xác nhận'
+                  : 'Hoàn thành'}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* Cancel Dialog with reason */}
-      <Dialog open={!!cancelDialog} onOpenChange={() => { setCancelDialog(null); setCancelReason(''); }}>
+      <Dialog
+        open={!!cancelDialog}
+        onOpenChange={(open) => {
+          if (!open) closeCancelDialog();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Hủy lịch hẹn</DialogTitle>
           </DialogHeader>
+          {actionError && (
+            <Alert variant="destructive">
+              <AlertDescription>{actionError}</AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-4 py-4">
             <p className="text-sm text-muted-foreground">
               Bạn có chắc chắn muốn hủy lịch hẹn này? Hành động này không thể hoàn tác.
@@ -502,11 +550,11 @@ export function AdminAppointmentsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setCancelDialog(null); setCancelReason(''); }}>
+            <Button variant="outline" onClick={closeCancelDialog} disabled={isActionSubmitting}>
               Đóng
             </Button>
-            <Button variant="destructive" onClick={handleCancelAppointment}>
-              Hủy lịch hẹn
+            <Button variant="destructive" onClick={handleCancelAppointment} disabled={isActionSubmitting}>
+              {isActionSubmitting ? 'Đang xử lý...' : 'Hủy lịch hẹn'}
             </Button>
           </DialogFooter>
         </DialogContent>

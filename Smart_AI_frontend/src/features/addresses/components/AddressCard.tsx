@@ -57,8 +57,10 @@ export function AddressCard({
               <div className="flex items-center gap-3 mb-2">
                 <input
                   type="radio"
+                  name="checkout-address"
                   checked={selected}
                   onChange={() => onSelect?.(address)}
+                  aria-label={`Chọn địa chỉ ${labelDisplay} - ${address.fullName}`}
                   className="h-4 w-4 text-primary"
                   onClick={(e) => e.stopPropagation()}
                 />

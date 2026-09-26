@@ -55,6 +55,9 @@ const SidebarNavGroup: React.FC<SidebarNavGroupProps> = ({
               <Link
                 to={link.to}
                 onClick={onLinkClick}
+                // Collapsed groups hide the visible label, so expose it to
+                // assistive technology (H06)
+                aria-label={isCollapsed ? link.label : undefined}
                 className={cn(
                   // Base styles
                   'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium',

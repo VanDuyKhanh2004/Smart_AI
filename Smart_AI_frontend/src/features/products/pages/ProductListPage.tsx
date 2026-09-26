@@ -438,6 +438,7 @@ const ProductListPage: React.FC = () => {
                   <PaginationItem>
                     <PaginationPrevious
                       href="#"
+                      disabled={!pagination.hasPrevPage}
                       onClick={(e) => {
                         e.preventDefault();
                         if (pagination.hasPrevPage) {
@@ -453,6 +454,7 @@ const ProductListPage: React.FC = () => {
                   <PaginationItem>
                     <PaginationNext
                       href="#"
+                      disabled={!pagination.hasNextPage}
                       onClick={(e) => {
                         e.preventDefault();
                         if (pagination.hasNextPage) {

@@ -4,6 +4,7 @@ import { ComplaintFilters } from "../components/ComplaintFilters";
 import { ComplaintTable } from "../components/ComplaintTable";
 import { ComplaintDetailDialog } from "../components/ComplaintDetailDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
 import {
   useComplaints,
@@ -42,6 +43,7 @@ export function ComplaintListPage() {
     data: complaintsData,
     isLoading: isLoadingComplaints,
     isError: isComplaintsError,
+    refetch: refetchComplaints,
   } = useComplaints({
     page,
     limit: 10,
@@ -149,7 +151,8 @@ export function ComplaintListPage() {
       {/* Statistics Cards */}
       <ComplaintStats stats={stats} isLoading={isLoadingStats} />
 
-      {/* Mutation error (ERR-04) — dialog stays open only until user retries; alert is page-level */}
+      {/* Mutation error (ERR-04) — page-level copy, also passed to the dialog so
+          the message is readable above the overlay while it is open (H03) */}
       {updateComplaint.isError && mutationErrorMessage && (
         <Alert variant="destructive" role="alert">
           <AlertCircle className="size-4" aria-hidden="true" />
@@ -166,10 +169,23 @@ export function ComplaintListPage() {
         onClearFilters={handleClearFilters}
       />
 
-      {/* Error State */}
+      {/* Error State — query failure, kept separate from the mutation Alert
+          above and from the table's "no data" state (H15) */}
       {isComplaintsError && (
-        <div className="text-center py-8 text-destructive">
-          Failed to load complaints. Please try again.
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <p className="text-destructive">
+            Failed to load complaints. Please try again.
+          </p>
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => refetchComplaints()}
+            >
+              Thử lại
+            </Button>
+          </div>
         </div>
       )}
 
@@ -177,6 +193,7 @@ export function ComplaintListPage() {
       <ComplaintTable
         complaints={complaints}
         isLoading={isLoadingComplaints}
+        isError={isComplaintsError}
         pagination={pagination}
         onPageChange={handlePageChange}
         onRowClick={handleRowClick}
@@ -189,6 +206,10 @@ export function ComplaintListPage() {
         onClose={handleDialogClose}
         onUpdateStatus={handleUpdateStatus}
         onUpdateNotes={handleUpdateNotes}
+        saveError={
+          updateComplaint.isError && mutationErrorMessage ? mutationErrorMessage : null
+        }
+        isSaving={updateComplaint.isPending}
       />
     </div>
   );

@@ -363,17 +363,18 @@ export function AdminReviewsPage() {
           <Pagination>
             <PaginationContent>
               <PaginationItem>
-                <PaginationPrevious
-                  onClick={() =>
-                    pagination.hasPrevPage &&
-                    handlePageChange(pagination.currentPage - 1)
-                  }
-                  className={
-                    !pagination.hasPrevPage
-                      ? "pointer-events-none opacity-50"
-                      : "cursor-pointer"
-                  }
-                />
+                  <PaginationPrevious
+                    onClick={() =>
+                      pagination.hasPrevPage &&
+                      handlePageChange(pagination.currentPage - 1)
+                    }
+                    disabled={!pagination.hasPrevPage}
+                    className={
+                      !pagination.hasPrevPage
+                        ? "pointer-events-none opacity-50"
+                        : "cursor-pointer"
+                    }
+                  />
               </PaginationItem>
 
               {pageNumbers.map((page) => (
@@ -389,17 +390,18 @@ export function AdminReviewsPage() {
               ))}
 
               <PaginationItem>
-                <PaginationNext
-                  onClick={() =>
-                    pagination.hasNextPage &&
-                    handlePageChange(pagination.currentPage + 1)
-                  }
-                  className={
-                    !pagination.hasNextPage
-                      ? "pointer-events-none opacity-50"
-                      : "cursor-pointer"
-                  }
-                />
+                  <PaginationNext
+                    onClick={() =>
+                      pagination.hasNextPage &&
+                      handlePageChange(pagination.currentPage + 1)
+                    }
+                    disabled={!pagination.hasNextPage}
+                    className={
+                      !pagination.hasNextPage
+                        ? "pointer-events-none opacity-50"
+                        : "cursor-pointer"
+                    }
+                  />
               </PaginationItem>
             </PaginationContent>
           </Pagination>

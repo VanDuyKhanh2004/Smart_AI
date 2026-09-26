@@ -37,6 +37,7 @@ export function AdminOrderPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [isStatsLoading, setIsStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -85,6 +86,7 @@ export function AdminOrderPage() {
   // Fetch stats
   const fetchStats = useCallback(async () => {
     setIsStatsLoading(true);
+    setStatsError(false);
 
     try {
       const response = await orderService.getOrderStats();
@@ -107,6 +109,8 @@ export function AdminOrderPage() {
         setStats(response.data);
       }
     } catch (err) {
+      // H15: stats failure must surface as an error state, not endless skeletons
+      setStatsError(true);
       console.error("Failed to fetch stats:", err);
     } finally {
       setIsStatsLoading(false);
@@ -214,7 +218,12 @@ export function AdminOrderPage() {
       </div>
 
       {/* Stats */}
-      <OrderStats stats={stats} isLoading={isStatsLoading} />
+      <OrderStats
+        stats={stats}
+        isLoading={isStatsLoading}
+        isError={statsError}
+        onRetry={fetchStats}
+      />
 
       {/* Filters */}
       <OrderFilters

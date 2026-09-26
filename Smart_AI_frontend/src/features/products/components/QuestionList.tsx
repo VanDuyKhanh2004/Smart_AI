@@ -9,6 +9,8 @@ interface QuestionListProps {
   questions: Question[];
   pagination?: Pagination;
   isLoading?: boolean;
+  /** H15: suppresses the "no questions yet" empty state while the fetch failed */
+  hasError?: boolean;
   onUpvote: (questionId: string) => Promise<void>;
   onDelete: (questionId: string) => Promise<void>;
   onPageChange?: (page: number) => void;
@@ -18,6 +20,7 @@ export function QuestionList({
   questions,
   pagination,
   isLoading = false,
+  hasError = false,
   onUpvote,
   onDelete,
   onPageChange,
@@ -53,15 +56,19 @@ export function QuestionList({
       </CardHeader>
       <CardContent>
         {questions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <HelpCircle className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <p className="text-muted-foreground">
-              Chưa có câu hỏi nào cho sản phẩm này.
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Hãy là người đầu tiên đặt câu hỏi!
-            </p>
-          </div>
+          // H15: a failed fetch is reported by the section's error banner —
+          // never present it as "no questions yet"
+          hasError ? null : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <HelpCircle className="h-12 w-12 text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground">
+                Chưa có câu hỏi nào cho sản phẩm này.
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Hãy là người đầu tiên đặt câu hỏi!
+              </p>
+            </div>
+          )
         ) : (
           <div className="space-y-6">
             {questions.map((question) => {
