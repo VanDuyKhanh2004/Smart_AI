@@ -549,4 +549,20 @@ describe('ProductListPage', () => {
       screen.queryByTestId('product-empty-state')
     ).not.toBeInTheDocument();
   });
+
+  it('retries the fetch from the error state and recovers when Thử lại succeeds', async () => {
+    mockGetAllProducts.mockRejectedValueOnce(new Error('network'));
+
+    renderPage();
+
+    expect(await screen.findByText(/Vui lòng thử lại sau/)).toBeInTheDocument();
+    expect(screen.queryByTestId('product-empty-state')).not.toBeInTheDocument();
+
+    mockGetAllProducts.mockResolvedValue(makeListResponse());
+    fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
+
+    expect(await screen.findByText('iPhone 14')).toBeInTheDocument();
+    expect(screen.queryByText(/Vui lòng thử lại sau/)).toBeNull();
+    expect(mockGetAllProducts.mock.calls.length).toBe(2);
+  });
 });

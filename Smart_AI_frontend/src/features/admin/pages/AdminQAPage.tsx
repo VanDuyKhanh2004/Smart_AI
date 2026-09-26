@@ -234,6 +234,9 @@ export function AdminQAPage() {
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
   const [answerText, setAnswerText] = useState("");
   const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  // Answer dialog errors stay inside the dialog (H03): a page-level banner is
+  // hidden behind the dialog overlay.
+  const [answerError, setAnswerError] = useState<string | null>(null);
 
   // Fetch products for filter dropdown
   const fetchProducts = useCallback(async () => {
@@ -398,36 +401,29 @@ export function AdminQAPage() {
   const openAnswerDialog = (question: Question) => {
     setSelectedQuestion(question);
     setAnswerText("");
+    setAnswerError(null);
     setAnswerDialogOpen(true);
   };
 
   // Submit answer
   const handleSubmitAnswer = async () => {
     if (!selectedQuestion || answerText.trim().length < 5) {
-      setNotification({
-        type: "error",
-        message: "Câu trả lời phải có ít nhất 5 ký tự",
-      });
+      setAnswerError("Câu trả lời phải có ít nhất 5 ký tự");
       return;
     }
 
     if (answerText.trim().length > 1000) {
-      setNotification({
-        type: "error",
-        message: "Câu trả lời không được vượt quá 1000 ký tự",
-      });
+      setAnswerError("Câu trả lời không được vượt quá 1000 ký tự");
       return;
     }
 
     setIsSubmittingAnswer(true);
+    setAnswerError(null);
 
     // Get questionId - handle both _id and id formats
     const questionId = selectedQuestion._id || (selectedQuestion as unknown as { id: string }).id;
     if (!questionId) {
-      setNotification({
-        type: "error",
-        message: "Không tìm thấy ID câu hỏi",
-      });
+      setAnswerError("Không tìm thấy ID câu hỏi");
       setIsSubmittingAnswer(false);
       return;
     }
@@ -444,12 +440,10 @@ export function AdminQAPage() {
       setAnswerDialogOpen(false);
       setSelectedQuestion(null);
       setAnswerText("");
+      setAnswerError(null);
       fetchQuestions();
     } catch (err) {
-      setNotification({
-        type: "error",
-        message: err instanceof Error ? err.message : "Không thể gửi câu trả lời",
-      });
+      setAnswerError(err instanceof Error ? err.message : "Không thể gửi câu trả lời");
     } finally {
       setIsSubmittingAnswer(false);
     }
@@ -686,6 +680,7 @@ export function AdminQAPage() {
                     pagination.hasPrevPage &&
                     handlePageChange(pagination.currentPage - 1)
                   }
+                  disabled={!pagination.hasPrevPage}
                   className={
                     !pagination.hasPrevPage
                       ? "pointer-events-none opacity-50"
@@ -712,6 +707,7 @@ export function AdminQAPage() {
                     pagination.hasNextPage &&
                     handlePageChange(pagination.currentPage + 1)
                   }
+                  disabled={!pagination.hasNextPage}
                   className={
                     !pagination.hasNextPage
                       ? "pointer-events-none opacity-50"
@@ -733,11 +729,22 @@ export function AdminQAPage() {
       </div>
 
       {/* Answer Dialog */}
-      <Dialog open={answerDialogOpen} onOpenChange={setAnswerDialogOpen}>
+      <Dialog
+        open={answerDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) setAnswerError(null);
+          setAnswerDialogOpen(open);
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Trả lời câu hỏi</DialogTitle>
           </DialogHeader>
+          {answerError && (
+            <Alert variant="destructive">
+              <AlertDescription>{answerError}</AlertDescription>
+            </Alert>
+          )}
           {selectedQuestion && (
             <div className="space-y-4">
               <div className="p-3 bg-muted rounded-md">
@@ -769,7 +776,10 @@ export function AdminQAPage() {
               <div className="flex justify-end gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => setAnswerDialogOpen(false)}
+                  onClick={() => {
+                    setAnswerError(null);
+                    setAnswerDialogOpen(false);
+                  }}
                   disabled={isSubmittingAnswer}
                 >
                   Hủy

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ShoppingBag, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +15,7 @@ import {
 interface CartSummaryProps {
   totalItems: number;
   totalPrice: number;
-  onClearCart: () => void;
+  onClearCart: () => void | Promise<void>;
   onCheckout?: () => void;
   isLoading?: boolean;
 }
@@ -27,6 +28,8 @@ const CartSummary: React.FC<CartSummaryProps> = ({
   isLoading = false,
 }) => {
   const [showClearDialog, setShowClearDialog] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('vi-VN', {
@@ -35,9 +38,25 @@ const CartSummary: React.FC<CartSummaryProps> = ({
     }).format(price);
   };
 
-  const handleClearConfirm = () => {
-    onClearCart();
-    setShowClearDialog(false);
+  const handleClearConfirm = async () => {
+    if (isClearing) return;
+    setClearError(null);
+    setIsClearing(true);
+    try {
+      await onClearCart();
+      setShowClearDialog(false);
+    } catch {
+      // Keep the dialog open so the failure stays readable (H03).
+      setClearError('Không thể xóa giỏ hàng. Vui lòng thử lại.');
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const handleClearDialogOpenChange = (open: boolean) => {
+    if (isClearing) return;
+    setClearError(null);
+    setShowClearDialog(open);
   };
 
   const isEmpty = totalItems === 0;
@@ -76,7 +95,7 @@ const CartSummary: React.FC<CartSummaryProps> = ({
             variant="outline"
             className="w-full"
             disabled={isEmpty || isLoading}
-            onClick={() => setShowClearDialog(true)}
+            onClick={() => handleClearDialogOpenChange(true)}
           >
             <Trash2 className="h-4 w-4 mr-2" />
             Xóa tất cả
@@ -85,7 +104,7 @@ const CartSummary: React.FC<CartSummaryProps> = ({
       </Card>
 
       {/* Clear Cart Confirmation Dialog */}
-      <Dialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+      <Dialog open={showClearDialog} onOpenChange={handleClearDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Xác nhận xóa giỏ hàng</DialogTitle>
@@ -93,20 +112,25 @@ const CartSummary: React.FC<CartSummaryProps> = ({
               Bạn có chắc chắn muốn xóa tất cả sản phẩm trong giỏ hàng? Hành động này không thể hoàn tác.
             </DialogDescription>
           </DialogHeader>
+          {clearError && (
+            <Alert variant="destructive">
+              <AlertDescription>{clearError}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setShowClearDialog(false)}
-              disabled={isLoading}
+              onClick={() => handleClearDialogOpenChange(false)}
+              disabled={isClearing || isLoading}
             >
               Hủy
             </Button>
             <Button
               variant="destructive"
               onClick={handleClearConfirm}
-              disabled={isLoading}
+              disabled={isClearing || isLoading}
             >
-              Xóa tất cả
+              {isClearing ? 'Đang xóa...' : 'Xóa tất cả'}
             </Button>
           </DialogFooter>
         </DialogContent>

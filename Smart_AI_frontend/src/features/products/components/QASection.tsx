@@ -4,6 +4,8 @@ import type { Question } from '@/types/qa.type';
 import type { Pagination } from '@/types/api.type';
 import { QuestionForm } from './QuestionForm';
 import { QuestionList } from './QuestionList';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
 
 interface QASectionProps {
@@ -96,12 +98,24 @@ export function QASection({ productId }: QASectionProps) {
       {/* Question Form */}
       <QuestionForm onSubmit={handleSubmitQuestion} isSubmitting={isSubmitting} />
 
-      {/* Error State */}
+      {/* Error State (H09: shared Alert live-region semantics) */}
       {error && !isLoading && (
-        <div className="flex items-center gap-2 p-4 rounded-md bg-destructive/10 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <span>{error}</span>
-        </div>
+        <Alert variant="destructive" role="alert">
+          <AlertCircle aria-hidden="true" />
+          <AlertDescription>
+            <div className="flex w-full items-center gap-3">
+              <span className="flex-1">{error}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fetchQuestions(currentPage)}
+                className="shrink-0"
+              >
+                Thử lại
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Question List */}
@@ -109,6 +123,7 @@ export function QASection({ productId }: QASectionProps) {
         questions={questions}
         pagination={pagination}
         isLoading={isLoading}
+        hasError={!!error && !isLoading}
         onUpvote={handleUpvote}
         onDelete={handleDelete}
         onPageChange={handlePageChange}

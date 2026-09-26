@@ -1,4 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { OrderStats as OrderStatsType } from "@/types/order.type";
 import {
   Package,
@@ -13,6 +15,9 @@ import {
 interface OrderStatsProps {
   stats: OrderStatsType | null;
   isLoading?: boolean;
+  /** H15: fetch failure is reported with a retry instead of endless skeletons */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 interface StatCardProps {
@@ -36,8 +41,47 @@ function StatCard({ title, value, icon, colorClass }: StatCardProps) {
   );
 }
 
-export function OrderStats({ stats, isLoading }: OrderStatsProps) {
-  if (isLoading || !stats) {
+export function OrderStats({
+  stats,
+  isLoading,
+  isError = false,
+  onRetry,
+}: OrderStatsProps) {
+  if (isLoading) {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <div className="h-4 w-20 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-4 bg-muted animate-pulse rounded" />
+            </CardHeader>
+            <CardContent>
+              <div className="h-8 w-12 bg-muted animate-pulse rounded" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  // H15: without this branch a failed stats fetch left 7 skeletons forever
+  if (isError && !stats) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8">
+        <Alert variant="destructive" className="max-w-md">
+          <AlertDescription>Không thể tải thống kê đơn hàng.</AlertDescription>
+        </Alert>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            Thử lại
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (!stats) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {Array.from({ length: 7 }).map((_, i) => (

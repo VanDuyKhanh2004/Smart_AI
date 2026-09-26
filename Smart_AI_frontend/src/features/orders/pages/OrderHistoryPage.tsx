@@ -265,6 +265,7 @@ export function OrderHistoryPage() {
                 <PaginationItem>
                   <PaginationPrevious
                     onClick={() => pagination.hasPrevPage && handlePageChange(page - 1)}
+                    disabled={!pagination.hasPrevPage}
                     className={!pagination.hasPrevPage ? "pointer-events-none opacity-50" : "cursor-pointer"}
                   />
                 </PaginationItem>
@@ -284,6 +285,7 @@ export function OrderHistoryPage() {
                 <PaginationItem>
                   <PaginationNext
                     onClick={() => pagination.hasNextPage && handlePageChange(page + 1)}
+                    disabled={!pagination.hasNextPage}
                     className={!pagination.hasNextPage ? "pointer-events-none opacity-50" : "cursor-pointer"}
                   />
                 </PaginationItem>

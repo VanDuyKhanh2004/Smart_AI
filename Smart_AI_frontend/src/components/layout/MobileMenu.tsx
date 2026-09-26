@@ -69,6 +69,8 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
 
       {/* Drawer */}
       <div
+        id="mobile-nav-drawer"
+        aria-label="Menu điều hướng"
         className={`
           fixed top-0 left-0 z-50 h-full w-72 bg-background border-r shadow-xl
           transform transition-transform duration-300 ease-in-out md:hidden
@@ -102,10 +104,13 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
             <div className="pt-4 border-t mt-4">
               <button
                 onClick={() => setIsAdminExpanded(!isAdminExpanded)}
+                aria-expanded={isAdminExpanded}
+                aria-controls="mobile-admin-links"
                 className="flex items-center justify-between w-full px-4 py-3 text-base font-medium text-foreground hover:bg-accent rounded-md transition-colors"
               >
                 Quản lý
                 <ChevronDown
+                  aria-hidden="true"
                   className={`h-4 w-4 transition-transform duration-200 ${
                     isAdminExpanded ? 'rotate-180' : ''
                   }`}
@@ -113,7 +118,10 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
               </button>
 
               {isAdminExpanded && (
-                <div className="ml-4 mt-1 space-y-1 animate-in slide-in-from-top-2 duration-200">
+                <div
+                  id="mobile-admin-links"
+                  className="ml-4 mt-1 space-y-1 animate-in slide-in-from-top-2 duration-200"
+                >
                   <Link to="/admin/dashboard" className={navLinkClass('/admin/dashboard')}>
                     Dashboard
                   </Link>

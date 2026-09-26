@@ -59,6 +59,8 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
               className="md:hidden"
               onClick={() => setIsMobileMenuOpen(true)}
               aria-label="Mở menu"
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="mobile-nav-drawer"
             >
               <Menu className="h-5 w-5" />
             </Button>

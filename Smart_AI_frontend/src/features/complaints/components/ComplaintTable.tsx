@@ -23,6 +23,8 @@ import type { Pagination as PaginationType } from "@/types/api.type";
 interface ComplaintTableProps {
   complaints: Complaint[];
   isLoading: boolean;
+  /** H15: fetch failure — suppresses the "No complaints found" empty state */
+  isError?: boolean;
   pagination: PaginationType;
   onPageChange: (page: number) => void;
   onRowClick: (complaint: Complaint) => void;
@@ -87,6 +89,7 @@ function generatePageNumbers(currentPage: number, totalPages: number): number[] 
 export function ComplaintTable({
   complaints,
   isLoading,
+  isError = false,
   pagination,
   onPageChange,
   onRowClick,
@@ -109,6 +112,14 @@ export function ComplaintTable({
         <TableBody>
           {isLoading ? (
             <TableSkeleton />
+          ) : isError && complaints.length === 0 ? (
+            // H15: a failed fetch must never read as "No complaints found" —
+            // the page-level error banner carries the message and the retry
+            <TableRow>
+              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                Không thể tải dữ liệu khiếu nại.
+              </TableCell>
+            </TableRow>
           ) : complaints.length === 0 ? (
             <TableRow>
               <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
@@ -123,7 +134,18 @@ export function ComplaintTable({
                 onClick={() => onRowClick(complaint)}
               >
                 <TableCell className="font-mono text-xs">
-                  {getComplaintId(complaint).slice(0, 8)}...
+                  {/* Keyboard entry point for the clickable row (H04) */}
+                  <button
+                    type="button"
+                    aria-label={`Xem chi tiết khiếu nại ${getComplaintId(complaint).slice(0, 8)}...`}
+                    className="rounded-sm text-left hover:underline focus-visible:underline"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRowClick(complaint);
+                    }}
+                  >
+                    {getComplaintId(complaint).slice(0, 8)}...
+                  </button>
                 </TableCell>
                 <TableCell className="max-w-xs truncate">
                   {complaint.complaintSummary || "-"}
@@ -148,6 +170,7 @@ export function ComplaintTable({
             <PaginationItem>
               <PaginationPrevious
                 onClick={() => pagination.hasPrevPage && onPageChange(pagination.currentPage - 1)}
+                disabled={!pagination.hasPrevPage}
                 className={!pagination.hasPrevPage ? "pointer-events-none opacity-50" : "cursor-pointer"}
               />
             </PaginationItem>
@@ -167,6 +190,7 @@ export function ComplaintTable({
             <PaginationItem>
               <PaginationNext
                 onClick={() => pagination.hasNextPage && onPageChange(pagination.currentPage + 1)}
+                disabled={!pagination.hasNextPage}
                 className={!pagination.hasNextPage ? "pointer-events-none opacity-50" : "cursor-pointer"}
               />
             </PaginationItem>

@@ -89,9 +89,10 @@ const CartItem: React.FC<CartItemProps> = ({
                 size="icon-sm"
                 onClick={() => onRemove(_id)}
                 disabled={isLoading}
+                aria-label={`Xóa ${product.name} khỏi giỏ hàng`}
                 className="text-muted-foreground hover:text-destructive"
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
 
@@ -109,8 +110,9 @@ const CartItem: React.FC<CartItemProps> = ({
                   size="icon-sm"
                   onClick={handleDecrease}
                   disabled={isLoading || isOutOfStock}
+                  aria-label={`Giảm số lượng ${product.name}`}
                 >
-                  <Minus className="h-3 w-3" />
+                  <Minus className="h-3 w-3" aria-hidden="true" />
                 </Button>
                 <span className="w-8 text-center text-sm font-medium">{quantity}</span>
                 <Button
@@ -118,8 +120,9 @@ const CartItem: React.FC<CartItemProps> = ({
                   size="icon-sm"
                   onClick={handleIncrease}
                   disabled={isLoading || isOutOfStock || quantity >= product.inStock}
+                  aria-label={`Tăng số lượng ${product.name}`}
                 >
-                  <Plus className="h-3 w-3" />
+                  <Plus className="h-3 w-3" aria-hidden="true" />
                 </Button>
               </div>
             </div>

@@ -43,16 +43,24 @@ export function AdminProductPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // Errors of the create/edit dialog are rendered inside the dialog (H03):
+  // a page-level banner sits behind the dialog overlay and is not readable.
+  const [formError, setFormError] = useState<string | null>(null);
+  // H15: list fetch failure is rendered by the table (with retry) instead of
+  // being reported only through the notification banner
+  const [listError, setListError] = useState(false);
   const [page, setPage] = useState(1);
 
 
   const fetchProducts = useCallback(async () => {
     setIsLoading(true);
+    setListError(false);
     try {
       const response = await productService.getAllProducts({ page, limit: 10 });
       setProducts(response.data.products);
       setPagination(response.data.pagination);
     } catch {
+      setListError(true);
       setNotification({ type: 'error', message: 'Không thể tải danh sách sản phẩm' });
     } finally {
       setIsLoading(false);
@@ -71,9 +79,21 @@ export function AdminProductPage() {
     }
   }, [notification]);
 
+  const openForm = () => {
+    setFormError(null);
+    setIsFormOpen(true);
+  };
+
+  const closeForm = () => {
+    setFormError(null);
+    setEditingProduct(null);
+    setIsFormOpen(false);
+  };
+
   const handleCreateProduct = async (data: ProductFormPayload) => {
     setIsSubmitting(true);
     setUploadProgress(0);
+    setFormError(null);
     try {
       await productService.createProduct(data, {
         onUploadProgress: (event) => {
@@ -83,10 +103,10 @@ export function AdminProductPage() {
         },
       });
       setNotification({ type: 'success', message: 'Thêm sản phẩm thành công' });
-      setIsFormOpen(false);
+      closeForm();
       fetchProducts();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể thêm sản phẩm' });
+      setFormError('Không thể thêm sản phẩm');
     } finally {
       setIsSubmitting(false);
       setUploadProgress(null);
@@ -94,6 +114,7 @@ export function AdminProductPage() {
   };
 
   const handleEditProduct = (product: Product) => {
+    setFormError(null);
     setEditingProduct(product);
     setIsFormOpen(true);
   };
@@ -102,6 +123,7 @@ export function AdminProductPage() {
     if (!editingProduct) return;
     setIsSubmitting(true);
     setUploadProgress(0);
+    setFormError(null);
     try {
       await productService.updateProduct(editingProduct._id, data, {
         onUploadProgress: (event) => {
@@ -111,11 +133,10 @@ export function AdminProductPage() {
         },
       });
       setNotification({ type: 'success', message: 'Cập nhật sản phẩm thành công' });
-      setIsFormOpen(false);
-      setEditingProduct(null);
+      closeForm();
       fetchProducts();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể cập nhật sản phẩm' });
+      setFormError('Không thể cập nhật sản phẩm');
     } finally {
       setIsSubmitting(false);
       setUploadProgress(null);
@@ -173,7 +194,7 @@ export function AdminProductPage() {
     <div className="w-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Quản lý sản phẩm</h1>
-        <Button onClick={() => setIsFormOpen(true)}>
+        <Button onClick={openForm}>
           <Plus className="h-4 w-4 mr-2" />
           Thêm sản phẩm
         </Button>
@@ -202,6 +223,8 @@ export function AdminProductPage() {
         onDelete={handleDeleteProduct}
         isLoading={isLoading}
         isDeleting={isDeleting}
+        isError={listError}
+        onRetry={fetchProducts}
       />
 
       {pagination.totalPages > 1 && (
@@ -234,15 +257,20 @@ export function AdminProductPage() {
         </Pagination>
       )}
 
-      <Dialog open={isFormOpen} onOpenChange={(open) => { if (!open) { setEditingProduct(null); setIsFormOpen(false); } }}>
+      <Dialog open={isFormOpen} onOpenChange={(open) => { if (!open) closeForm(); }}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</DialogTitle>
           </DialogHeader>
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
           <ProductForm
             key={editingProduct?._id || 'create'}
             onSubmit={editingProduct ? handleUpdateProduct : handleCreateProduct}
-            onCancel={() => { setEditingProduct(null); setIsFormOpen(false); }}
+            onCancel={closeForm}
             isLoading={isSubmitting}
             uploadProgress={uploadProgress}
             initialData={editingProduct || undefined}

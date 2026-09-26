@@ -133,7 +133,18 @@ export function OrderTable({
                     {urgent && (
                       <AlertTriangle className="h-4 w-4 text-yellow-600" />
                     )}
-                    {order.orderNumber}
+                    {/* Keyboard entry point for the clickable row (H04) */}
+                    <button
+                      type="button"
+                      aria-label={`Xem chi tiết đơn hàng ${order.orderNumber}`}
+                      className="rounded-sm text-left hover:underline focus-visible:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOrderClick(order);
+                      }}
+                    >
+                      {order.orderNumber}
+                    </button>
                   </div>
                 </TableCell>
                 <TableCell>
@@ -166,6 +177,7 @@ export function OrderTable({
             <PaginationItem>
               <PaginationPrevious
                 onClick={() => currentPage > 1 && onPageChange(currentPage - 1)}
+                disabled={currentPage <= 1}
                 className={cn(
                   currentPage <= 1 && "pointer-events-none opacity-50"
                 )}
@@ -186,6 +198,7 @@ export function OrderTable({
             <PaginationItem>
               <PaginationNext
                 onClick={() => currentPage < totalPages && onPageChange(currentPage + 1)}
+                disabled={currentPage >= totalPages}
                 className={cn(
                   currentPage >= totalPages && "pointer-events-none opacity-50"
                 )}

@@ -37,6 +37,7 @@ const ProductDetailPage: React.FC = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewStats, setReviewStats] = useState<ProductReviewStats>({ averageRating: 0, totalCount: 0 });
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
   const [canReview, setCanReview] = useState(false);
   const [canReviewReason, setCanReviewReason] = useState<string | undefined>();
   const [submittingReview, setSubmittingReview] = useState(false);
@@ -80,10 +81,12 @@ const ProductDetailPage: React.FC = () => {
 
     try {
       setReviewsLoading(true);
+      setReviewsError(null);
       const response = await reviewService.getProductReviews(id);
       setReviews(response.data.reviews);
       setReviewStats(response.data.stats);
     } catch (err) {
+      setReviewsError('Không thể tải đánh giá. Vui lòng thử lại sau.');
       console.error('Error fetching reviews:', err);
     } finally {
       setReviewsLoading(false);
@@ -490,6 +493,8 @@ const ProductDetailPage: React.FC = () => {
                 reviews={reviews}
                 stats={reviewStats}
                 isLoading={reviewsLoading}
+                error={reviewsError}
+                onRetry={() => fetchReviews()}
               />
             </TabsContent>
 

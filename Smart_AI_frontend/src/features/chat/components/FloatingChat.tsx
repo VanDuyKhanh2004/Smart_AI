@@ -429,17 +429,19 @@ const FloatingChat: React.FC = () => {
                   variant="ghost"
                   size="sm"
                   onClick={handleToggle}
+                  aria-label="Mở lại cửa sổ chat"
                   className="h-6 w-6 p-0"
                 >
-                  <Minimize2 className="h-3 w-3" />
+                  <Minimize2 className="h-3 w-3" aria-hidden="true" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={handleClose}
+                  aria-label="Đóng cửa sổ chat"
                   className="h-6 w-6 p-0"
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-3 w-3" aria-hidden="true" />
                 </Button>
               </div>
             </div>
@@ -449,9 +451,13 @@ const FloatingChat: React.FC = () => {
         <Button
           onClick={handleToggle}
           size="lg"
+          aria-label={
+            isOpen ? 'Đóng cửa sổ chat với CSKH' : 'Mở cửa sổ chat với CSKH'
+          }
+          aria-expanded={isOpen}
           className="rounded-full h-14 w-14 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
         >
-          <MessageCircle className="h-6 w-6" />
+          <MessageCircle className="h-6 w-6" aria-hidden="true" />
         </Button>
 
         

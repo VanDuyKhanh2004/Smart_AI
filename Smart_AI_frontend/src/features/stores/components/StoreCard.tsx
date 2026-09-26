@@ -31,8 +31,21 @@ export function StoreCard({
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            {/* Store name */}
-            <h3 className="font-semibold text-base truncate">{store.name}</h3>
+            {/* Store name — also the keyboard entry point for selecting the
+                store (H04); the card itself keeps the mouse-only shortcut */}
+            <h3 className="font-semibold text-base truncate">
+              <button
+                type="button"
+                aria-label={`Chọn cửa hàng ${store.name}`}
+                className="rounded-sm text-left hover:underline focus-visible:underline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect(store);
+                }}
+              >
+                {store.name}
+              </button>
+            </h3>
             
             {/* Address */}
             <div className="flex items-start gap-1.5 mt-2 text-muted-foreground">

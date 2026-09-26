@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ComplaintStatusBadge } from "./ComplaintStatusBadge";
 import type { Complaint, ComplaintStatus } from "@/types/complaint.type";
 import { getComplaintId } from "@/types/complaint.type";
@@ -26,6 +27,10 @@ interface ComplaintDetailDialogProps {
   onClose: () => void;
   onUpdateStatus: (id: string, status: ComplaintStatus) => void;
   onUpdateNotes: (id: string, notes: string) => void;
+  /** Mutation failure message, shown inside the dialog (H03). */
+  saveError?: string | null;
+  /** True while the parent mutation is in flight. */
+  isSaving?: boolean;
 }
 
 const STATUS_OPTIONS: { value: ComplaintStatus; label: string }[] = [
@@ -61,6 +66,8 @@ export function ComplaintDetailDialog({
   onClose,
   onUpdateStatus,
   onUpdateNotes,
+  saveError,
+  isSaving = false,
 }: ComplaintDetailDialogProps) {
   const [status, setStatus] = useState<ComplaintStatus>("open");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -86,7 +93,7 @@ export function ComplaintDetailDialog({
   };
 
   const handleSave = () => {
-    if (!complaint) return;
+    if (!complaint || isSaving) return;
 
     const complaintId = getComplaintId(complaint);
     if (!complaintId) return;
@@ -243,12 +250,22 @@ export function ComplaintDetailDialog({
           </div>
         </div>
 
+        {/* Mutation failure stays visible inside the dialog (H03) */}
+        {saveError && (
+          <Alert variant="destructive">
+            <AlertDescription>{saveError}</AlertDescription>
+          </Alert>
+        )}
+
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel}>
+          <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!hasChanges}>
-            Save Changes
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || (!hasChanges && !saveError)}
+          >
+            {isSaving ? "Saving..." : "Save Changes"}
           </Button>
         </DialogFooter>
       </DialogContent>

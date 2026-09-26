@@ -18,7 +18,6 @@ import {
 } from '@/components/ui/table';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -35,10 +34,15 @@ export function AdminStoresPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingStore, setEditingStore] = useState<Store | null>(null);
   const [deleteStore, setDeleteStore] = useState<Store | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // Mutation errors of the dialogs are rendered inside the dialog itself (H03):
+  // a page-level banner sits behind the overlay and cannot be read.
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchStores = useCallback(async () => {
     setIsLoading(true);
@@ -67,13 +71,14 @@ export function AdminStoresPage() {
 
   const handleCreateStore = async (data: CreateStoreRequest) => {
     setIsSubmitting(true);
+    setFormError(null);
     try {
       await storeService.createStore(data);
       setNotification({ type: 'success', message: 'Thêm cửa hàng thành công' });
-      setIsFormOpen(false);
+      closeForm();
       fetchStores();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể thêm cửa hàng' });
+      setFormError('Không thể thêm cửa hàng');
     } finally {
       setIsSubmitting(false);
     }
@@ -82,27 +87,32 @@ export function AdminStoresPage() {
   const handleUpdateStore = async (data: CreateStoreRequest) => {
     if (!editingStore) return;
     setIsSubmitting(true);
+    setFormError(null);
     try {
       await storeService.updateStore(editingStore.id, data);
       setNotification({ type: 'success', message: 'Cập nhật cửa hàng thành công' });
-      setEditingStore(null);
+      closeForm();
       fetchStores();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể cập nhật cửa hàng' });
+      setFormError('Không thể cập nhật cửa hàng');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDeleteStore = async () => {
-    if (!deleteStore) return;
+    if (!deleteStore || isDeleting) return;
+    setDeleteError(null);
+    setIsDeleting(true);
     try {
       await storeService.deleteStore(deleteStore.id);
       setNotification({ type: 'success', message: 'Xóa cửa hàng thành công' });
       setDeleteStore(null);
       fetchStores();
     } catch {
-      setNotification({ type: 'error', message: 'Không thể xóa cửa hàng' });
+      setDeleteError('Không thể xóa cửa hàng');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -120,12 +130,33 @@ export function AdminStoresPage() {
   };
 
   const openEditForm = (store: Store) => {
+    setFormError(null);
     setEditingStore(store);
   };
 
   const closeForm = () => {
     setIsFormOpen(false);
     setEditingStore(null);
+    setFormError(null);
+  };
+
+  const handleFormOpenChange = (open: boolean) => {
+    if (open) {
+      setFormError(null);
+      setIsFormOpen(true);
+    } else {
+      closeForm();
+    }
+  };
+
+  const openDeleteDialog = (store: Store) => {
+    setDeleteError(null);
+    setDeleteStore(store);
+  };
+
+  const closeDeleteDialog = () => {
+    setDeleteStore(null);
+    setDeleteError(null);
   };
 
 
@@ -222,7 +253,7 @@ export function AdminStoresPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setDeleteStore(store)}
+                        onClick={() => openDeleteDialog(store)}
                         title="Xóa"
                         className="text-destructive hover:text-destructive"
                       >
@@ -239,11 +270,16 @@ export function AdminStoresPage() {
 
 
       {/* Create Store Dialog */}
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog open={isFormOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Thêm cửa hàng mới</DialogTitle>
           </DialogHeader>
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
           <StoreForm
             onSubmit={handleCreateStore}
             onCancel={closeForm}
@@ -253,11 +289,21 @@ export function AdminStoresPage() {
       </Dialog>
 
       {/* Edit Store Dialog */}
-      <Dialog open={!!editingStore} onOpenChange={() => setEditingStore(null)}>
+      <Dialog
+        open={!!editingStore}
+        onOpenChange={(open) => {
+          if (!open) closeForm();
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Chỉnh sửa cửa hàng</DialogTitle>
           </DialogHeader>
+          {formError && (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
           <StoreForm
             store={editingStore}
             onSubmit={handleUpdateStore}
@@ -268,7 +314,12 @@ export function AdminStoresPage() {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deleteStore} onOpenChange={() => setDeleteStore(null)}>
+      <AlertDialog
+        open={!!deleteStore}
+        onOpenChange={(open) => {
+          if (!open) closeDeleteDialog();
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Xác nhận xóa cửa hàng</AlertDialogTitle>
@@ -276,11 +327,21 @@ export function AdminStoresPage() {
               Bạn có chắc chắn muốn xóa cửa hàng "{deleteStore?.name}"? Hành động này không thể hoàn tác.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel>Hủy</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteStore} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Xóa
-            </AlertDialogAction>
+            <AlertDialogCancel disabled={isDeleting}>Hủy</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteStore}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? 'Đang xóa...' : 'Xóa'}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

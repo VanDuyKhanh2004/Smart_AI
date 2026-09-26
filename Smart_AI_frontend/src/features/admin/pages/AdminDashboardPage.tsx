@@ -6,6 +6,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { SummaryCards } from "../components/SummaryCards";
 import { RevenueChart } from "../components/RevenueChart";
 import { TopProductsTable } from "../components/TopProductsTable";
@@ -98,13 +100,28 @@ export function AdminDashboardPage() {
       </div>
 
       {error && (
-        <div className="p-4 rounded-md bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-          {error}
-        </div>
+        <Alert variant="destructive" className="flex flex-wrap items-center gap-3">
+          <AlertDescription className="flex-1 min-w-48">
+            {error}
+          </AlertDescription>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => fetchDashboardData()}
+          >
+            Thử lại
+          </Button>
+        </Alert>
       )}
 
       {/* Summary Cards */}
-      <SummaryCards summary={summary} isLoading={isLoading} />
+      <SummaryCards
+        summary={summary}
+        isLoading={isLoading}
+        isError={!!error}
+        onRetry={fetchDashboardData}
+      />
 
       {/* Charts Grid */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -115,7 +132,12 @@ export function AdminDashboardPage() {
       {/* Bottom Section */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <TopProductsTable products={topProducts} isLoading={isLoading} />
+          <TopProductsTable
+            products={topProducts}
+            isLoading={isLoading}
+            isError={!!error}
+            onRetry={fetchDashboardData}
+          />
         </div>
         <UserStatsCard data={userStats} isLoading={isLoading} />
       </div>
