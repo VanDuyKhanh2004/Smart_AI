@@ -15,6 +15,8 @@ import {
 interface AdminMegaMenuProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Element id of the "Quản lý" trigger; focused again when Escape closes the panel (W2B-M1). */
+  triggerId?: string;
 }
 
 interface AdminLink {
@@ -34,7 +36,7 @@ interface AdminGroup {
  * Requirements: 2.3 - Group links into categories: Sản phẩm, Đơn hàng, Cửa hàng, Hệ thống
  * Requirements: 2.4 - Close dropdown when clicking outside
  */
-const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose }) => {
+const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose, triggerId }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
@@ -103,6 +105,40 @@ const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  // W2B-M1: this panel is a navigation disclosure, not an application menu.
+  // Escape closes it and returns focus to the trigger; moving keyboard focus
+  // anywhere else outside the panel simply closes it.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        if (triggerId) {
+          document.getElementById(triggerId)?.focus();
+        }
+      }
+    };
+
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target)) return;
+      if (triggerId) {
+        const trigger = document.getElementById(triggerId);
+        if (trigger?.contains(target)) return;
+      }
+      onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('focusin', handleFocusIn);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('focusin', handleFocusIn);
+    };
+  }, [isOpen, onClose, triggerId]);
+
   const isActiveLink = (path: string): boolean => {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
@@ -112,6 +148,7 @@ const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose }) => {
   return (
     <div
       ref={menuRef}
+      id="admin-mega-menu"
       className="
         absolute top-full left-1/2 -translate-x-1/2 mt-2
         w-[500px] p-4
@@ -120,8 +157,6 @@ const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose }) => {
         animate-in fade-in-0 zoom-in-95 duration-200
         origin-top
       "
-      role="menu"
-      aria-orientation="vertical"
     >
       <div className="grid grid-cols-2 gap-4">
         {adminGroups.map((group) => (
@@ -142,10 +177,9 @@ const AdminMegaMenu: React.FC<AdminMegaMenuProps> = ({ isOpen, onClose }) => {
                       : 'text-foreground hover:bg-accent hover:text-accent-foreground'
                     }
                   `}
-                  role="menuitem"
                   onClick={onClose}
                 >
-                  <span className="text-muted-foreground">{link.icon}</span>
+                  <span className="text-muted-foreground" aria-hidden="true">{link.icon}</span>
                   {link.label}
                 </Link>
               ))}

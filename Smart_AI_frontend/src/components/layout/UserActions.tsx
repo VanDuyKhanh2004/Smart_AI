@@ -49,19 +49,19 @@ const UserActions: React.FC<UserActionsProps> = ({ isAuthenticated, isLoading })
 
   return (
     <div className="flex items-center gap-1 sm:gap-2">
-      {/* Wishlist Icon with Badge - Requirements: 4.1 */}
+      {/* Wishlist Icon with Badge - Requirements: 4.1 (W2B-M3: single interactive element) */}
       {isAuthenticated && (
-        <Link to="/wishlist">
-          <Button variant="ghost" size="icon" className="relative">
-            <Heart className="h-5 w-5" />
+        <Button asChild variant="ghost" size="icon" className="relative">
+          <Link to="/wishlist">
+            <Heart className="h-5 w-5" aria-hidden="true" />
             {wishlistCount > 0 && (
               <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white animate-in zoom-in-50 duration-200">
                 {wishlistCount > 99 ? '99+' : wishlistCount}
               </span>
             )}
             <span className="sr-only">Yêu thích ({wishlistCount} sản phẩm)</span>
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       )}
 
       {/* Cart Icon with Badge and Preview - Requirements: 4.1, 4.2 */}
@@ -70,32 +70,32 @@ const UserActions: React.FC<UserActionsProps> = ({ isAuthenticated, isLoading })
         onMouseEnter={handleCartMouseEnter}
         onMouseLeave={handleCartMouseLeave}
       >
-        <Link to="/cart">
-          <Button variant="ghost" size="icon" className="relative">
-            <ShoppingCart className="h-5 w-5" />
+        <Button asChild variant="ghost" size="icon" className="relative">
+          <Link to="/cart">
+            <ShoppingCart className="h-5 w-5" aria-hidden="true" />
             {cartCount > 0 && (
               <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground animate-in zoom-in-50 duration-200">
                 {cartCount > 99 ? '99+' : cartCount}
               </span>
             )}
             <span className="sr-only">Giỏ hàng ({cartCount} sản phẩm)</span>
-          </Button>
-        </Link>
+          </Link>
+        </Button>
         <MiniCartPreview isVisible={isCartPreviewVisible} />
       </div>
 
       {/* Cart Icon for mobile (no preview) */}
-      <Link to="/cart" className="sm:hidden">
-        <Button variant="ghost" size="icon" className="relative">
-          <ShoppingCart className="h-5 w-5" />
+      <Button asChild variant="ghost" size="icon" className="relative sm:hidden">
+        <Link to="/cart">
+          <ShoppingCart className="h-5 w-5" aria-hidden="true" />
           {cartCount > 0 && (
             <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground animate-in zoom-in-50 duration-200">
               {cartCount > 99 ? '99+' : cartCount}
             </span>
           )}
           <span className="sr-only">Giỏ hàng ({cartCount} sản phẩm)</span>
-        </Button>
-      </Link>
+        </Link>
+      </Button>
 
       {/* Auth Section - Requirements: 4.4 */}
       {isLoading ? (
@@ -104,16 +104,12 @@ const UserActions: React.FC<UserActionsProps> = ({ isAuthenticated, isLoading })
         <UserDropdown />
       ) : (
         <div className="flex items-center gap-1 sm:gap-2 ml-1">
-          <Link to="/login">
-            <Button variant="ghost" size="sm" className="text-xs sm:text-sm">
-              Đăng nhập
-            </Button>
-          </Link>
-          <Link to="/register">
-            <Button size="sm" className="text-xs sm:text-sm">
-              Đăng ký
-            </Button>
-          </Link>
+          <Button asChild variant="ghost" size="sm" className="text-xs sm:text-sm">
+            <Link to="/login">Đăng nhập</Link>
+          </Button>
+          <Button asChild size="sm" className="text-xs sm:text-sm">
+            <Link to="/register">Đăng ký</Link>
+          </Button>
         </div>
       )}
     </div>

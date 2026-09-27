@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,14 +54,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   };
 
   // Close mobile drawer - Requirements: 5.3
-  const handleMobileClose = () => {
+  const handleMobileClose = useCallback(() => {
     setIsMobileOpen(false);
-  };
+  }, []);
 
   // Open mobile drawer - Requirements: 5.2
-  const handleMobileOpen = () => {
+  const handleMobileOpen = useCallback(() => {
     setIsMobileOpen(true);
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -79,6 +79,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       <div className="flex">
         {/* Mobile Hamburger Menu Trigger - Requirements: 5.2 */}
         <Button
+          id="admin-mobile-menu-trigger"
           variant="ghost"
           size="icon"
           className={cn(
@@ -88,8 +89,10 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           )}
           onClick={handleMobileOpen}
           aria-label="Mở menu admin"
+          aria-expanded={isMobileOpen}
+          aria-controls="admin-sidebar-drawer"
         >
-          <Menu className="h-5 w-5" />
+          <Menu className="h-5 w-5" aria-hidden="true" />
         </Button>
 
         {/* Admin Sidebar - Requirements: 1.1, 5.1, 5.2 */}
@@ -98,6 +101,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           onToggle={handleToggle}
           isMobileOpen={isMobileOpen}
           onMobileClose={handleMobileClose}
+          triggerId="admin-mobile-menu-trigger"
         />
 
         {/* Main Content Area - Requirements: 1.3 */}
