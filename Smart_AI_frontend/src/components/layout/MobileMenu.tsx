@@ -1,13 +1,16 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { X, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { trapTabKey } from '@/lib/drawerFocus';
 
 interface MobileMenuProps {
   isOpen: boolean;
   onClose: () => void;
   isAdmin: boolean;
   isAuthenticated: boolean;
+  /** Element id of the trigger button; focused again when the drawer closes (H08). */
+  triggerId?: string;
 }
 
 /**
@@ -23,14 +26,49 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
   onClose,
   isAdmin,
   isAuthenticated,
+  triggerId,
 }) => {
   const location = useLocation();
   const [isAdminExpanded, setIsAdminExpanded] = React.useState(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const wasOpenRef = useRef(false);
 
   // Close menu on route change
   useEffect(() => {
     onClose();
   }, [location.pathname, onClose]);
+
+  // H08 focus lifecycle: when open, focus the drawer; when closed, remove the
+  // drawer from the tab order and the accessibility tree (inert) and give
+  // focus back to the trigger that opened it.
+  useEffect(() => {
+    const drawer = drawerRef.current;
+    if (isOpen) {
+      wasOpenRef.current = true;
+      drawer?.removeAttribute('inert');
+      document.getElementById('mobile-menu-close')?.focus();
+    } else {
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false;
+        if (triggerId) {
+          document.getElementById(triggerId)?.focus();
+        }
+      }
+      drawer?.setAttribute('inert', '');
+    }
+  }, [isOpen, triggerId]);
+
+  // H08: Escape closes the drawer from anywhere while it is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   // Prevent body scroll when menu is open
   useEffect(() => {
@@ -67,10 +105,14 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
         />
       )}
 
-      {/* Drawer */}
+      {/* Drawer — modal dialog while open, inert while closed (H08) */}
       <div
+        ref={drawerRef}
         id="mobile-nav-drawer"
+        role="dialog"
+        aria-modal="true"
         aria-label="Menu điều hướng"
+        onKeyDown={(event) => trapTabKey(event, drawerRef.current)}
         className={`
           fixed top-0 left-0 z-50 h-full w-72 bg-background border-r shadow-xl
           transform transition-transform duration-300 ease-in-out md:hidden
@@ -80,13 +122,22 @@ const MobileMenu: React.FC<MobileMenuProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <span className="font-bold text-xl">Smart AI</span>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Đóng menu">
-            <X className="h-5 w-5" />
+          <Button
+            id="mobile-menu-close"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="Đóng menu"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
           </Button>
         </div>
 
         {/* Navigation Links */}
-        <nav className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-80px)]">
+        <nav
+          aria-label="Điều hướng di động"
+          className="p-4 space-y-1 overflow-y-auto max-h-[calc(100vh-80px)]"
+        >
           <Link to="/products" className={navLinkClass('/products')}>
             Sản phẩm
           </Link>

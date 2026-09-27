@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -86,5 +86,30 @@ describe('AdminLayout shared shell', () => {
     expect(aside!.className).toContain('w-16');
     // Collapsed state must not reintroduce a compensating main padding either.
     expect(main!.className).not.toContain('lg:pl-');
+  });
+
+  // W2B-M2: the hamburger discloses the sidebar drawer
+  it('wires the admin hamburger as an aria-expanded/aria-controls disclosure', () => {
+    render(
+      <MemoryRouter>
+        <AdminLayout>
+          <div>Admin content</div>
+        </AdminLayout>
+      </MemoryRouter>
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Mở menu admin' });
+    expect(trigger).toHaveAttribute('id', 'admin-mobile-menu-trigger');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveAttribute('aria-controls', 'admin-sidebar-drawer');
+    expect(trigger.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(document.getElementById('admin-sidebar-drawer')).not.toBeNull();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByRole('dialog', { name: 'Menu điều hướng quản trị' })
+    ).toBeInTheDocument();
   });
 });

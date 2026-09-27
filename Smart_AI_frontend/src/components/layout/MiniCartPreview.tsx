@@ -61,11 +61,9 @@ const MiniCartPreview: React.FC<MiniCartPreviewProps> = ({ isVisible }) => {
         <div className="p-6 text-center">
           <ShoppingBag className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm text-muted-foreground">Giỏ hàng trống</p>
-          <Link to="/products">
-            <Button variant="link" size="sm" className="mt-2">
-              Tiếp tục mua sắm
-            </Button>
-          </Link>
+          <Button asChild variant="link" size="sm" className="mt-2">
+            <Link to="/products">Tiếp tục mua sắm</Link>
+          </Button>
         </div>
       ) : (
         <>
@@ -123,11 +121,9 @@ const MiniCartPreview: React.FC<MiniCartPreviewProps> = ({ isVisible }) => {
             )}
             
             <div className="flex gap-2">
-              <Link to="/cart" className="flex-1">
-                <Button variant="outline" size="sm" className="w-full">
-                  Xem giỏ hàng
-                </Button>
-              </Link>
+              <Button asChild variant="outline" size="sm" className="flex-1 w-full">
+                <Link to="/cart">Xem giỏ hàng</Link>
+              </Button>
               <div className="flex-1">
                 <Button size="sm" className="w-full" onClick={handleCheckout}>
                   Thanh toán

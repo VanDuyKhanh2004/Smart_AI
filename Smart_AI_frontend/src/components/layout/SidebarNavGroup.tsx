@@ -46,7 +46,7 @@ const SidebarNavGroup: React.FC<SidebarNavGroupProps> = ({
       )}
 
       {/* Navigation Links */}
-      <nav className="space-y-1">
+      <nav className="space-y-1" aria-label={`Điều hướng ${title}`}>
         {links.map((link) => {
           const isActive = isActiveLink(link.to);
           

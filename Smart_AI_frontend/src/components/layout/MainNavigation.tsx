@@ -38,6 +38,7 @@ const MainNavigation: React.FC<MainNavigationProps> = ({
 }) => {
   const location = useLocation();
   const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const closeAdminMenu = React.useCallback(() => setIsAdminMenuOpen(false), []);
 
   const isActiveLink = (path: string): boolean => {
     if (path === '/products') {
@@ -51,7 +52,7 @@ const MainNavigation: React.FC<MainNavigationProps> = ({
   };
 
   return (
-    <nav className={`items-center gap-1 ${className}`}>
+    <nav aria-label="Điều hướng chính" className={`items-center gap-1 ${className}`}>
       {navLinks.map((link) => {
         // Skip auth-required links for unauthenticated users
         if (link.requiresAuth && !isAuthenticated) {
@@ -90,6 +91,7 @@ const MainNavigation: React.FC<MainNavigationProps> = ({
       {isAdmin && !isAdminPage && (
         <div className="relative">
           <Button
+            id="admin-mega-menu-trigger"
             variant="ghost"
             data-admin-trigger
             className={`
@@ -102,10 +104,11 @@ const MainNavigation: React.FC<MainNavigationProps> = ({
             `}
             onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)}
             aria-expanded={isAdminMenuOpen}
-            aria-haspopup="menu"
+            aria-controls="admin-mega-menu"
           >
             Quản lý
             <ChevronDown
+              aria-hidden="true"
               className={`ml-1 h-4 w-4 transition-transform duration-200 ${
                 isAdminMenuOpen ? 'rotate-180' : ''
               }`}
@@ -114,7 +117,8 @@ const MainNavigation: React.FC<MainNavigationProps> = ({
 
           <AdminMegaMenu
             isOpen={isAdminMenuOpen}
-            onClose={() => setIsAdminMenuOpen(false)}
+            onClose={closeAdminMenu}
+            triggerId="admin-mega-menu-trigger"
           />
         </div>
       )}

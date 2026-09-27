@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, Home, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,11 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
+
+  // Stable identities so the drawer's route-change effect only fires on
+  // actual navigation, not on every Header re-render (H08).
+  const openMobileMenu = useCallback(() => setIsMobileMenuOpen(true), []);
+  const closeMobileMenu = useCallback(() => setIsMobileMenuOpen(false), []);
 
   // Detect if current page is an admin page - Requirements: 4.1, 4.2
   const isAdminPage = location.pathname.startsWith('/admin') || location.pathname.startsWith('/complaints');
@@ -54,15 +59,16 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
           <div className="flex items-center gap-4">
             {/* Mobile Menu Trigger - Requirements: 3.1 */}
             <Button
+              id="mobile-menu-trigger"
               variant="ghost"
               size="icon"
               className="md:hidden"
-              onClick={() => setIsMobileMenuOpen(true)}
+              onClick={openMobileMenu}
               aria-label="Mở menu"
               aria-expanded={isMobileMenuOpen}
               aria-controls="mobile-nav-drawer"
             >
-              <Menu className="h-5 w-5" />
+              <Menu className="h-5 w-5" aria-hidden="true" />
             </Button>
 
             <Link to="/" className="flex items-center gap-2" aria-label="Smart AI - Trang chủ">
@@ -85,7 +91,7 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
               to="/"
               className="hidden md:flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors duration-200"
             >
-              <Home className="h-4 w-4" />
+              <Home className="h-4 w-4" aria-hidden="true" />
               Về trang chính
             </Link>
           )}
@@ -101,9 +107,10 @@ const Header: React.FC<HeaderProps> = ({ className = '' }) => {
       {/* Mobile Menu Drawer */}
       <MobileMenu
         isOpen={isMobileMenuOpen}
-        onClose={() => setIsMobileMenuOpen(false)}
+        onClose={closeMobileMenu}
         isAdmin={isAdmin}
         isAuthenticated={isAuthenticated}
+        triggerId="mobile-menu-trigger"
       />
     </>
   );

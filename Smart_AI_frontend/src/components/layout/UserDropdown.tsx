@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/authStore';
 const UserDropdown: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const { user, logout, isLoading } = useAuthStore();
 
   // Close dropdown when clicking outside
@@ -28,11 +29,15 @@ const UserDropdown: React.FC = () => {
     };
   }, []);
 
-  // Close dropdown on escape key
+  // Close dropdown on escape key only while it is open, and hand focus
+  // back to the trigger (W2B-L1)
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     };
 
@@ -40,7 +45,7 @@ const UserDropdown: React.FC = () => {
     return () => {
       document.removeEventListener('keydown', handleEscape);
     };
-  }, []);
+  }, [isOpen]);
 
   const handleLogout = async () => {
     setIsOpen(false);
@@ -80,6 +85,7 @@ const UserDropdown: React.FC = () => {
   return (
     <div className="relative" ref={menuRef}>
       <button
+        ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 p-1.5 rounded-full hover:bg-accent transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
         aria-expanded={isOpen}
@@ -97,6 +103,7 @@ const UserDropdown: React.FC = () => {
           {user.name}
         </span>
         <ChevronDown 
+          aria-hidden="true"
           className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
         />
       </button>
@@ -132,7 +139,7 @@ const UserDropdown: React.FC = () => {
                 className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-accent transition-colors"
                 onClick={() => setIsOpen(false)}
               >
-                <item.icon className="h-4 w-4 text-muted-foreground" />
+                <item.icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 {item.label}
               </Link>
             ))}
@@ -146,7 +153,7 @@ const UserDropdown: React.FC = () => {
               onClick={handleLogout}
               disabled={isLoading}
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className="h-4 w-4" aria-hidden="true" />
               {isLoading ? 'Đang đăng xuất...' : 'Đăng xuất'}
             </Button>
           </div>
