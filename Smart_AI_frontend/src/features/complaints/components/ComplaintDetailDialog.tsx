@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -126,6 +127,7 @@ export function ComplaintDetailDialog({
             Complaint Details
             <ComplaintStatusBadge type="priority" value={complaint.priority} />
           </DialogTitle>
+          <DialogDescription>Xem chi tiết khiếu nại và trạng thái xử lý.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">

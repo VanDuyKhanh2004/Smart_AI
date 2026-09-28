@@ -104,9 +104,9 @@ const CompareHistoryPage: React.FC = () => {
           <p className="text-muted-foreground mb-6">
             Bạn cần đăng nhập để xem lịch sử so sánh sản phẩm.
           </p>
-          <Link to="/login">
-            <Button>Đăng nhập</Button>
-          </Link>
+          <Button asChild>
+            <Link to="/login">Đăng nhập</Link>
+          </Button>
         </div>
       </div>
     );
@@ -159,9 +159,9 @@ const CompareHistoryPage: React.FC = () => {
           <p className="text-muted-foreground mb-6">
             Hãy so sánh các sản phẩm để xem lại sau.
           </p>
-          <Link to="/products">
-            <Button>Khám phá sản phẩm</Button>
-          </Link>
+          <Button asChild>
+            <Link to="/products">Khám phá sản phẩm</Link>
+          </Button>
         </div>
       ) : (
         /* History List - Requirement 5.3, 5.4 */

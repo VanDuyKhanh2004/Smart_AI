@@ -5,6 +5,33 @@ import { AlertCircle } from 'lucide-react';
 import LoginForm from '../components/LoginForm';
 import { useAuthStore } from '@/stores/authStore';
 
+type FromState = string | { pathname?: string; search?: string; hash?: string } | undefined;
+
+/**
+ * H02-2: rebuild the full location (pathname + search + hash) from the
+ * preserved Location object. String values are already complete and pass
+ * through unchanged.
+ */
+function resolveFromTarget(from: FromState): string | null {
+  if (typeof from === 'string') return from;
+  if (from?.pathname) return `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`;
+  return null;
+}
+
+/**
+ * H14-1: validate the ?returnTo= value written by the terminal-401 hard
+ * redirect. Only same-document route locations are accepted: a single leading
+ * '/' (never protocol-relative or backslash paths), and never the login page
+ * itself, which would create a redirect loop.
+ */
+function sanitizeReturnTo(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return null;
+  const pathname = raw.split(/[?#]/)[0];
+  if (pathname === '/login') return null;
+  return raw;
+}
+
 const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -32,12 +59,14 @@ const LoginPage: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Get the redirect path from location state, default to home
-  const locationState = location.state as { from?: string | { pathname?: string } } | null;
+  // Return target: the in-app redirect state (state.from) wins, then the
+  // ?returnTo= value written by the terminal-401 hard redirect (H14-1),
+  // else home. Preserves pathname + search + hash (H02-2).
+  const locationState = location.state as { from?: FromState } | null;
   const from =
-    typeof locationState?.from === 'string'
-      ? locationState.from
-      : locationState?.from?.pathname || '/';
+    resolveFromTarget(locationState?.from) ??
+    sanitizeReturnTo(searchParams.get('returnTo')) ??
+    '/';
 
   useEffect(() => {
     // Redirect if already authenticated

@@ -43,9 +43,9 @@ const ProfilePage: React.FC = () => {
     return (
       <div className="py-8 text-center">
         <p className="text-muted-foreground">Không thể tải thông tin người dùng</p>
-        <Link to="/login">
-          <Button variant="link">Đăng nhập lại</Button>
-        </Link>
+        <Button asChild variant="link">
+          <Link to="/login">Đăng nhập lại</Link>
+        </Button>
       </div>
     );
   }
@@ -92,9 +92,9 @@ const ProfilePage: React.FC = () => {
               <p className="text-muted-foreground mb-4">
                 Quản lý địa chỉ giao hàng của bạn để thanh toán nhanh hơn.
               </p>
-              <Link to="/profile/addresses">
-                <Button>Quản lý địa chỉ</Button>
-              </Link>
+              <Button asChild>
+                <Link to="/profile/addresses">Quản lý địa chỉ</Link>
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

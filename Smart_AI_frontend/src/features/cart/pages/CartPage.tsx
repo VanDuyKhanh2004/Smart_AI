@@ -115,9 +115,9 @@ const CartPage: React.FC = () => {
           <p className="text-muted-foreground mb-6">
             Bạn chưa có sản phẩm nào trong giỏ hàng.
           </p>
-          <Link to="/products">
-            <Button>Tiếp tục mua sắm</Button>
-          </Link>
+          <Button asChild>
+            <Link to="/products">Tiếp tục mua sắm</Link>
+          </Button>
         </div>
       ) : (
         /* Cart Content */

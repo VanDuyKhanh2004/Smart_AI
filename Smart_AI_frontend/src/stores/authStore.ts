@@ -14,6 +14,13 @@ interface AuthState {
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /**
+   * True once initialize() has resolved the authenticated state (both the
+   * token-present and no-token paths). Route guards must render their loading
+   * state while this is false so a cold load never redirects to /login before
+   * hydration has finished (H02-1).
+   */
+  hasHydrated: boolean;
   error: string | null;
   errorCode: string | null;
 }
@@ -46,6 +53,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   accessToken: null,
   isAuthenticated: false,
   isLoading: false,
+  hasHydrated: false,
   error: null,
   errorCode: null,
 
@@ -285,67 +293,73 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   initialize: async () => {
-    const storedAccessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-    const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-
-    if (!storedAccessToken || !storedRefreshToken) {
-      // Load guest cart from localStorage for unauthenticated users
-      try {
-        useCartStore.getState().loadFromLocalStorage();
-      } catch {
-        // Ignore cart errors during initialization
-      }
-      set({ isLoading: false });
-      return;
-    }
-
-    set({ isLoading: true, accessToken: storedAccessToken });
-
     try {
-      const user = await authService.getMe();
-      set({
-        user,
-        accessToken: localStorage.getItem(ACCESS_TOKEN_KEY),
-        isAuthenticated: true,
-        isLoading: false,
-      });
-      // Sync the chat socket with the hydrated token.
-      try {
-        const { default: chatService } = await import('@/services/chat.service');
-        chatService.syncAuthentication();
-      } catch {
-        // Ignore chat sync errors during initialization
+      const storedAccessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+      const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+
+      if (!storedAccessToken || !storedRefreshToken) {
+        // Load guest cart from localStorage for unauthenticated users
+        try {
+          useCartStore.getState().loadFromLocalStorage();
+        } catch {
+          // Ignore cart errors during initialization
+        }
+        set({ isLoading: false });
+        return;
       }
-      // Fetch cart for authenticated user (don't await to prevent blocking)
-      useCartStore.getState().fetchCart().catch(() => {
-        // Ignore cart fetch errors
-      });
-      // Fetch wishlist for authenticated user
-      useWishlistStore.getState().fetchWishlist().catch(() => {
-        // Ignore wishlist fetch errors
-      });
-    } catch {
-      // Axios interceptor already attempted token refresh.
-      // If we reach here, the interceptor's refresh failed and
-      // localStorage tokens have been cleared by the interceptor.
-      // No need to retry refresh — just set unauthenticated state.
-      // Clear owned chat persistence so this browser never resumes a stale
-      // selected conversation for an unauthenticated state.
-      clearChatPersistence();
-      // Disconnect the chat socket so it cannot keep using the cleared token.
+
+      set({ isLoading: true, accessToken: storedAccessToken });
+
       try {
-        const { default: chatService } = await import('@/services/chat.service');
-        chatService.syncAuthentication(null);
+        const user = await authService.getMe();
+        set({
+          user,
+          accessToken: localStorage.getItem(ACCESS_TOKEN_KEY),
+          isAuthenticated: true,
+          isLoading: false,
+        });
+        // Sync the chat socket with the hydrated token.
+        try {
+          const { default: chatService } = await import('@/services/chat.service');
+          chatService.syncAuthentication();
+        } catch {
+          // Ignore chat sync errors during initialization
+        }
+        // Fetch cart for authenticated user (don't await to prevent blocking)
+        useCartStore.getState().fetchCart().catch(() => {
+          // Ignore cart fetch errors
+        });
+        // Fetch wishlist for authenticated user
+        useWishlistStore.getState().fetchWishlist().catch(() => {
+          // Ignore wishlist fetch errors
+        });
       } catch {
-        // Ignore chat sync errors during initialization failure
+        // Axios interceptor already attempted token refresh.
+        // If we reach here, the interceptor's refresh failed and
+        // localStorage tokens have been cleared by the interceptor.
+        // No need to retry refresh — just set unauthenticated state.
+        // Clear owned chat persistence so this browser never resumes a stale
+        // selected conversation for an unauthenticated state.
+        clearChatPersistence();
+        // Disconnect the chat socket so it cannot keep using the cleared token.
+        try {
+          const { default: chatService } = await import('@/services/chat.service');
+          chatService.syncAuthentication(null);
+        } catch {
+          // Ignore chat sync errors during initialization failure
+        }
+        set({
+          user: null,
+          accessToken: null,
+          isAuthenticated: false,
+          isLoading: false,
+          errorCode: null,
+        });
       }
-      set({
-        user: null,
-        accessToken: null,
-        isAuthenticated: false,
-        isLoading: false,
-        errorCode: null,
-      });
+    } finally {
+      // Runs at the END of both the token-present and no-token paths so route
+      // guards never redirect before hydration has resolved (H02-1).
+      set({ hasHydrated: true });
     }
   },
 }));

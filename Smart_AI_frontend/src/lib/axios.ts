@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { resolveApiBaseUrl, ApiConfigError, type ApiConfigState } from './apiBaseUrl';
+import { clearChatPersistence } from '../services/chatPersistence';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
@@ -150,7 +151,8 @@ apiClient.interceptors.response.use(
       if (!refreshToken) {
         isRefreshing = false;
         clearAuthStorage();
-        window.location.href = '/login?expired=1';
+        clearChatPersistence();
+        window.location.href = buildExpiredLoginUrl();
         return Promise.reject(error);
       }
 
@@ -172,7 +174,8 @@ apiClient.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError as Error, null);
         clearAuthStorage();
-        window.location.href = '/login?expired=1';
+        clearChatPersistence();
+        window.location.href = buildExpiredLoginUrl();
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -191,6 +194,27 @@ function clearAuthStorage() {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem('user');
+}
+
+function isSafeReturnPath(pathname: string): boolean {
+  return pathname.startsWith('/') && !pathname.startsWith('//') && !pathname.includes('\\');
+}
+
+/**
+ * H14-1: terminal-401 login URL. Keeps the existing ?expired=1 UX and adds a
+ * route-only returnTo (pathname + search) so the hard reload can restore the
+ * destination after re-authentication. The value is built from the current
+ * document location — route location only, never form bodies or fragments of
+ * arbitrary content — and is re-validated again when LoginPage consumes it.
+ */
+function buildExpiredLoginUrl(): string {
+  const pathname = window.location.pathname || '/';
+  const search = window.location.search || '';
+  const params = new URLSearchParams({ expired: '1' });
+  if (isSafeReturnPath(pathname) && pathname.split(/[?#]/)[0] !== '/login') {
+    params.set('returnTo', `${pathname}${search}`);
+  }
+  return `/login?${params.toString()}`;
 }
 
 export default apiClient;

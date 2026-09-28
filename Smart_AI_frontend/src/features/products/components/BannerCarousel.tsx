@@ -82,14 +82,13 @@ const BannerCarousel: React.FC = () => {
             <p className="text-base md:text-lg mb-8 leading-relaxed drop-shadow-sm">
               {banner.description}
             </p>
-            <Link to={banner.buttonLink}>
-              <Button 
-                size="lg" 
-                className="bg-white text-black hover:bg-gray-100 font-semibold px-8 py-3 text-lg shadow-lg"
-              >
-                {banner.buttonText}
-              </Button>
-            </Link>
+            <Button
+              asChild
+              size="lg"
+              className="bg-white text-black hover:bg-gray-100 font-semibold px-8 py-3 text-lg shadow-lg"
+            >
+              <Link to={banner.buttonLink}>{banner.buttonText}</Link>
+            </Button>
           </div>
         </div>
       </div>
