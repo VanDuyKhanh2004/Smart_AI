@@ -4,6 +4,7 @@ import { Calendar, Clock, User, Phone, Mail, FileText, Loader2 } from 'lucide-re
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -193,6 +194,7 @@ export function AppointmentForm({
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Đặt lịch hẹn tại {store.name}</DialogTitle>
+          <DialogDescription>Chọn ngày và khung giờ bạn muốn đến cửa hàng.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">

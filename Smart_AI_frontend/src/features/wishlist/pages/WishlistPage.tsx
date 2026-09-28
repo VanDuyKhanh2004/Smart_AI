@@ -82,9 +82,9 @@ const WishlistPage: React.FC = () => {
           <p className="text-muted-foreground mb-6">
             Hãy thêm sản phẩm vào danh sách yêu thích để xem lại sau.
           </p>
-          <Link to="/products">
-            <Button>Khám phá sản phẩm</Button>
-          </Link>
+          <Button asChild>
+            <Link to="/products">Khám phá sản phẩm</Link>
+          </Button>
         </div>
       ) : isLoading && items.length === 0 ? (
         /* Loading State */

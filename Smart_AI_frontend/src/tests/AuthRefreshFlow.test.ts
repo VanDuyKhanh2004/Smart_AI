@@ -4,6 +4,7 @@ import { authService } from '@/services/auth.service';
 import apiClient from '@/lib/axios';
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
+import { SELECTED_SESSION_KEY, RESTORE_MODE_KEY } from '@/services/chatPersistence';
 
 vi.mock('@/services/auth.service', () => ({
   authService: {
@@ -232,8 +233,12 @@ describe('Axios response interceptor', () => {
     await expect(handler!(error)).rejects.toBe(error);
   });
 
-  it('redirects to /login?expired=1 when no refresh token is in localStorage', async () => {
-    const originalLocation = window.location.href;
+  it('redirects to /login?expired=1 with a route-only returnTo when no refresh token is in localStorage', async () => {
+    const originalLocation = {
+      href: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search,
+    };
     const handler = getResponseErrorHandler();
     expect(handler).toBeDefined();
     localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -241,23 +246,27 @@ describe('Axios response interceptor', () => {
       response: { status: 401 },
       config: { url: '/auth/me', headers: {} },
     };
-    const locationMock = { href: '/login' };
+    const locationMock = { href: '/login', pathname: '/checkout', search: '?coupon=X' };
     Object.defineProperty(window, 'location', {
       value: locationMock,
       writable: true,
       configurable: true,
     });
     await expect(handler!(error)).rejects.toBe(error);
-    expect(locationMock.href).toBe('/login?expired=1');
+    expect(locationMock.href).toBe('/login?expired=1&returnTo=%2Fcheckout%3Fcoupon%3DX');
     Object.defineProperty(window, 'location', {
-      value: { href: originalLocation },
+      value: originalLocation,
       writable: true,
       configurable: true,
     });
   });
 
-  it('redirects to /login?expired=1 when refresh fails', async () => {
-    const originalLocation = window.location.href;
+  it('redirects to /login?expired=1 with returnTo when refresh fails', async () => {
+    const originalLocation = {
+      href: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search,
+    };
     const handler = getResponseErrorHandler();
     expect(handler).toBeDefined();
     localStorage.setItem(REFRESH_TOKEN_KEY, 'bad-refresh');
@@ -266,17 +275,80 @@ describe('Axios response interceptor', () => {
       response: { status: 401 },
       config: { url: '/auth/me', headers: {} },
     };
-    const locationMock = { href: '/login' };
+    const locationMock = { href: '/login', pathname: '/admin/products', search: '' };
     Object.defineProperty(window, 'location', {
       value: locationMock,
       writable: true,
       configurable: true,
     });
     await expect(handler!(error)).rejects.toBeInstanceOf(Error);
-    expect(locationMock.href).toBe('/login?expired=1');
+    expect(locationMock.href).toBe('/login?expired=1&returnTo=%2Fadmin%2Fproducts');
     postSpy.mockRestore();
     Object.defineProperty(window, 'location', {
-      value: { href: originalLocation },
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('omits returnTo when the terminal 401 happens on /login itself (no redirect loop)', async () => {
+    const originalLocation = {
+      href: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search,
+    };
+    const handler = getResponseErrorHandler();
+    expect(handler).toBeDefined();
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    const error = {
+      response: { status: 401 },
+      config: { url: '/auth/me', headers: {} },
+    };
+    const locationMock = { href: '/login', pathname: '/login', search: '?x=1' };
+    Object.defineProperty(window, 'location', {
+      value: locationMock,
+      writable: true,
+      configurable: true,
+    });
+    await expect(handler!(error)).rejects.toBe(error);
+    expect(locationMock.href).toBe('/login?expired=1');
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('clears chat persistence together with auth storage on a terminal 401 (H14-2)', async () => {
+    const originalLocation = {
+      href: window.location.href,
+      pathname: window.location.pathname,
+      search: window.location.search,
+    };
+    const handler = getResponseErrorHandler();
+    expect(handler).toBeDefined();
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.setItem(SELECTED_SESSION_KEY, 'session-1');
+    localStorage.setItem(RESTORE_MODE_KEY, 'selected');
+    const error = {
+      response: { status: 401 },
+      config: { url: '/auth/me', headers: {} },
+    };
+    const locationMock = { href: '/login', pathname: '/checkout', search: '' };
+    Object.defineProperty(window, 'location', {
+      value: locationMock,
+      writable: true,
+      configurable: true,
+    });
+    await expect(handler!(error)).rejects.toBe(error);
+
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem('user')).toBeNull();
+    expect(localStorage.getItem(SELECTED_SESSION_KEY)).toBeNull();
+    expect(localStorage.getItem(RESTORE_MODE_KEY)).toBe('new');
+
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
       writable: true,
       configurable: true,
     });

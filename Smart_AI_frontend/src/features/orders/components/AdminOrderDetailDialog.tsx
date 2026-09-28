@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -139,6 +140,7 @@ export function AdminOrderDetailDialog({
             Chi tiết đơn hàng {order.orderNumber}
             <OrderStatusBadge status={order.status} />
           </DialogTitle>
+          <DialogDescription>Xem chi tiết và cập nhật trạng thái đơn hàng.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">

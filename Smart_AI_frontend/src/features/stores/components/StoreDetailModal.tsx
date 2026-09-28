@@ -2,6 +2,7 @@ import { Phone, Mail, MapPin, Clock, Navigation, Calendar } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -59,6 +60,7 @@ export function StoreDetailModal({
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl">{store.name}</DialogTitle>
+          <DialogDescription>Xem thông tin cửa hàng, giờ mở cửa và chỉ đường.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">

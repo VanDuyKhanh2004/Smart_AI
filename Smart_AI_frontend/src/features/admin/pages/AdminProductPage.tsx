@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -261,6 +262,7 @@ export function AdminProductPage() {
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</DialogTitle>
+            <DialogDescription>Điền thông tin sản phẩm vào biểu mẫu bên dưới.</DialogDescription>
           </DialogHeader>
           {formError && (
             <Alert variant="destructive">

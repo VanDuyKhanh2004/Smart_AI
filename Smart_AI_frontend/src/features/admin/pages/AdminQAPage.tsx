@@ -25,6 +25,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -739,6 +740,7 @@ export function AdminQAPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Trả lời câu hỏi</DialogTitle>
+            <DialogDescription>Viết câu trả lời của bạn cho câu hỏi này.</DialogDescription>
           </DialogHeader>
           {answerError && (
             <Alert variant="destructive">

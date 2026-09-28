@@ -8,10 +8,11 @@ interface AdminRouteProps {
 
 const AdminRoute: React.FC<AdminRouteProps> = ({ children }) => {
   const location = useLocation();
-  const { isAuthenticated, isLoading, user } = useAuthStore();
+  const { isAuthenticated, isLoading, hasHydrated, user } = useAuthStore();
 
-  // Show loading spinner while checking authentication
-  if (isLoading) {
+  // Show loading spinner while auth hydration (H02-1) or a sign-in flow is in
+  // flight — never redirect before initialize() has resolved.
+  if (!hasHydrated || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>

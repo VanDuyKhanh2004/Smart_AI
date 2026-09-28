@@ -189,3 +189,116 @@ describe('LoginPage session-expired banner (ERR-01)', () => {
     expect(screen.getByRole('button', { name: 'Đăng nhập' })).toBeInTheDocument();
   });
 });
+
+describe('LoginPage return path (H02-2 / H14-1)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  function setAuthenticated() {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          _id: 'u1',
+          name: 'Test User',
+          email: 'test@example.com',
+          role: 'user',
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+        },
+        accessToken: 'tok',
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+        errorCode: null,
+      });
+    });
+  }
+
+  function setUnauthenticated() {
+    act(() => {
+      useAuthStore.setState({
+        user: null,
+        accessToken: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null,
+        errorCode: null,
+      });
+    });
+  }
+
+  function LocationProbe() {
+    const location = useLocation();
+    return (
+      <div data-testid="probe">{`${location.pathname}${location.search}${location.hash}`}</div>
+    );
+  }
+
+  function renderLoginAt(
+    entry: string | { pathname: string; state?: unknown }
+  ) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+
+  it('H02-2: preserves pathname + search + hash from state.from after authentication', async () => {
+    setAuthenticated();
+    renderLoginAt({
+      pathname: '/login',
+      state: { from: { pathname: '/orders', search: '?status=shipped', hash: '#details' } },
+    });
+
+    expect(await screen.findByTestId('probe')).toHaveTextContent(
+      '/orders?status=shipped#details'
+    );
+  });
+
+  it('H14-1: consumes returnTo and returns to the expired route with its query string', async () => {
+    setAuthenticated();
+    renderLoginAt('/login?expired=1&returnTo=%2Fcheckout%3Fcoupon%3DX');
+
+    expect(await screen.findByTestId('probe')).toHaveTextContent('/checkout?coupon=X');
+  });
+
+  it('H14-1: /checkout expiry returns to /checkout', async () => {
+    setAuthenticated();
+    renderLoginAt('/login?expired=1&returnTo=%2Fcheckout');
+
+    expect(await screen.findByTestId('probe')).toHaveTextContent('/checkout');
+  });
+
+  it('H14-1: no redirect loop when returnTo points back at the login page', async () => {
+    setAuthenticated();
+    renderLoginAt('/login?expired=1&returnTo=%2Flogin');
+
+    // Sanitised to the default home target — never back to /login.
+    expect(await screen.findByTestId('probe')).toHaveTextContent('/');
+    expect(screen.queryByRole('button', { name: 'Đăng nhập' })).not.toBeInTheDocument();
+  });
+
+  it('H14-1: rejects protocol-relative returnTo values (route location only)', async () => {
+    setAuthenticated();
+    renderLoginAt('/login?expired=1&returnTo=%2F%2Fevil.example.com');
+
+    expect(await screen.findByTestId('probe')).toHaveTextContent('/');
+  });
+
+  it('H14-1: keeps the login form available before authentication when returnTo is present', async () => {
+    setUnauthenticated();
+    renderLoginAt('/login?expired=1&returnTo=%2Fcheckout');
+
+    expect(
+      await screen.findByText('Phiên đăng nhập đã hết hạn')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Đăng nhập' })).toBeInTheDocument();
+    expect(screen.queryByTestId('probe')).not.toBeInTheDocument();
+  });
+});

@@ -259,9 +259,9 @@ const CheckoutPage: React.FC = () => {
           <p className="text-muted-foreground mb-6">
             Bạn cần thêm sản phẩm vào giỏ hàng trước khi thanh toán.
           </p>
-          <Link to="/products">
-            <Button>Tiếp tục mua sắm</Button>
-          </Link>
+          <Button asChild>
+            <Link to="/products">Tiếp tục mua sắm</Link>
+          </Button>
         </div>
       </div>
     );

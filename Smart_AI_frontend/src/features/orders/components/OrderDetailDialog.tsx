@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -104,6 +105,7 @@ export function OrderDetailDialog({
             Chi tiết đơn hàng {order.orderNumber}
             <OrderStatusBadge status={order.status} />
           </DialogTitle>
+          <DialogDescription>Xem sản phẩm, địa chỉ giao hàng và trạng thái đơn hàng.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
