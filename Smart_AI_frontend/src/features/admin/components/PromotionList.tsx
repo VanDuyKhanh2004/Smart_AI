@@ -1,4 +1,5 @@
 import { PromotionCard } from './PromotionCard';
+import { Button } from '@/components/ui/button';
 import type { Promotion, PromotionStatus } from '@/types/promotion.type';
 
 interface PromotionListProps {
@@ -10,6 +11,10 @@ interface PromotionListProps {
   deletingId?: string | null;
   togglingId?: string | null;
   statusFilter?: PromotionStatus | 'all';
+  /** W3-11: load failure state with a manual retry action */
+  isError?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 export function PromotionList({
@@ -20,6 +25,9 @@ export function PromotionList({
   isLoading = false,
   deletingId = null,
   togglingId = null,
+  isError = false,
+  error,
+  onRetry,
 }: PromotionListProps) {
   if (isLoading) {
     return (
@@ -35,6 +43,20 @@ export function PromotionList({
   }
 
   if (promotions.length === 0) {
+    if (isError) {
+      return (
+        <div role="alert" className="text-center py-12">
+          <p className="text-lg text-destructive">
+            {error || 'Không tải được danh sách mã khuyến mãi'}
+          </p>
+          {onRetry && (
+            <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+              Thử lại
+            </Button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="text-center py-12 text-muted-foreground">
         <p className="text-lg">Không có mã khuyến mãi nào</p>

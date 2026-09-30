@@ -5,6 +5,8 @@ import ChatWindow from './ChatWindow';
 import chatService, { type ChatMessage as ChatMessageType, type ChatServiceConfig } from '@/services/chat.service';
 import { getSelectedSession, getRestoreMode } from '@/services/chatPersistence';
 import { getConversation, hydrateMessages } from '@/services/chatHistory.service';
+import { useCompareStore } from '@/stores/compareStore';
+import { cn } from '@/lib/utils';
 
 const FloatingChat: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -413,10 +415,15 @@ const FloatingChat: React.FC = () => {
     chatService.regenerateMessage(message.clientMessageId, message.content);
   };
 
+  // W3-06: keep the toggle button clear of the floating CompareBar when visible.
+  const hasCompareItems = useCompareStore((state) => state.items.length > 0);
+
   return (
     <>
       {/* Floating Button */}
-      <div className="fixed bottom-6 right-6 z-40">
+      <div
+        className={cn('fixed right-6 z-40', hasCompareItems ? 'bottom-20' : 'bottom-6')}
+      >
         {isMinimized && (
           <div className="mb-2">
             <div className="bg-background border rounded-lg shadow-lg p-3 flex items-center gap-2 max-w-xs">

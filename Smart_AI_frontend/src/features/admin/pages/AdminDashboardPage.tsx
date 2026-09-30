@@ -125,8 +125,18 @@ export function AdminDashboardPage() {
 
       {/* Charts Grid */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <RevenueChart data={revenueData} isLoading={isLoading} />
-        <OrderTrendsChart data={orderTrends} isLoading={isLoading} />
+        <RevenueChart
+          data={revenueData}
+          isLoading={isLoading}
+          isError={!!error}
+          onRetry={fetchDashboardData}
+        />
+        <OrderTrendsChart
+          data={orderTrends}
+          isLoading={isLoading}
+          isError={!!error}
+          onRetry={fetchDashboardData}
+        />
       </div>
 
       {/* Bottom Section */}
@@ -139,7 +149,12 @@ export function AdminDashboardPage() {
             onRetry={fetchDashboardData}
           />
         </div>
-        <UserStatsCard data={userStats} isLoading={isLoading} />
+        <UserStatsCard
+          data={userStats}
+          isLoading={isLoading}
+          isError={!!error}
+          onRetry={fetchDashboardData}
+        />
       </div>
     </div>
   );

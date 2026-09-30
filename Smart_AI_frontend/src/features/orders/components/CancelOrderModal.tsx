@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -33,16 +33,31 @@ export function CancelOrderModal({
   const [customReason, setCustomReason] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // W3-09: focus the error message after a failed validation attempt.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      const target =
+        contentRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+        contentRef.current?.querySelector<HTMLElement>('[role="alert"]');
+      target?.focus();
+    }
+  }, [error]);
 
   const handleConfirm = async () => {
     // Validation - Requirements 2.3
     if (!selectedReason) {
       setError("Vui lòng chọn lý do hủy đơn hàng");
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
     if (selectedReason === "other" && !customReason.trim()) {
       setError("Vui lòng nhập lý do hủy đơn hàng");
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -78,7 +93,7 @@ export function CancelOrderModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-4" ref={contentRef}>
           {/* Cancellation Reasons - Requirements 2.1 */}
           <div className="space-y-3">
             <p className="text-sm font-medium">Lý do hủy đơn hàng:</p>
@@ -126,7 +141,7 @@ export function CancelOrderModal({
 
           {/* Error Message */}
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p role="alert" tabIndex={-1} className="text-sm text-destructive">{error}</p>
           )}
         </div>
 
@@ -141,7 +156,7 @@ export function CancelOrderModal({
           <Button
             variant="destructive"
             onClick={handleConfirm}
-            disabled={isLoading || !selectedReason}
+            disabled={isLoading}
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
             Xác nhận hủy

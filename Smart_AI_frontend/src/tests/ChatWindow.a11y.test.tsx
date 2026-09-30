@@ -46,19 +46,49 @@ beforeAll(() => {
   }
 });
 
-describe('ChatWindow accessibility (H13 / H06)', () => {
-  it('exposes the message list as a polite live log', () => {
+describe('ChatWindow accessibility (H13 / H06 / W3-01)', () => {
+  it('exposes the message list as a non-live log (W3-01)', () => {
     render(<ChatWindow {...baseProps()} />);
 
     const log = screen.getByRole('log');
-    expect(log).toHaveAttribute('aria-live', 'polite');
-    expect(log).toHaveAttribute('aria-relevant', 'additions text');
+    expect(log).toHaveAttribute('aria-live', 'off');
+    expect(log).not.toHaveAttribute('aria-relevant');
     expect(log).toHaveAccessibleName();
     expect(log).toHaveTextContent('Tôi cần hỗ trợ');
     expect(log).toHaveTextContent('Chào bạn, chúng tôi có thể giúp gì?');
   });
 
-  it('keeps error messages inside the live log region', () => {
+  it('exposes a polite status region for announcements (W3-01)', () => {
+    render(<ChatWindow {...baseProps()} />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).toBeEmptyDOMElement();
+  });
+
+  it('announces the start of a response through the status region', () => {
+    render(<ChatWindow {...baseProps()} isProcessing={true} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Đang trả lời...');
+  });
+
+  it('announces completion with the final assistant answer', () => {
+    const { rerender } = render(<ChatWindow {...baseProps()} isProcessing={true} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Đang trả lời...');
+
+    rerender(<ChatWindow {...baseProps()} isProcessing={false} />);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Hoàn tất. Chào bạn, chúng tôi có thể giúp gì?'
+    );
+  });
+
+  it('announces errors through the status region', () => {
+    render(<ChatWindow {...baseProps()} error="Mất kết nối máy chủ" />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Mất kết nối máy chủ');
+  });
+
+  it('keeps error messages inside the log region', () => {
     render(<ChatWindow {...baseProps()} error="Mất kết nối máy chủ" />);
 
     const log = screen.getByRole('log');

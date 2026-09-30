@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,7 +67,18 @@ export function AddressSelector({
     city: '',
   });
   const [errors, setErrors] = useState<FormErrors>({});
+  // W3-09: focus the first invalid field after a failed validation attempt.
+  const newAddressRef = useRef<HTMLDivElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
 
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      newAddressRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   // Pre-select default address on mount (Requirements 6.2)
   useEffect(() => {
@@ -146,7 +157,10 @@ export function AddressSelector({
   };
 
   const handleSubmitNewAddress = () => {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
+      return;
+    }
 
     const addressData: CreateAddressRequest | undefined = saveNewAddress
       ? {
@@ -161,18 +175,6 @@ export function AddressSelector({
       : undefined;
 
     onUseNewAddress(formData, saveNewAddress, addressData);
-  };
-
-  const isFormValid = () => {
-    return (
-      formData.fullName.trim() &&
-      /^[0-9]{10,11}$/.test(formData.phone.trim()) &&
-      formData.address.trim() &&
-      formData.ward.trim() &&
-      formData.district.trim() &&
-      formData.city.trim() &&
-      (!saveNewAddress || newAddressLabel)
-    );
   };
 
   // Check if user can save more addresses
@@ -219,7 +221,7 @@ export function AddressSelector({
 
         {/* New address form */}
         {(useNewAddress || addresses.length === 0) && (
-          <div className="space-y-4">
+          <div className="space-y-4" ref={newAddressRef}>
             {addresses.length > 0 && (
               <Button
                 type="button"
@@ -268,7 +270,7 @@ export function AddressSelector({
                       </SelectContent>
                     </Select>
                     {errors.label && (
-                      <p className="text-sm text-destructive">{errors.label}</p>
+                      <p role="alert" className="text-sm text-destructive">{errors.label}</p>
                     )}
                   </div>
                 )}
@@ -291,7 +293,7 @@ export function AddressSelector({
                   disabled={isLoading}
                 />
                 {errors.fullName && (
-                  <p className="text-sm text-destructive">{errors.fullName}</p>
+                  <p role="alert" className="text-sm text-destructive">{errors.fullName}</p>
                 )}
               </div>
 
@@ -309,7 +311,7 @@ export function AddressSelector({
                   disabled={isLoading}
                 />
                 {errors.phone && (
-                  <p className="text-sm text-destructive">{errors.phone}</p>
+                  <p role="alert" className="text-sm text-destructive">{errors.phone}</p>
                 )}
               </div>
 
@@ -327,7 +329,7 @@ export function AddressSelector({
                   disabled={isLoading}
                 />
                 {errors.address && (
-                  <p className="text-sm text-destructive">{errors.address}</p>
+                  <p role="alert" className="text-sm text-destructive">{errors.address}</p>
                 )}
               </div>
 
@@ -346,7 +348,7 @@ export function AddressSelector({
                     disabled={isLoading}
                   />
                   {errors.ward && (
-                    <p className="text-sm text-destructive">{errors.ward}</p>
+                    <p role="alert" className="text-sm text-destructive">{errors.ward}</p>
                   )}
                 </div>
 
@@ -364,7 +366,7 @@ export function AddressSelector({
                     disabled={isLoading}
                   />
                   {errors.district && (
-                    <p className="text-sm text-destructive">{errors.district}</p>
+                    <p role="alert" className="text-sm text-destructive">{errors.district}</p>
                   )}
                 </div>
 
@@ -382,7 +384,7 @@ export function AddressSelector({
                     disabled={isLoading}
                   />
                   {errors.city && (
-                    <p className="text-sm text-destructive">{errors.city}</p>
+                    <p role="alert" className="text-sm text-destructive">{errors.city}</p>
                   )}
                 </div>
               </div>
@@ -393,7 +395,7 @@ export function AddressSelector({
               type="button"
               className="w-full"
               onClick={handleSubmitNewAddress}
-              disabled={isLoading || !isFormValid()}
+              disabled={isLoading}
             >
               {isLoading ? 'Đang xử lý...' : 'Sử dụng địa chỉ này'}
             </Button>

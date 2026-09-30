@@ -1,10 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ComplaintStatsData } from "@/types/complaint.type";
 
 interface ComplaintStatsProps {
   stats: ComplaintStatsData | null;
   isLoading: boolean;
+  /** W3-11: load failure state with a manual retry action */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 interface StatCardProps {
@@ -46,7 +51,7 @@ function StatCardSkeleton() {
   );
 }
 
-export function ComplaintStats({ stats, isLoading }: ComplaintStatsProps) {
+export function ComplaintStats({ stats, isLoading, isError, onRetry }: ComplaintStatsProps) {
   if (isLoading) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -59,6 +64,21 @@ export function ComplaintStats({ stats, isLoading }: ComplaintStatsProps) {
   }
 
   if (!stats) {
+    // W3-11: a failed stats fetch must not silently render nothing
+    if (isError) {
+      return (
+        <div role="alert" className="flex flex-wrap items-center gap-3">
+          <Alert variant="destructive">
+            <AlertDescription>Không thể tải thống kê khiếu nại.</AlertDescription>
+          </Alert>
+          {onRetry && (
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              Thử lại
+            </Button>
+          )}
+        </div>
+      );
+    }
     return null;
   }
 

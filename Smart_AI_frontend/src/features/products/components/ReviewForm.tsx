@@ -26,6 +26,19 @@ export function ReviewForm({
   const [rating, setRating] = React.useState<number>(0);
   const [comment, setComment] = React.useState<string>('');
   const [error, setError] = React.useState<string | null>(null);
+  // W3-09: focus the first invalid control after a failed validation attempt.
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      const target =
+        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+        formRef.current?.querySelector<HTMLElement>('[role="alert"]');
+      target?.focus();
+    }
+  }, [error]);
 
   const commentLength = comment.length;
   const isCommentTooLong = commentLength > MAX_COMMENT_LENGTH;
@@ -41,6 +54,7 @@ export function ReviewForm({
       } else if (isCommentTooLong) {
         setError(`Nhận xét không được vượt quá ${MAX_COMMENT_LENGTH} ký tự`);
       }
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -86,7 +100,7 @@ export function ReviewForm({
         <CardTitle>Viết đánh giá của bạn</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
           {/* Rating selector */}
           <div className="space-y-2">
             <label className="text-sm font-medium">
@@ -138,7 +152,7 @@ export function ReviewForm({
 
           {/* Error message */}
           {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive">
+            <div role="alert" tabIndex={-1} className="flex items-center gap-2 text-sm text-destructive">
               <AlertCircle className="h-4 w-4" />
               <span>{error}</span>
             </div>
@@ -147,7 +161,7 @@ export function ReviewForm({
           {/* Submit button */}
           <Button
             type="submit"
-            disabled={!isValid || isSubmitting}
+            disabled={isSubmitting}
             className="w-full sm:w-auto"
           >
             {isSubmitting ? (

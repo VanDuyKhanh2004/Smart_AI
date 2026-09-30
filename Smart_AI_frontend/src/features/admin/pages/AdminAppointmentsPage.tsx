@@ -98,6 +98,8 @@ export function AdminAppointmentsPage() {
   // banner is hidden behind the overlay.
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActionSubmitting, setIsActionSubmitting] = useState(false);
+  // W3-11: list load failure (distinct from the ERR-03 notification banner)
+  const [listError, setListError] = useState<string | null>(null);
 
   // Fetch stores for filter dropdown
   const fetchStores = useCallback(async () => {
@@ -112,6 +114,7 @@ export function AdminAppointmentsPage() {
   // Fetch appointments with filters
   const fetchAppointments = useCallback(async () => {
     setIsLoading(true);
+    setListError(null);
     try {
       const params: Record<string, string> = {};
       
@@ -131,6 +134,7 @@ export function AdminAppointmentsPage() {
       const response = await appointmentService.getAllAppointments(params);
       setAppointments(response.data);
     } catch {
+      setListError('Không tải được danh sách lịch hẹn');
       setNotification({ type: 'error', message: 'Không thể tải danh sách lịch hẹn' });
     } finally {
       setIsLoading(false);
@@ -390,11 +394,27 @@ export function AdminAppointmentsPage() {
                 </TableCell>
               </TableRow>
             ) : appointments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
-                  Không có lịch hẹn nào
-                </TableCell>
-              </TableRow>
+              listError ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    <span className="text-destructive">{listError}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-3"
+                      onClick={() => fetchAppointments()}
+                    >
+                      Thử lại
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    Không có lịch hẹn nào
+                  </TableCell>
+                </TableRow>
+              )
             ) : (
               appointments.map((appointment) => {
                 const contact = getContactInfo(appointment);

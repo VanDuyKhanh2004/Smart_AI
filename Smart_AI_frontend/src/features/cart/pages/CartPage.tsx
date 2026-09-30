@@ -22,7 +22,6 @@ const CartPage: React.FC = () => {
     removeItem,
     clearCart,
     loadFromLocalStorage,
-    clearError,
   } = useCartStore();
 
   useEffect(() => {
@@ -32,13 +31,6 @@ const CartPage: React.FC = () => {
       loadFromLocalStorage();
     }
   }, [isAuthenticated, fetchCart, loadFromLocalStorage]);
-
-  useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => clearError(), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [error, clearError]);
 
   useEffect(() => {
     if (!checkoutNotice) return;
@@ -83,6 +75,15 @@ const CartPage: React.FC = () => {
     navigate('/checkout');
   };
 
+  // W3-11: manual retry — the load failure no longer auto-dismisses.
+  const handleRetry = () => {
+    if (isAuthenticated) {
+      fetchCart();
+    } else {
+      loadFromLocalStorage();
+    }
+  };
+
   const totalItems = getTotalItems();
   const totalPrice = getTotalPrice();
   const isEmpty = items.length === 0;
@@ -94,8 +95,9 @@ const CartPage: React.FC = () => {
         Giỏ hàng của bạn
       </h1>
 
-      {/* Error Message */}
-      {error && (
+      {/* Error Message — only shown while cart items are present (an empty
+          cart with an error renders the dedicated error state below) */}
+      {error && !isEmpty && (
         <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
           {error}
         </div>
@@ -108,17 +110,25 @@ const CartPage: React.FC = () => {
       )}
 
       {isEmpty && !isLoading ? (
-        /* Empty Cart State */
-        <div className="flex flex-col items-center justify-center py-16">
-          <ShoppingCart className="h-16 w-16 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">Giỏ hàng trống</h2>
-          <p className="text-muted-foreground mb-6">
-            Bạn chưa có sản phẩm nào trong giỏ hàng.
-          </p>
-          <Button asChild>
-            <Link to="/products">Tiếp tục mua sắm</Link>
-          </Button>
-        </div>
+        error ? (
+          /* Load failed — keep the failure visible until retried */
+          <div role="alert" className="flex flex-col items-center justify-center py-16">
+            <p className="text-destructive mb-4">{error}</p>
+            <Button onClick={handleRetry}>Thử lại</Button>
+          </div>
+        ) : (
+          /* Empty Cart State */
+          <div className="flex flex-col items-center justify-center py-16">
+            <ShoppingCart className="h-16 w-16 text-muted-foreground mb-4" />
+            <h2 className="text-xl font-semibold mb-2">Giỏ hàng trống</h2>
+            <p className="text-muted-foreground mb-6">
+              Bạn chưa có sản phẩm nào trong giỏ hàng.
+            </p>
+            <Button asChild>
+              <Link to="/products">Tiếp tục mua sắm</Link>
+            </Button>
+          </div>
+        )
       ) : (
         /* Cart Content */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

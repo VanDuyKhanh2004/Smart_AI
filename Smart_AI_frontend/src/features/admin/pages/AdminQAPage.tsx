@@ -516,8 +516,9 @@ export function AdminQAPage() {
         </div>
       </div>
 
-      {/* Error message */}
-      {error && (
+      {/* Error message — only while there are rows; an empty table with an
+          error renders the retry row inside the table (W3-11) */}
+      {error && questions.length > 0 && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-lg">
           {error}
         </div>
@@ -542,14 +543,30 @@ export function AdminQAPage() {
             {isLoading ? (
               <TableSkeleton />
             ) : questions.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-center text-muted-foreground py-8"
-                >
-                  Không có câu hỏi nào
-                </TableCell>
-              </TableRow>
+              error ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    <span className="text-destructive">{error}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-3"
+                      onClick={() => fetchQuestions()}
+                    >
+                      Thử lại
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={8}
+                    className="text-center text-muted-foreground py-8"
+                  >
+                    Không có câu hỏi nào
+                  </TableCell>
+                </TableRow>
+              )
             ) : (
               questions.map((question) => {
                 // Handle both _id and id formats (Mongoose can return either)
@@ -737,7 +754,7 @@ export function AdminQAPage() {
           setAnswerDialogOpen(open);
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Trả lời câu hỏi</DialogTitle>
             <DialogDescription>Viết câu trả lời của bạn cho câu hỏi này.</DialogDescription>

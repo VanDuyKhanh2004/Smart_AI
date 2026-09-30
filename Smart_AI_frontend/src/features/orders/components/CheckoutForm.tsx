@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +30,18 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
     city: '',
   });
   const [errors, setErrors] = useState<FormErrors>({});
+  // W3-09: focus the first invalid field after a failed validation attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -80,18 +92,9 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
     e.preventDefault();
     if (validateForm()) {
       onSubmit(formData);
+    } else {
+      shouldFocusInvalidRef.current = true;
     }
-  };
-
-  const isFormValid = () => {
-    return (
-      formData.fullName.trim() &&
-      /^[0-9]{10,11}$/.test(formData.phone.trim()) &&
-      formData.address.trim() &&
-      formData.ward.trim() &&
-      formData.district.trim() &&
-      formData.city.trim()
-    );
   };
 
   return (
@@ -100,7 +103,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
         <CardTitle>Thông tin giao hàng</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
           <div className="space-y-2">
             <label htmlFor="fullName" className="text-sm font-medium">
               Họ và tên <span className="text-destructive">*</span>
@@ -115,7 +118,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
               disabled={isLoading}
             />
             {errors.fullName && (
-              <p className="text-sm text-destructive">{errors.fullName}</p>
+              <p role="alert" className="text-sm text-destructive">{errors.fullName}</p>
             )}
           </div>
 
@@ -133,7 +136,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
               disabled={isLoading}
             />
             {errors.phone && (
-              <p className="text-sm text-destructive">{errors.phone}</p>
+              <p role="alert" className="text-sm text-destructive">{errors.phone}</p>
             )}
           </div>
 
@@ -151,7 +154,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
               disabled={isLoading}
             />
             {errors.address && (
-              <p className="text-sm text-destructive">{errors.address}</p>
+              <p role="alert" className="text-sm text-destructive">{errors.address}</p>
             )}
           </div>
 
@@ -170,7 +173,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
                 disabled={isLoading}
               />
               {errors.ward && (
-                <p className="text-sm text-destructive">{errors.ward}</p>
+                <p role="alert" className="text-sm text-destructive">{errors.ward}</p>
               )}
             </div>
 
@@ -188,7 +191,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
                 disabled={isLoading}
               />
               {errors.district && (
-                <p className="text-sm text-destructive">{errors.district}</p>
+                <p role="alert" className="text-sm text-destructive">{errors.district}</p>
               )}
             </div>
 
@@ -206,7 +209,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
                 disabled={isLoading}
               />
               {errors.city && (
-                <p className="text-sm text-destructive">{errors.city}</p>
+                <p role="alert" className="text-sm text-destructive">{errors.city}</p>
               )}
             </div>
           </div>
@@ -215,7 +218,7 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
             type="submit"
             className="w-full"
             size="lg"
-            disabled={isLoading || !isFormValid()}
+            disabled={isLoading}
           >
             {isLoading ? (
               <>

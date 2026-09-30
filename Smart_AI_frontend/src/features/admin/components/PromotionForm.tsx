@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -62,6 +62,18 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
     endDate: '',
   });
   const [errors, setErrors] = useState<FormErrors>({});
+  // W3-09: focus the first invalid field after a failed validation attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   useEffect(() => {
     if (promotion) {
@@ -133,6 +145,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
     e.preventDefault();
 
     if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -169,13 +182,8 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
     }
   };
 
-  const isFormValid = isEditMode
-    ? formData.discountValue && Number(formData.discountValue) > 0 && formData.usageLimit && formData.endDate
-    : formData.code.trim() && formData.discountValue && Number(formData.discountValue) > 0 && 
-      formData.usageLimit && formData.startDate && formData.endDate;
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
       {/* Code field - only for create mode */}
       {!isEditMode && (
         <div className="space-y-2">
@@ -191,7 +199,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             disabled={isLoading}
             maxLength={20}
           />
-          {errors.code && <p className="text-sm text-destructive">{errors.code}</p>}
+          {errors.code && <p role="alert" className="text-sm text-destructive">{errors.code}</p>}
           <p className="text-xs text-muted-foreground">Chỉ chứa chữ cái và số, 4-20 ký tự</p>
         </div>
       )}
@@ -248,7 +256,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             min={1}
             max={formData.discountType === 'percentage' ? 100 : undefined}
           />
-          {errors.discountValue && <p className="text-sm text-destructive">{errors.discountValue}</p>}
+          {errors.discountValue && <p role="alert" className="text-sm text-destructive">{errors.discountValue}</p>}
         </div>
       </div>
 
@@ -268,7 +276,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             disabled={isLoading}
             min={0}
           />
-          {errors.minOrderValue && <p className="text-sm text-destructive">{errors.minOrderValue}</p>}
+          {errors.minOrderValue && <p role="alert" className="text-sm text-destructive">{errors.minOrderValue}</p>}
         </div>
 
         <div className="space-y-2">
@@ -303,7 +311,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
           disabled={isLoading}
           min={1}
         />
-        {errors.usageLimit && <p className="text-sm text-destructive">{errors.usageLimit}</p>}
+        {errors.usageLimit && <p role="alert" className="text-sm text-destructive">{errors.usageLimit}</p>}
       </div>
 
       {/* Date Range */}
@@ -320,7 +328,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             aria-invalid={!!errors.startDate}
             disabled={isLoading || isEditMode}
           />
-          {errors.startDate && <p className="text-sm text-destructive">{errors.startDate}</p>}
+          {errors.startDate && <p role="alert" className="text-sm text-destructive">{errors.startDate}</p>}
         </div>
 
         <div className="space-y-2">
@@ -335,7 +343,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             aria-invalid={!!errors.endDate}
             disabled={isLoading}
           />
-          {errors.endDate && <p className="text-sm text-destructive">{errors.endDate}</p>}
+          {errors.endDate && <p role="alert" className="text-sm text-destructive">{errors.endDate}</p>}
         </div>
       </div>
 
@@ -344,7 +352,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
         <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
           Hủy
         </Button>
-        <Button type="submit" disabled={isLoading || !isFormValid}>
+        <Button type="submit" disabled={isLoading}>
           {isLoading ? 'Đang xử lý...' : isEditMode ? 'Cập nhật' : 'Tạo mã'}
         </Button>
       </div>

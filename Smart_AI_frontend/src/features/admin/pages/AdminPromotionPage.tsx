@@ -65,9 +65,12 @@ export function AdminPromotionPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  // W3-11: list load failure (distinct from the ERR-03 notification banner)
+  const [listError, setListError] = useState<string | null>(null);
 
   const fetchPromotions = useCallback(async () => {
     setIsLoading(true);
+    setListError(null);
     try {
       const params: { page: number; limit: number; status?: PromotionStatus } = {
         page,
@@ -80,6 +83,7 @@ export function AdminPromotionPage() {
       setPromotions(response.data);
       setPagination(response.pagination);
     } catch {
+      setListError('Không tải được danh sách mã khuyến mãi');
       setNotification({ type: 'error', message: 'Không thể tải danh sách mã khuyến mãi' });
     } finally {
       setIsLoading(false);
@@ -280,6 +284,9 @@ export function AdminPromotionPage() {
         isLoading={isLoading}
         deletingId={deletingId}
         togglingId={togglingId}
+        isError={!!listError}
+        error={listError}
+        onRetry={() => fetchPromotions()}
       />
 
       {/* Pagination */}
@@ -315,7 +322,7 @@ export function AdminPromotionPage() {
 
       {/* Create Dialog */}
       <Dialog open={isFormOpen} onOpenChange={handleFormOpenChange}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Tạo mã khuyến mãi mới</DialogTitle>
           </DialogHeader>
@@ -334,7 +341,7 @@ export function AdminPromotionPage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editingPromotion} onOpenChange={handleEditOpenChange}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Chỉnh sửa mã khuyến mãi</DialogTitle>
           </DialogHeader>

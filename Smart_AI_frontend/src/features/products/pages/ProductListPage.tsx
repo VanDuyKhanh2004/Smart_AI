@@ -351,28 +351,32 @@ const ProductListPage: React.FC = () => {
           {/* Product Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
             {products.map((product) => (
-              <Link
+              <Card
                 key={product._id}
-                to={`/products/${product._id}`}
-                className="block transition-transform hover:scale-105"
+                className="h-full relative cursor-pointer hover:shadow-lg transition-[transform,box-shadow] hover:scale-105"
               >
-                <Card className="h-full cursor-pointer hover:shadow-lg transition-shadow relative">
+                {/* Action buttons are siblings of the product link — never
+                    nested inside it (W3-07) */}
+                <div className="absolute top-2 right-2 z-10 flex gap-1">
+                  {/* CompareButton - Requirements: 1.1 */}
+                  <CompareButton
+                    productId={product._id}
+                    size="icon"
+                    variant="ghost"
+                    className="bg-white/80 hover:bg-white shadow-sm rounded-full"
+                  />
                   {/* WishlistButton - Requirements: 7.1 */}
-                  <div className="absolute top-2 right-2 z-10 flex gap-1">
-                    {/* CompareButton - Requirements: 1.1 */}
-                    <CompareButton
-                      productId={product._id}
-                      size="icon"
-                      variant="ghost"
-                      className="bg-white/80 hover:bg-white shadow-sm rounded-full"
-                    />
-                    <WishlistButton
-                      productId={product._id}
-                      size="icon"
-                      variant="ghost"
-                      className="bg-white/80 hover:bg-white shadow-sm rounded-full"
-                    />
-                  </div>
+                  <WishlistButton
+                    productId={product._id}
+                    size="icon"
+                    variant="ghost"
+                    className="bg-white/80 hover:bg-white shadow-sm rounded-full"
+                  />
+                </div>
+                <Link
+                  to={`/products/${product._id}`}
+                  className="block"
+                >
                   <CardContent className="p-0">
                     <AspectRatio ratio={4 / 3} className="bg-muted">
                       <img
@@ -425,8 +429,8 @@ const ProductListPage: React.FC = () => {
                       </span>
                     </div>
                   </CardFooter>
-                </Card>
-              </Link>
+                </Link>
+              </Card>
             ))}
           </div>
 
