@@ -142,61 +142,41 @@ const CheckoutPage: React.FC = () => {
   }, []);
 
   // Handle using a new address (Requirements 6.4, 6.5)
+  // W3-08: this only applies the address (saving it when requested) — the
+  // order itself is only ever created by the explicit "Đặt hàng" action.
   const handleUseNewAddress = async (
     shippingAddress: ShippingAddress,
     saveAddress: boolean,
     addressData?: CreateAddressRequest
   ) => {
-    setIsLoading(true);
     setError(null);
 
-    try {
-      // Save address if requested (Requirements 6.5)
-      if (saveAddress && addressData) {
-        try {
-          await addressService.createAddress(addressData);
-        } catch (saveErr) {
-          console.error('Failed to save address:', saveErr);
-          // Continue with order even if save fails
-        }
+    // Save address if requested (Requirements 6.5)
+    if (saveAddress && addressData) {
+      setIsLoading(true);
+      try {
+        await addressService.createAddress(addressData);
+      } catch (saveErr) {
+        console.error('Failed to save address:', saveErr);
+        // Continue with the applied address even if save fails
+      } finally {
+        setIsLoading(false);
       }
-
-      // Create order with the new address and promotion if applied
-      const response = await orderService.createOrder({ 
-        shippingAddress,
-        promotionCode: appliedPromotion?.promotion.code,
-      }, idempotencyKey);
-      
-      // Clear cart + rotate idempotency key after successful order.
-      // Cart cleanup failures are swallowed by finalizeSuccessfulOrder.
-      await finalizeSuccessfulOrder(response.data.orderNumber);
-    } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { message?: string } } };
-      setError(
-        axiosError.response?.data?.message || 
-        'Đã xảy ra lỗi khi đặt hàng. Vui lòng thử lại.'
-      );
-      setIsLoading(false);
     }
+
+    // Apply the address as the active shipping address for the order step.
+    setSelectedAddress(null);
+    setManualAddress(shippingAddress);
   };
 
-  // Handle order submission with selected saved address
+  // Handle order submission with the active shipping address (saved or applied)
   const handleSubmitWithSavedAddress = async () => {
-    if (!selectedAddress) return;
+    if (!shippingAddress) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      const shippingAddress: ShippingAddress = {
-        fullName: selectedAddress.fullName,
-        phone: selectedAddress.phone,
-        address: selectedAddress.address,
-        ward: selectedAddress.ward,
-        district: selectedAddress.district,
-        city: selectedAddress.city,
-      };
-
       const response = await orderService.createOrder({ 
         shippingAddress,
         promotionCode: appliedPromotion?.promotion.code,
@@ -316,8 +296,8 @@ const CheckoutPage: React.FC = () => {
                 canSaveAddress={true}
               />
               
-              {/* Order button when using saved address */}
-              {selectedAddress && (
+              {/* Order button for the active shipping address (saved or applied) */}
+              {shippingAddress && (
                 <Button
                   className="w-full"
                   size="lg"

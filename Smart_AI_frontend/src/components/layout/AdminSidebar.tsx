@@ -153,7 +153,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       {/* Mobile Overlay - Requirements: 5.3 */}
       {isMobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          // W3-16: above the CompareBar (z-50) and its hamburger (z-[55]).
+          className="fixed inset-0 bg-black/50 z-[65] lg:hidden"
           onClick={onMobileClose}
           aria-hidden="true"
         />
@@ -170,9 +171,10 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
         aria-label={isMobileOpen ? 'Menu điều hướng quản trị' : undefined}
         onKeyDown={(event) => trapTabKey(event, asideRef.current)}
         className={cn(
-          // shrink-0 prevents the fixed-width sidebar (Requirements: 1.2) from
+          // shrink-0 prevents the fixed-width sidebar (Requirements 1.2) from
           // being compressed when wide page content overflows the flex line.
-          'fixed top-0 left-0 z-50 h-screen shrink-0',
+          // W3-16: above the overlay (z-[65]) and the CompareBar (z-50).
+          'fixed top-0 left-0 z-[70] h-screen shrink-0',
           // Background and border - Requirements: 6.1: Consistent styling with main theme
           // Using sidebar-specific CSS variables for theme consistency
           'bg-sidebar border-r border-sidebar-border',

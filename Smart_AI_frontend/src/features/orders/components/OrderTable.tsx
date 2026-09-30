@@ -15,6 +15,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { OrderStatusBadge } from "./OrderStatusBadge";
+import { Button } from "@/components/ui/button";
 import type { Order } from "@/types/order.type";
 import type { Pagination as PaginationType } from "@/types/api.type";
 import { AlertTriangle } from "lucide-react";
@@ -26,6 +27,10 @@ interface OrderTableProps {
   onPageChange: (page: number) => void;
   onOrderClick: (order: Order) => void;
   isLoading?: boolean;
+  /** W3-11: load failure state with a manual retry action */
+  isError?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 /**
@@ -66,6 +71,9 @@ export function OrderTable({
   onPageChange,
   onOrderClick,
   isLoading,
+  isError,
+  error,
+  onRetry,
 }: OrderTableProps) {
   const { currentPage, totalPages } = pagination;
 
@@ -97,6 +105,18 @@ export function OrderTable({
   }
 
   if (orders.length === 0) {
+    if (isError) {
+      return (
+        <div role="alert" className="flex items-center justify-center gap-3 py-8">
+          <span className="text-destructive">{error || "Không thể tải danh sách đơn hàng"}</span>
+          {onRetry && (
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              Thử lại
+            </Button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="flex items-center justify-center py-8">
         <div className="text-muted-foreground">Không có đơn hàng nào</div>

@@ -8,11 +8,16 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { RevenueData } from "@/types/dashboard.type";
 
 interface RevenueChartProps {
   data: RevenueData[];
   isLoading?: boolean;
+  /** W3-11: load failure state with a manual retry action */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 function formatCurrency(value: number): string {
@@ -60,7 +65,7 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   return null;
 }
 
-export function RevenueChart({ data, isLoading }: RevenueChartProps) {
+export function RevenueChart({ data, isLoading, isError, onRetry }: RevenueChartProps) {
   if (isLoading) {
     return (
       <Card>
@@ -85,9 +90,23 @@ export function RevenueChart({ data, isLoading }: RevenueChartProps) {
           <CardTitle>Doanh thu</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-            Không có dữ liệu
-          </div>
+          {/* H15: a failed dashboard fetch must never read as "no data" */}
+          {isError ? (
+            <div className="h-[300px] flex flex-col items-center justify-center gap-3">
+              <Alert variant="destructive" className="max-w-md">
+                <AlertDescription>Không thể tải dữ liệu doanh thu.</AlertDescription>
+              </Alert>
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  Thử lại
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              Không có dữ liệu
+            </div>
+          )}
         </CardContent>
       </Card>
     );

@@ -82,7 +82,7 @@ const CompareBar: React.FC = () => {
       <div className="container mx-auto px-4 py-3 md:px-8">
         <div className="flex items-center justify-between gap-4">
           {/* Product thumbnails */}
-          <div className="flex items-center gap-2 flex-1 overflow-x-auto">
+          <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto">
             <GitCompareArrows className="h-5 w-5 text-blue-500 flex-shrink-0" />
             <span className="text-sm font-medium text-gray-600 flex-shrink-0">
               So sánh:
@@ -111,18 +111,19 @@ const CompareBar: React.FC = () => {
                         className="w-full h-full object-cover"
                       />
                     </div>
-                    {/* Remove button */}
+                    {/* Remove button — always visible on touch (no hover) with a
+                        24px minimum target */}
                     <button
                       onClick={(e) => handleRemove(product._id, e)}
                       className={cn(
-                        'absolute -top-1 -right-1 w-5 h-5 rounded-full',
+                        'absolute -top-1 -right-1 h-6 w-6 rounded-full',
                         'bg-red-500 text-white flex items-center justify-center',
-                        'opacity-0 group-hover:opacity-100 transition-opacity',
+                        'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:opacity-100 transition-opacity',
                         'hover:bg-red-600'
                       )}
                       aria-label={`Xóa ${product.name} khỏi so sánh`}
                     >
-                      <X className="h-3 w-3" />
+                      <X className="h-3.5 w-3.5" />
                     </button>
                     {/* Product name tooltip */}
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -146,8 +147,8 @@ const CompareBar: React.FC = () => {
 
           {/* Counter and actions */}
           <div className="flex items-center gap-3 flex-shrink-0">
-            {/* Counter */}
-            <span className="text-sm text-gray-500">
+            {/* Counter — hidden on small screens so the actions fit at 320px */}
+            <span className="hidden sm:inline text-sm text-gray-500">
               {items.length}/{MAX_COMPARE_ITEMS} sản phẩm
             </span>
 

@@ -232,8 +232,9 @@ export function AdminOrderPage() {
         onClearFilters={handleClearFilters}
       />
 
-      {/* Error message */}
-      {error && (
+      {/* Error message — only while there are rows; an empty table with an
+          error renders the retry state inside OrderTable (W3-11) */}
+      {error && orders.length > 0 && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-lg">
           {error}
         </div>
@@ -246,6 +247,9 @@ export function AdminOrderPage() {
         onPageChange={handlePageChange}
         onOrderClick={handleOrderClick}
         isLoading={isLoading}
+        isError={!!error}
+        error={error}
+        onRetry={() => fetchOrders(currentPage, filters)}
       />
 
       {/* Order detail dialog */}

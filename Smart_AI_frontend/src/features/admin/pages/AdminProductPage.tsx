@@ -259,7 +259,7 @@ export function AdminProductPage() {
       )}
 
       <Dialog open={isFormOpen} onOpenChange={(open) => { if (!open) closeForm(); }}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingProduct ? 'Chỉnh sửa sản phẩm' : 'Thêm sản phẩm mới'}</DialogTitle>
             <DialogDescription>Điền thông tin sản phẩm vào biểu mẫu bên dưới.</DialogDescription>

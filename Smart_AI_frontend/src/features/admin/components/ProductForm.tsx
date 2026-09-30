@@ -38,6 +38,18 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
     inStock: initialData?.inStock ?? 0,
   });
   const [errors, setErrors] = useState<FormErrors>({});
+  // W3-09: focus the first invalid field after a failed validation attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
   const [colorsInput, setColorsInput] = useState(
     initialData?.colors ? initialData.colors.join(', ') : ''
   );
@@ -161,6 +173,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
     e.preventDefault();
 
     if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -208,10 +221,8 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
     setPreviewFailed(false);
   }, [previewSrc]);
 
-  const isFormValid = formData.name.trim() && formData.brand.trim() && formData.price > 0 && formData.description.trim();
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
       <div className="space-y-2">
         <label htmlFor="name" className="text-sm font-medium">
           Tên sản phẩm <span className="text-destructive">*</span>
@@ -224,7 +235,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
           aria-invalid={!!errors.name}
           disabled={isLoading}
         />
-        {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
+        {errors.name && <p role="alert" className="text-sm text-destructive">{errors.name}</p>}
       </div>
 
       <div className="space-y-2">
@@ -239,7 +250,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
           aria-invalid={!!errors.brand}
           disabled={isLoading}
         />
-        {errors.brand && <p className="text-sm text-destructive">{errors.brand}</p>}
+        {errors.brand && <p role="alert" className="text-sm text-destructive">{errors.brand}</p>}
       </div>
 
       <div className="space-y-2">
@@ -256,7 +267,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
           disabled={isLoading}
           min={0}
         />
-        {errors.price && <p className="text-sm text-destructive">{errors.price}</p>}
+        {errors.price && <p role="alert" className="text-sm text-destructive">{errors.price}</p>}
       </div>
 
       <div className="space-y-2">
@@ -272,7 +283,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
           disabled={isLoading}
           rows={3}
         />
-        {errors.description && <p className="text-sm text-destructive">{errors.description}</p>}
+        {errors.description && <p role="alert" className="text-sm text-destructive">{errors.description}</p>}
       </div>
 
       <fieldset className="space-y-3">
@@ -425,7 +436,7 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
         <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
           Hủy
         </Button>
-        <Button type="submit" disabled={isLoading || !isFormValid}>
+        <Button type="submit" disabled={isLoading}>
           {isLoading
             ? uploadProgress != null && uploadProgress > 0
               ? `Đang tải ảnh... ${uploadProgress}%`

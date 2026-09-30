@@ -53,7 +53,12 @@ export function ComplaintListPage() {
   });
 
   // Fetch complaint statistics
-  const { data: statsData, isLoading: isLoadingStats } = useComplaintStats();
+  const {
+    data: statsData,
+    isLoading: isLoadingStats,
+    isError: isStatsError,
+    refetch: refetchStats,
+  } = useComplaintStats();
 
 
   // Mutation for updating complaints
@@ -149,7 +154,12 @@ export function ComplaintListPage() {
       </div>
 
       {/* Statistics Cards */}
-      <ComplaintStats stats={stats} isLoading={isLoadingStats} />
+      <ComplaintStats
+        stats={stats}
+        isLoading={isLoadingStats}
+        isError={isStatsError}
+        onRetry={() => refetchStats()}
+      />
 
       {/* Mutation error (ERR-04) — page-level copy, also passed to the dialog so
           the message is readable above the overlay while it is open (H03) */}

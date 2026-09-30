@@ -46,12 +46,14 @@ const WishlistPage: React.FC = () => {
     }
   }, [isAuthenticated, fetchWishlist]);
 
-  useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => clearError(), 5000);
-      return () => clearTimeout(timer);
+  // W3-11: manual retry — the load failure no longer auto-dismisses.
+  const handleRetry = () => {
+    if (isAuthenticated) {
+      fetchWishlist();
+    } else {
+      clearError();
     }
-  }, [error, clearError]);
+  };
 
   const isEmpty = items.length === 0;
 
@@ -67,25 +69,34 @@ const WishlistPage: React.FC = () => {
         )}
       </h1>
 
-      {/* Error Message */}
-      {error && (
+      {/* Error Message — only shown while items are present (an empty list
+          with an error renders the dedicated error state below) */}
+      {error && !isEmpty && (
         <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
           {error}
         </div>
       )}
 
       {isEmpty && !isLoading ? (
-        /* Empty Wishlist State - Requirement 3.3 */
-        <div className="flex flex-col items-center justify-center py-16">
-          <Heart className="h-16 w-16 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">Chưa có sản phẩm yêu thích</h2>
-          <p className="text-muted-foreground mb-6">
-            Hãy thêm sản phẩm vào danh sách yêu thích để xem lại sau.
-          </p>
-          <Button asChild>
-            <Link to="/products">Khám phá sản phẩm</Link>
-          </Button>
-        </div>
+        error ? (
+          /* Load failed — keep the failure visible until retried */
+          <div role="alert" className="flex flex-col items-center justify-center py-16">
+            <p className="text-destructive mb-4">{error}</p>
+            <Button onClick={handleRetry}>Thử lại</Button>
+          </div>
+        ) : (
+          /* Empty Wishlist State - Requirement 3.3 */
+          <div className="flex flex-col items-center justify-center py-16">
+            <Heart className="h-16 w-16 text-muted-foreground mb-4" />
+            <h2 className="text-xl font-semibold mb-2">Chưa có sản phẩm yêu thích</h2>
+            <p className="text-muted-foreground mb-6">
+              Hãy thêm sản phẩm vào danh sách yêu thích để xem lại sau.
+            </p>
+            <Button asChild>
+              <Link to="/products">Khám phá sản phẩm</Link>
+            </Button>
+          </div>
+        )
       ) : isLoading && items.length === 0 ? (
         /* Loading State */
         <div className="flex items-center justify-center py-16">
@@ -237,9 +248,10 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
   return (
     <Card className={`h-full ${isUnavailable ? 'opacity-60' : ''}`}>
       <CardContent className="p-0">
-        {/* Product Image */}
-        <Link to={`/products/${productId}`}>
-          <div className="relative aspect-[4/3] bg-muted overflow-hidden rounded-t-lg">
+        {/* Product Image — the link wraps only the image; the remove button
+            stays a sibling, never nested inside the link (W3-07) */}
+        <div className="relative aspect-[4/3] bg-muted overflow-hidden rounded-t-lg">
+          <Link to={`/products/${productId}`} className="block h-full">
             <img
               src={productData.image || '/images/product-placeholder.svg'}
               alt={productData.name}
@@ -249,39 +261,39 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
                 e.currentTarget.src = '/images/product-placeholder.svg';
               }}
             />
-            {/* Remove Button */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="absolute top-2 right-2 bg-white/80 hover:bg-white text-muted-foreground hover:text-destructive z-10"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleRemove();
-              }}
-              disabled={isRemoving}
-            >
-              {isRemoving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )}
-            </Button>
-            {/* Status Badges */}
-            <div className="absolute top-2 left-2 flex flex-col gap-1">
-              {isUnavailable && (
-                <Badge variant="destructive" className="text-xs">
-                  Không còn khả dụng
-                </Badge>
-              )}
-              {isOutOfStock && !isUnavailable && (
-                <Badge variant="secondary" className="text-xs">
-                  Hết hàng
-                </Badge>
-              )}
-            </div>
+          </Link>
+          {/* Remove Button */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="absolute top-2 right-2 bg-white/80 hover:bg-white text-muted-foreground hover:text-destructive z-10"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleRemove();
+            }}
+            disabled={isRemoving}
+          >
+            {isRemoving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
+          {/* Status Badges */}
+          <div className="absolute top-2 left-2 flex flex-col gap-1">
+            {isUnavailable && (
+              <Badge variant="destructive" className="text-xs">
+                Không còn khả dụng
+              </Badge>
+            )}
+            {isOutOfStock && !isUnavailable && (
+              <Badge variant="secondary" className="text-xs">
+                Hết hàng
+              </Badge>
+            )}
           </div>
-        </Link>
+        </div>
 
         {/* Product Info */}
         <div className="p-4 space-y-3">

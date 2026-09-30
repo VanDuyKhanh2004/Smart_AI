@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -84,6 +84,18 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
   const [longitude, setLongitude] = useState<number>(105.8542);
   const [businessHours, setBusinessHours] = useState<BusinessHours>(DEFAULT_BUSINESS_HOURS);
   const [errors, setErrors] = useState<FormErrors>({});
+  // W3-09: focus the first invalid field after a failed validation attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   // Initialize form with store data if editing
   useEffect(() => {
@@ -146,7 +158,10 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
+      return;
+    }
 
     const data: CreateStoreRequest = {
       name: name.trim(),
@@ -170,10 +185,8 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
     await onSubmit(data);
   };
 
-  const isFormValid = name.trim() && street.trim() && district.trim() && city.trim() && fullAddress.trim() && phone.trim();
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6" ref={formRef}>
       {/* Basic Info */}
       <div className="space-y-4">
         <h3 className="font-medium text-lg">Thông tin cơ bản</h3>
@@ -185,6 +198,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
           <Input
             id="name"
             value={name}
+            aria-invalid={!!errors.name}
             onChange={(e) => {
               setName(e.target.value);
               if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
@@ -192,7 +206,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             placeholder="Nhập tên cửa hàng"
             disabled={isLoading}
           />
-          {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
+          {errors.name && <p role="alert" className="text-sm text-destructive">{errors.name}</p>}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -203,6 +217,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             <Input
               id="phone"
               value={phone}
+              aria-invalid={!!errors.phone}
               onChange={(e) => {
                 setPhone(e.target.value);
                 if (errors.phone) setErrors((prev) => ({ ...prev, phone: undefined }));
@@ -210,7 +225,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
               placeholder="0123456789"
               disabled={isLoading}
             />
-            {errors.phone && <p className="text-sm text-destructive">{errors.phone}</p>}
+            {errors.phone && <p role="alert" className="text-sm text-destructive">{errors.phone}</p>}
           </div>
           <div className="space-y-2">
             <label htmlFor="email" className="text-sm font-medium">Email</label>
@@ -250,6 +265,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
           <Input
             id="street"
             value={street}
+            aria-invalid={!!errors.street}
             onChange={(e) => {
               setStreet(e.target.value);
               if (errors.street) setErrors((prev) => ({ ...prev, street: undefined }));
@@ -257,7 +273,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             placeholder="123 Đường ABC"
             disabled={isLoading}
           />
-          {errors.street && <p className="text-sm text-destructive">{errors.street}</p>}
+          {errors.street && <p role="alert" className="text-sm text-destructive">{errors.street}</p>}
         </div>
 
         <div className="grid grid-cols-3 gap-4">
@@ -278,6 +294,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             <Input
               id="district"
               value={district}
+              aria-invalid={!!errors.district}
               onChange={(e) => {
                 setDistrict(e.target.value);
                 if (errors.district) setErrors((prev) => ({ ...prev, district: undefined }));
@@ -285,7 +302,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
               placeholder="Quận 1"
               disabled={isLoading}
             />
-            {errors.district && <p className="text-sm text-destructive">{errors.district}</p>}
+            {errors.district && <p role="alert" className="text-sm text-destructive">{errors.district}</p>}
           </div>
           <div className="space-y-2">
             <label htmlFor="city" className="text-sm font-medium">
@@ -294,6 +311,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             <Input
               id="city"
               value={city}
+              aria-invalid={!!errors.city}
               onChange={(e) => {
                 setCity(e.target.value);
                 if (errors.city) setErrors((prev) => ({ ...prev, city: undefined }));
@@ -301,7 +319,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
               placeholder="Hà Nội"
               disabled={isLoading}
             />
-            {errors.city && <p className="text-sm text-destructive">{errors.city}</p>}
+            {errors.city && <p role="alert" className="text-sm text-destructive">{errors.city}</p>}
           </div>
         </div>
 
@@ -312,6 +330,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
           <Input
             id="fullAddress"
             value={fullAddress}
+            aria-invalid={!!errors.fullAddress}
             onChange={(e) => {
               setFullAddress(e.target.value);
               if (errors.fullAddress) setErrors((prev) => ({ ...prev, fullAddress: undefined }));
@@ -319,7 +338,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             placeholder="123 Đường ABC, Phường 1, Quận 1, Hà Nội"
             disabled={isLoading}
           />
-          {errors.fullAddress && <p className="text-sm text-destructive">{errors.fullAddress}</p>}
+          {errors.fullAddress && <p role="alert" className="text-sm text-destructive">{errors.fullAddress}</p>}
         </div>
       </div>
 
@@ -418,7 +437,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
         <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
           Hủy
         </Button>
-        <Button type="submit" disabled={isLoading || !isFormValid}>
+        <Button type="submit" disabled={isLoading}>
           {isLoading ? 'Đang xử lý...' : store ? 'Cập nhật' : 'Thêm cửa hàng'}
         </Button>
       </div>

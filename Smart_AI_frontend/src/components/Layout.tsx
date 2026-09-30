@@ -3,6 +3,8 @@ import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
 import CompareBar from '@/components/CompareBar';
 import { PageLoader } from '@/components/ui/page-loader';
+import { useCompareStore } from '@/stores/compareStore';
+import { cn } from '@/lib/utils';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -13,8 +15,16 @@ interface LayoutProps {
  * Requirements: 1.1 - Clean header layout with new Header component
  */
 const Layout: React.FC<LayoutProps> = ({ children }) => {
+  // W3-16: reserve space so the fixed CompareBar never covers the footer.
+  const hasCompareItems = useCompareStore((state) => state.items.length > 0);
+
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div
+      className={cn(
+        'flex min-h-screen flex-col bg-background',
+        hasCompareItems && 'pb-20'
+      )}
+    >
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"

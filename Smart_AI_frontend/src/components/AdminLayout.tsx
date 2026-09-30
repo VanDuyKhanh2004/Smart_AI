@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import Header from '@/components/layout/Header';
 import AdminSidebar from '@/components/layout/AdminSidebar';
 import CompareBar from '@/components/CompareBar';
+import { useCompareStore } from '@/stores/compareStore';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -27,6 +28,8 @@ const SIDEBAR_COLLAPSED_KEY = 'admin-sidebar-collapsed';
  */
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const location = useLocation();
+  // W3-16: reserve space so the fixed CompareBar never covers the content.
+  const hasCompareItems = useCompareStore((state) => state.items.length > 0);
   
   // Sidebar collapsed state - Requirements: 3.2, 3.3
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -64,7 +67,12 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div
+      className={cn(
+        'min-h-screen bg-background',
+        hasCompareItems && 'pb-20'
+      )}
+    >
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
@@ -83,7 +91,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           variant="ghost"
           size="icon"
           className={cn(
-            'fixed bottom-4 left-4 z-30 lg:hidden',
+            // W3-16: above the fixed CompareBar (z-50) so it stays clickable.
+            'fixed bottom-4 left-4 z-[55] lg:hidden',
             'bg-primary text-primary-foreground shadow-lg',
             'hover:bg-primary/90'
           )}

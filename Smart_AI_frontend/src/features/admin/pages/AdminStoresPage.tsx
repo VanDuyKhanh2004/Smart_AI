@@ -43,13 +43,17 @@ export function AdminStoresPage() {
   // a page-level banner sits behind the overlay and cannot be read.
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // W3-11: list load failure (distinct from the ERR-03 notification banner)
+  const [listError, setListError] = useState<string | null>(null);
 
   const fetchStores = useCallback(async () => {
     setIsLoading(true);
+    setListError(null);
     try {
       const response = await storeService.getAllStoresAdmin();
       setStores(response.data);
     } catch {
+      setListError('Không tải được danh sách cửa hàng');
       setNotification({ type: 'error', message: 'Không thể tải danh sách cửa hàng' });
     } finally {
       setIsLoading(false);
@@ -206,11 +210,27 @@ export function AdminStoresPage() {
                 </TableCell>
               </TableRow>
             ) : stores.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-8">
-                  Chưa có cửa hàng nào
-                </TableCell>
-              </TableRow>
+              listError ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8">
+                    <span className="text-destructive">{listError}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-3"
+                      onClick={() => fetchStores()}
+                    >
+                      Thử lại
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8">
+                    Chưa có cửa hàng nào
+                  </TableCell>
+                </TableRow>
+              )
             ) : (
               stores.map((store) => (
                 <TableRow key={store.id}>
@@ -271,7 +291,7 @@ export function AdminStoresPage() {
 
       {/* Create Store Dialog */}
       <Dialog open={isFormOpen} onOpenChange={handleFormOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Thêm cửa hàng mới</DialogTitle>
           </DialogHeader>
@@ -295,7 +315,7 @@ export function AdminStoresPage() {
           if (!open) closeForm();
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Chỉnh sửa cửa hàng</DialogTitle>
           </DialogHeader>

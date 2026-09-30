@@ -267,8 +267,9 @@ export function AdminReviewsPage() {
         </div>
       </div>
 
-      {/* Error message */}
-      {error && (
+      {/* Error message — only while there are rows; an empty table with an
+          error renders the retry row inside the table (W3-11) */}
+      {error && reviews.length > 0 && (
         <div className="p-4 bg-destructive/10 text-destructive rounded-lg">
           {error}
         </div>
@@ -292,14 +293,30 @@ export function AdminReviewsPage() {
             {isLoading ? (
               <TableSkeleton />
             ) : reviews.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="text-center text-muted-foreground py-8"
-                >
-                  Không có đánh giá nào
-                </TableCell>
-              </TableRow>
+              error ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8">
+                    <span className="text-destructive">{error}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-3"
+                      onClick={() => fetchReviews()}
+                    >
+                      Thử lại
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="text-center text-muted-foreground py-8"
+                  >
+                    Không có đánh giá nào
+                  </TableCell>
+                </TableRow>
+              )
             ) : (
               reviews.map((review) => {
                 const reviewId = review._id || (review as unknown as { id: string }).id;

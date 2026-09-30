@@ -5,12 +5,17 @@ import {
   Tooltip,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Users } from "lucide-react";
 import type { UserStatsData } from "@/types/dashboard.type";
 
 interface UserStatsCardProps {
   data: UserStatsData | null;
   isLoading?: boolean;
+  /** W3-11: load failure state with a manual retry action */
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
 interface CustomTooltipProps {
@@ -33,7 +38,7 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
   return null;
 }
 
-export function UserStatsCard({ data, isLoading }: UserStatsCardProps) {
+export function UserStatsCard({ data, isLoading, isError, onRetry }: UserStatsCardProps) {
   if (isLoading) {
     return (
       <Card>
@@ -61,7 +66,21 @@ export function UserStatsCard({ data, isLoading }: UserStatsCardProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="text-muted-foreground text-sm">Không có dữ liệu</div>
+          {/* H15: a failed dashboard fetch must never read as "no data" */}
+          {isError ? (
+            <div className="flex flex-col items-start gap-3">
+              <Alert variant="destructive">
+                <AlertDescription>Không thể tải thống kê người dùng.</AlertDescription>
+              </Alert>
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  Thử lại
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="text-muted-foreground text-sm">Không có dữ liệu</div>
+          )}
         </CardContent>
       </Card>
     );
