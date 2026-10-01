@@ -364,24 +364,30 @@ const ProductDetailPage: React.FC = () => {
             </div>
           )}
 
-          {/* Quantity */}
+          {/* Quantity — W4-S13: labelled group with named buttons */}
           <div>
-            <h3 className="text-sm font-medium mb-3">Số lượng:</h3>
-            <div className="flex items-center gap-2">
+            <h3 id="quantity-heading" className="text-sm font-medium mb-3">
+              Số lượng:
+            </h3>
+            <div role="group" aria-labelledby="quantity-heading" className="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
                 disabled={quantity <= 1}
+                aria-label="Giảm số lượng"
               >
                 -
               </Button>
-              <span className="w-12 text-center font-medium">{quantity}</span>
+              <span aria-live="polite" className="w-12 text-center font-medium">
+                {quantity}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setQuantity(Math.min(product.inStock, quantity + 1))}
                 disabled={quantity >= product.inStock}
+                aria-label="Tăng số lượng"
               >
                 +
               </Button>

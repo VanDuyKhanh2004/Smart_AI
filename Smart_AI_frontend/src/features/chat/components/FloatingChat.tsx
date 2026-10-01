@@ -418,6 +418,22 @@ const FloatingChat: React.FC = () => {
   // W3-06: keep the toggle button clear of the floating CompareBar when visible.
   const hasCompareItems = useCompareStore((state) => state.items.length > 0);
 
+  // W4-M02: the FAB is the focus anchor — focused when the panel closes.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (wasOpenRef.current && !isOpen) {
+      triggerRef.current?.focus();
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  // W4-M03: Escape in the panel hides the chat without disconnecting.
+  const handleHide = () => {
+    setIsOpen(false);
+  };
+
   return (
     <>
       {/* Floating Button */}
@@ -456,6 +472,7 @@ const FloatingChat: React.FC = () => {
         )}
 
         <Button
+          ref={triggerRef}
           onClick={handleToggle}
           size="lg"
           aria-label={
@@ -474,6 +491,7 @@ const FloatingChat: React.FC = () => {
       <ChatWindow
         isOpen={isOpen}
         onClose={handleClose}
+        onHide={handleHide}
         onMinimize={handleMinimize}
         messages={messages}
         isConnected={isConnected}

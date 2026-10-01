@@ -42,6 +42,7 @@ export const PromptInputTextarea = ({
   placeholder = 'What would you like to know?',
   minHeight = 48,
   maxHeight = 164,
+  'aria-label': ariaLabel,
   ...props
 }: PromptInputTextareaProps) => {
   void minHeight;
@@ -77,6 +78,7 @@ export const PromptInputTextarea = ({
       }}
       onKeyDown={handleKeyDown}
       placeholder={placeholder}
+      aria-label={ariaLabel ?? 'Tin nhắn'}
       {...props}
     />
   );
@@ -147,6 +149,7 @@ export const PromptInputSubmit = ({
   size = 'icon',
   status,
   children,
+  'aria-label': ariaLabel,
   ...props
 }: PromptInputSubmitProps) => {
   let Icon = <SendIcon className="size-4" />;
@@ -159,12 +162,16 @@ export const PromptInputSubmit = ({
     Icon = <XIcon className="size-4" />;
   }
 
+  // W4-M01: icon-only submit still needs an accessible name.
+  const defaultLabel = status === 'streaming' ? 'Dừng trả lời' : 'Gửi tin nhắn';
+
   return (
     <Button
       className={cn('gap-1.5 rounded-lg', className)}
       size={size}
       type="submit"
       variant={variant}
+      aria-label={ariaLabel ?? defaultLabel}
       {...props}
     >
       {children ?? Icon}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,6 +33,19 @@ const RegisterForm: React.FC = () => {
   } = useResendCooldown();
   
   const { register, resendVerification, isLoading, error, clearError } = useAuthStore();
+
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -74,6 +87,7 @@ const RegisterForm: React.FC = () => {
     setResendError(null);
     
     if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
       return;
     }
     
@@ -131,7 +145,7 @@ const RegisterForm: React.FC = () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="name" className="text-sm font-medium">
               Họ và tên
@@ -145,11 +159,16 @@ const RegisterForm: React.FC = () => {
                 setName(e.target.value);
                 clearFieldError('name');
               }}
+              required
+              autoComplete="name"
               aria-invalid={!!errors.name}
+              aria-describedby={errors.name ? 'register-name-error' : undefined}
               disabled={isLoading}
             />
             {errors.name && (
-              <p className="text-sm text-destructive">{errors.name}</p>
+              <p id="register-name-error" role="alert" className="text-sm text-destructive">
+                {errors.name}
+              </p>
             )}
           </div>
 
@@ -166,11 +185,16 @@ const RegisterForm: React.FC = () => {
                 setEmail(e.target.value);
                 clearFieldError('email');
               }}
+              required
+              autoComplete="email"
               aria-invalid={!!errors.email}
+              aria-describedby={errors.email ? 'register-email-error' : undefined}
               disabled={isLoading}
             />
             {errors.email && (
-              <p className="text-sm text-destructive">{errors.email}</p>
+              <p id="register-email-error" role="alert" className="text-sm text-destructive">
+                {errors.email}
+              </p>
             )}
           </div>
           
@@ -187,11 +211,16 @@ const RegisterForm: React.FC = () => {
                 setPassword(e.target.value);
                 clearFieldError('password');
               }}
+              required
+              autoComplete="new-password"
               aria-invalid={!!errors.password}
+              aria-describedby={errors.password ? 'register-password-error' : undefined}
               disabled={isLoading}
             />
             {errors.password && (
-              <p className="text-sm text-destructive">{errors.password}</p>
+              <p id="register-password-error" role="alert" className="text-sm text-destructive">
+                {errors.password}
+              </p>
             )}
           </div>
 
@@ -208,11 +237,16 @@ const RegisterForm: React.FC = () => {
                 setConfirmPassword(e.target.value);
                 clearFieldError('confirmPassword');
               }}
+              required
+              autoComplete="new-password"
               aria-invalid={!!errors.confirmPassword}
+              aria-describedby={errors.confirmPassword ? 'register-confirm-error' : undefined}
               disabled={isLoading}
             />
             {errors.confirmPassword && (
-              <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+              <p id="register-confirm-error" role="alert" className="text-sm text-destructive">
+                {errors.confirmPassword}
+              </p>
             )}
           </div>
           

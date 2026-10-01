@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -29,6 +29,19 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -69,6 +82,7 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
     e.preventDefault();
 
     if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -100,14 +114,14 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
   };
 
   const EyeIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
       <circle cx="12" cy="12" r="3"/>
     </svg>
   );
 
   const EyeOffIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
       <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/>
       <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/>
@@ -124,7 +138,7 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
+        <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-4 max-w-md">
           <div className="space-y-2">
             <label htmlFor="currentPassword" className="text-sm font-medium">
               Mật khẩu hiện tại
@@ -141,21 +155,29 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
                     setErrors((prev) => ({ ...prev, currentPassword: undefined }));
                   }
                 }}
+                required
+                autoComplete="current-password"
                 disabled={isLoading}
                 aria-invalid={!!errors.currentPassword}
+                aria-describedby={
+                  errors.currentPassword ? 'current-password-error' : undefined
+                }
                 className="pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                tabIndex={-1}
+                aria-label="Hiển thị mật khẩu hiện tại"
+                aria-pressed={showCurrentPassword}
               >
                 {showCurrentPassword ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
             {errors.currentPassword && (
-              <p className="text-sm text-destructive">{errors.currentPassword}</p>
+              <p id="current-password-error" role="alert" className="text-sm text-destructive">
+                {errors.currentPassword}
+              </p>
             )}
           </div>
 
@@ -175,21 +197,27 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
                     setErrors((prev) => ({ ...prev, newPassword: undefined }));
                   }
                 }}
+                required
+                autoComplete="new-password"
                 disabled={isLoading}
                 aria-invalid={!!errors.newPassword}
+                aria-describedby={errors.newPassword ? 'new-password-error' : undefined}
                 className="pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowNewPassword(!showNewPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                tabIndex={-1}
+                aria-label="Hiển thị mật khẩu mới"
+                aria-pressed={showNewPassword}
               >
                 {showNewPassword ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
             {errors.newPassword && (
-              <p className="text-sm text-destructive">{errors.newPassword}</p>
+              <p id="new-password-error" role="alert" className="text-sm text-destructive">
+                {errors.newPassword}
+              </p>
             )}
           </div>
 
@@ -209,21 +237,29 @@ const PasswordChangeSection: React.FC<PasswordChangeSectionProps> = ({
                     setErrors((prev) => ({ ...prev, confirmPassword: undefined }));
                   }
                 }}
+                required
+                autoComplete="new-password"
                 disabled={isLoading}
                 aria-invalid={!!errors.confirmPassword}
+                aria-describedby={
+                  errors.confirmPassword ? 'confirm-password-error' : undefined
+                }
                 className="pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                tabIndex={-1}
+                aria-label="Hiển thị mật khẩu xác nhận"
+                aria-pressed={showConfirmPassword}
               >
                 {showConfirmPassword ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
             {errors.confirmPassword && (
-              <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+              <p id="confirm-password-error" role="alert" className="text-sm text-destructive">
+                {errors.confirmPassword}
+              </p>
             )}
           </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -58,6 +58,19 @@ export function AddressForm({
 
   const [errors, setErrors] = useState<FormErrors>({});
 
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
+
   // Update form when address prop changes (for edit mode)
   useEffect(() => {
     if (address) {
@@ -114,6 +127,8 @@ export function AddressForm({
     e.preventDefault();
     if (validateForm()) {
       onSubmit(formData);
+    } else {
+      shouldFocusInvalidRef.current = true;
     }
   };
 
@@ -126,15 +141,22 @@ export function AddressForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-4">
       {/* Label Select */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Nhãn địa chỉ</label>
+        <label htmlFor="address-label" className="text-sm font-medium">
+          Nhãn địa chỉ
+        </label>
         <Select
           value={formData.label}
           onValueChange={(value) => handleChange("label", value)}
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger
+            id="address-label"
+            aria-required="true"
+            aria-invalid={!!errors.label}
+            aria-describedby={errors.label ? "address-label-error" : undefined}
+          >
             <SelectValue placeholder="Chọn nhãn" />
           </SelectTrigger>
           <SelectContent>
@@ -146,91 +168,135 @@ export function AddressForm({
           </SelectContent>
         </Select>
         {errors.label && (
-          <p className="text-sm text-destructive">{errors.label}</p>
+          <p id="address-label-error" role="alert" className="text-sm text-destructive">
+            {errors.label}
+          </p>
         )}
       </div>
 
       {/* Full Name */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Họ và tên</label>
+        <label htmlFor="address-fullName" className="text-sm font-medium">
+          Họ và tên
+        </label>
         <Input
+          id="address-fullName"
           value={formData.fullName}
           onChange={(e) => handleChange("fullName", e.target.value)}
           placeholder="Nhập họ và tên người nhận"
+          required
           aria-invalid={!!errors.fullName}
+          aria-describedby={errors.fullName ? "address-fullname-error" : undefined}
         />
         {errors.fullName && (
-          <p className="text-sm text-destructive">{errors.fullName}</p>
+          <p id="address-fullname-error" role="alert" className="text-sm text-destructive">
+            {errors.fullName}
+          </p>
         )}
       </div>
 
       {/* Phone */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Số điện thoại</label>
+        <label htmlFor="address-phone" className="text-sm font-medium">
+          Số điện thoại
+        </label>
         <Input
+          id="address-phone"
           value={formData.phone}
           onChange={(e) => handleChange("phone", e.target.value)}
           placeholder="Nhập số điện thoại"
+          required
           aria-invalid={!!errors.phone}
+          aria-describedby={errors.phone ? "address-phone-error" : undefined}
         />
         {errors.phone && (
-          <p className="text-sm text-destructive">{errors.phone}</p>
+          <p id="address-phone-error" role="alert" className="text-sm text-destructive">
+            {errors.phone}
+          </p>
         )}
       </div>
 
       {/* Address */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Địa chỉ</label>
+        <label htmlFor="address-street" className="text-sm font-medium">
+          Địa chỉ
+        </label>
         <Input
+          id="address-street"
           value={formData.address}
           onChange={(e) => handleChange("address", e.target.value)}
           placeholder="Số nhà, tên đường"
+          required
           aria-invalid={!!errors.address}
+          aria-describedby={errors.address ? "address-street-error" : undefined}
         />
         {errors.address && (
-          <p className="text-sm text-destructive">{errors.address}</p>
+          <p id="address-street-error" role="alert" className="text-sm text-destructive">
+            {errors.address}
+          </p>
         )}
       </div>
 
       {/* Ward */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Phường/Xã</label>
+        <label htmlFor="address-ward" className="text-sm font-medium">
+          Phường/Xã
+        </label>
         <Input
+          id="address-ward"
           value={formData.ward}
           onChange={(e) => handleChange("ward", e.target.value)}
           placeholder="Nhập phường/xã"
+          required
           aria-invalid={!!errors.ward}
+          aria-describedby={errors.ward ? "address-ward-error" : undefined}
         />
         {errors.ward && (
-          <p className="text-sm text-destructive">{errors.ward}</p>
+          <p id="address-ward-error" role="alert" className="text-sm text-destructive">
+            {errors.ward}
+          </p>
         )}
       </div>
 
       {/* District */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Quận/Huyện</label>
+        <label htmlFor="address-district" className="text-sm font-medium">
+          Quận/Huyện
+        </label>
         <Input
+          id="address-district"
           value={formData.district}
           onChange={(e) => handleChange("district", e.target.value)}
           placeholder="Nhập quận/huyện"
+          required
           aria-invalid={!!errors.district}
+          aria-describedby={errors.district ? "address-district-error" : undefined}
         />
         {errors.district && (
-          <p className="text-sm text-destructive">{errors.district}</p>
+          <p id="address-district-error" role="alert" className="text-sm text-destructive">
+            {errors.district}
+          </p>
         )}
       </div>
 
       {/* City */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Tỉnh/Thành phố</label>
+        <label htmlFor="address-city" className="text-sm font-medium">
+          Tỉnh/Thành phố
+        </label>
         <Input
+          id="address-city"
           value={formData.city}
           onChange={(e) => handleChange("city", e.target.value)}
           placeholder="Nhập tỉnh/thành phố"
+          required
           aria-invalid={!!errors.city}
+          aria-describedby={errors.city ? "address-city-error" : undefined}
         />
         {errors.city && (
-          <p className="text-sm text-destructive">{errors.city}</p>
+          <p id="address-city-error" role="alert" className="text-sm text-destructive">
+            {errors.city}
+          </p>
         )}
       </div>
 

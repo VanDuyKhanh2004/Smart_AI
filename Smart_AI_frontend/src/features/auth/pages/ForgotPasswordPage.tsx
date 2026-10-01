@@ -1,23 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { authService } from '@/services/auth.service';
 
+interface FormErrors {
+  email?: string;
+}
+
 const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
+  const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrors({});
     setError(null);
     setMessage(null);
 
     if (!email.trim()) {
-      setError('Email là bắt buộc');
+      setErrors({ email: 'Email là bắt buộc' });
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -44,7 +64,7 @@ const ForgotPasswordPage: React.FC = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
                   Email
@@ -54,9 +74,23 @@ const ForgotPasswordPage: React.FC = () => {
                   type="email"
                   placeholder="name@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (errors.email) {
+                      setErrors({});
+                    }
+                  }}
+                  required
+                  autoComplete="email"
+                  aria-invalid={!!errors.email}
+                  aria-describedby={errors.email ? 'forgot-email-error' : undefined}
                   disabled={isLoading}
                 />
+                {errors.email && (
+                  <p id="forgot-email-error" role="alert" className="text-sm text-destructive">
+                    {errors.email}
+                  </p>
+                )}
               </div>
 
               {message && (
@@ -66,7 +100,7 @@ const ForgotPasswordPage: React.FC = () => {
               )}
 
               {error && (
-                <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+                <div role="alert" className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
                   {error}
                 </div>
               )}
