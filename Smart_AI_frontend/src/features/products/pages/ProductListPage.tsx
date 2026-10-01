@@ -33,6 +33,9 @@ const ProductListPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [draftFilters, setDraftFilters] = useState<ProductFilterState>({ ...DEFAULT_FILTER_STATE });
   const [currentFilters, setCurrentFilters] = useState<ProductFilterState>({ ...DEFAULT_FILTER_STATE });
+  // W4-S10: polite announcement for page changes (the result-count text alone
+  // can be identical across pages, so it must not be the only signal).
+  const [pageAnnouncement, setPageAnnouncement] = useState('');
 
   // Wishlist integration - Requirements: 7.1
   const { isAuthenticated } = useAuthStore();
@@ -164,6 +167,7 @@ const ProductListPage: React.FC = () => {
 
   const handlePageChange = (page: number) => {
     if (page === currentPage) return;
+    setPageAnnouncement(`Đang chuyển đến trang ${page}`);
     pendingPageScrollRef.current = page;
     setCurrentPage(page);
   };
@@ -179,6 +183,11 @@ const ProductListPage: React.FC = () => {
     if (loading) return;
     pendingPageScrollRef.current = null;
     scrollToProductList();
+    // W4-S10: move focus to the results heading so keyboard / screen-reader
+    // users land on the new page's content.
+    productListRef.current
+      ?.querySelector<HTMLElement>('h1[data-results-heading]')
+      ?.focus();
   }, [pagination, loading]);
 
   const formatPrice = (price: number) => {
@@ -275,14 +284,25 @@ const ProductListPage: React.FC = () => {
       <BannerCarousel />
       
       <div ref={productListRef} className="mb-8 scroll-mt-16">
-        <h1 className="text-3xl font-bold mb-2">Danh sách sản phẩm</h1>
-        <p className="text-muted-foreground">
+        <h1
+          data-results-heading
+          tabIndex={-1}
+          className="text-3xl font-bold mb-2 outline-none"
+        >
+          Danh sách sản phẩm
+        </h1>
+        {/* W4-S05: result count announced politely when it changes */}
+        <p className="text-muted-foreground" role="status">
           {pagination && (
             isFilterActive
               ? `Tìm thấy ${pagination.totalCount} sản phẩm phù hợp`
               : `Hiển thị ${products.length} trong tổng số ${pagination.totalCount} sản phẩm`
           )}
         </p>
+        {/* W4-S10: page-change announcement */}
+        <div role="status" aria-live="polite" className="sr-only">
+          {pageAnnouncement}
+        </div>
       </div>
 
       {/* Product Filters */}
@@ -301,13 +321,19 @@ const ProductListPage: React.FC = () => {
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Đang tải danh sách sản phẩm...</p>
+            {/* W4-S01: loading announced politely */}
+            <p className="text-muted-foreground" role="status">
+              Đang tải danh sách sản phẩm...
+            </p>
           </div>
         </div>
       ) : error ? (
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <p className="text-red-500 mb-4">{error}</p>
+            {/* W4-S02: load failure announced assertively once */}
+            <p className="text-red-500 mb-4" role="alert">
+              {error}
+            </p>
             <button
               onClick={() => fetchProducts(currentPage)}
               className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"

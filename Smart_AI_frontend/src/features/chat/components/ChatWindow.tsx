@@ -19,6 +19,8 @@ import {
 interface ChatWindowProps {
   isOpen: boolean;
   onClose: () => void;
+  /** W4-M03: non-destructive hide (keeps the session alive) — used by Escape. */
+  onHide?: () => void;
   onMinimize: () => void;
   messages: ChatMessageType[];
   isConnected: boolean;
@@ -33,9 +35,17 @@ interface ChatWindowProps {
   onRegenerateMessage?: (message: ChatMessageType) => void;
 }
 
+// W4-M03: Tab containment only applies on small (non-widened) viewports, where
+// the chat panel behaves like an overlay dialog.
+const isMobileViewport = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(max-width: 640px)').matches;
+
 const ChatWindow: React.FC<ChatWindowProps> = ({ 
   isOpen, 
   onClose, 
+  onHide,
   onMinimize, 
   messages, 
   isConnected, 
@@ -57,6 +67,128 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const wasProcessingRef = useRef(false);
   // W3-06: keep the window clear of the floating CompareBar when visible.
   const hasCompareItems = useCompareStore((state) => state.items.length > 0);
+
+  // W4-M02/M04: panel focus management.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const hadFocusInPanelRef = useRef(false);
+  const composerDisabled = !isConnected || isProcessing || isHydrating;
+  const composerDisabledRef = useRef(composerDisabled);
+
+  useEffect(() => {
+    composerDisabledRef.current = composerDisabled;
+  }, [composerDisabled]);
+
+  // Track focus inside the panel and restore focus that was destroyed when
+  // the composer became disabled while it held focus (W4-M04).
+  useEffect(() => {
+    if (!isOpen) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    const handleFocusIn = (event: FocusEvent) => {
+      hadFocusInPanelRef.current = panel.contains(event.target as Node);
+    };
+
+    const handleFocusOut = (event: FocusEvent) => {
+      if (event.relatedTarget) {
+        hadFocusInPanelRef.current = panel.contains(event.relatedTarget as Node);
+        return;
+      }
+      const target = event.target as Node | null;
+      if (!target || !panel.contains(target)) return;
+      // Focus went to nowhere (element disabled / removed). After the browser
+      // settles, pull focus back into the panel if the composer is disabled.
+      hadFocusInPanelRef.current = true;
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        if (
+          composerDisabledRef.current &&
+          hadFocusInPanelRef.current &&
+          panelRef.current &&
+          (!active || active === document.body)
+        ) {
+          panelRef.current.focus();
+        }
+      }, 0);
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+    };
+  }, [isOpen]);
+
+  // W4-M04: fallback for browsers that blur a focused element synchronously
+  // when it becomes disabled (focus lands on <body> without a focusout to us).
+  useEffect(() => {
+    if (!isOpen || !composerDisabled) return;
+    const active = document.activeElement;
+    if (hadFocusInPanelRef.current && (!active || active === document.body)) {
+      panelRef.current?.focus();
+    }
+  }, [composerDisabled, isOpen]);
+
+  // W4-M02: move focus into the panel when it opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const textarea = panel.querySelector<HTMLTextAreaElement>('textarea');
+    if (textarea && !textarea.disabled) {
+      textarea.focus();
+    } else {
+      panel.focus();
+    }
+  }, [isOpen]);
+
+  // W4-M04: when the composer becomes usable again while focus is parked on
+  // the panel root, continue in the composer.
+  useEffect(() => {
+    if (!isOpen || composerDisabled) return;
+    const panel = panelRef.current;
+    if (document.activeElement === panel) {
+      panel?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+    }
+  }, [composerDisabled, isOpen]);
+
+  // W4-M03: Escape hides non-destructively; Tab stays inside the panel on
+  // mobile viewports.
+  const handlePanelKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      if (onHide) {
+        e.preventDefault();
+        onHide();
+      }
+      return;
+    }
+
+    if (e.key === 'Tab' && isMobileViewport()) {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const inside = active ? panel.contains(active) : false;
+
+      if (e.shiftKey) {
+        if (!inside || active === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (!inside || active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -118,6 +250,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   return (
     <div
+      ref={panelRef}
+      tabIndex={-1}
+      aria-label="Chat với CSKH ĐTGK"
+      onKeyDown={handlePanelKeyDown}
       className={cn(
         'fixed right-4 left-4 sm:left-auto sm:w-96 h-[600px] z-50 shadow-2xl',
         hasCompareItems

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Calendar, Clock, User, Phone, Mail, FileText, Loader2 } from 'lucide-react';
 import {
@@ -80,6 +80,20 @@ export function AppointmentForm({
     email: '',
   });
   const [errors, setErrors] = useState<FormErrors>({});
+
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  // This form has no <form> element, so focus is scoped to the field container.
+  const formContainerRef = useRef<HTMLDivElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formContainerRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   // Pre-fill user info when logged in
   useEffect(() => {
@@ -171,7 +185,11 @@ export function AppointmentForm({
 
   // Handle form submission
   const handleSubmit = () => {
-    if (!validateForm() || !store || !selectedTimeSlot || !purpose) return;
+    if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
+      return;
+    }
+    if (!store || !selectedTimeSlot || !purpose) return;
 
     createMutation.mutate({
       store: store.id,
@@ -197,14 +215,18 @@ export function AppointmentForm({
           <DialogDescription>Chọn ngày và khung giờ bạn muốn đến cửa hàng.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div ref={formContainerRef} className="space-y-4 py-4">
           {/* Date picker */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
+            <label
+              htmlFor="appointment-date"
+              className="text-sm font-medium flex items-center gap-2"
+            >
+              <Calendar className="h-4 w-4" aria-hidden="true" />
               Ngày hẹn <span className="text-destructive">*</span>
             </label>
             <Input
+              id="appointment-date"
               type="date"
               min={getMinDate()}
               max={getMaxDate()}
@@ -214,17 +236,25 @@ export function AppointmentForm({
                 setSelectedTimeSlot(null);
                 setErrors((prev) => ({ ...prev, date: undefined }));
               }}
+              required
+              aria-invalid={!!errors.date}
+              aria-describedby={errors.date ? 'appointment-date-error' : undefined}
               className={errors.date ? 'border-destructive' : ''}
             />
             {errors.date && (
-              <p className="text-sm text-destructive">{errors.date}</p>
+              <p id="appointment-date-error" role="alert" className="text-sm text-destructive">
+                {errors.date}
+              </p>
             )}
           </div>
 
           {/* Purpose dropdown — selected before fetching slots */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <FileText className="h-4 w-4" />
+            <label
+              htmlFor="appointment-purpose"
+              className="text-sm font-medium flex items-center gap-2"
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" />
               Mục đích <span className="text-destructive">*</span>
             </label>
             <Select
@@ -235,7 +265,13 @@ export function AppointmentForm({
                 setErrors((prev) => ({ ...prev, purpose: undefined }));
               }}
             >
-              <SelectTrigger className={`w-full ${errors.purpose ? 'border-destructive' : ''}`}>
+              <SelectTrigger
+                id="appointment-purpose"
+                aria-required="true"
+                aria-invalid={!!errors.purpose}
+                aria-describedby={errors.purpose ? 'appointment-purpose-error' : undefined}
+                className={`w-full ${errors.purpose ? 'border-destructive' : ''}`}
+              >
                 <SelectValue placeholder="Chọn mục đích" />
               </SelectTrigger>
               <SelectContent>
@@ -247,16 +283,21 @@ export function AppointmentForm({
               </SelectContent>
             </Select>
             {errors.purpose && (
-              <p className="text-sm text-destructive">{errors.purpose}</p>
+              <p id="appointment-purpose-error" role="alert" className="text-sm text-destructive">
+                {errors.purpose}
+              </p>
             )}
           </div>
 
           {/* Time slot selector */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Clock className="h-4 w-4" />
+            <span
+              id="appointment-timeslot-label"
+              className="text-sm font-medium flex items-center gap-2"
+            >
+              <Clock className="h-4 w-4" aria-hidden="true" />
               Khung giờ <span className="text-destructive">*</span>
-            </label>
+            </span>
             {!selectedDate ? (
               <p className="text-sm text-muted-foreground">
                 Vui lòng chọn ngày trước
@@ -279,7 +320,11 @@ export function AppointmentForm({
                 Không có khung giờ trống trong ngày này
               </p>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div
+                role="group"
+                aria-labelledby="appointment-timeslot-label"
+                className="grid grid-cols-3 gap-2"
+              >
                 {availableSlots.map((slot: TimeSlot) => (
                   <Button
                     key={`${slot.start}-${slot.end}`}
@@ -302,7 +347,9 @@ export function AppointmentForm({
               </div>
             )}
             {errors.timeSlot && (
-              <p className="text-sm text-destructive">{errors.timeSlot}</p>
+              <p id="appointment-timeslot-error" role="alert" className="text-sm text-destructive">
+                {errors.timeSlot}
+              </p>
             )}
           </div>
 
@@ -310,30 +357,43 @@ export function AppointmentForm({
           {!isAuthenticated && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <User className="h-4 w-4" />
+                <label
+                  htmlFor="appointment-name"
+                  className="text-sm font-medium flex items-center gap-2"
+                >
+                  <User className="h-4 w-4" aria-hidden="true" />
                   Họ tên <span className="text-destructive">*</span>
                 </label>
                 <Input
+                  id="appointment-name"
                   placeholder="Nhập họ tên"
                   value={guestInfo.name}
                   onChange={(e) => {
                     setGuestInfo((prev) => ({ ...prev, name: e.target.value }));
                     setErrors((prev) => ({ ...prev, name: undefined }));
                   }}
+                  required
+                  aria-invalid={!!errors.name}
+                  aria-describedby={errors.name ? 'appointment-name-error' : undefined}
                   className={errors.name ? 'border-destructive' : ''}
                 />
                 {errors.name && (
-                  <p className="text-sm text-destructive">{errors.name}</p>
+                  <p id="appointment-name-error" role="alert" className="text-sm text-destructive">
+                    {errors.name}
+                  </p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <Phone className="h-4 w-4" />
+                <label
+                  htmlFor="appointment-phone"
+                  className="text-sm font-medium flex items-center gap-2"
+                >
+                  <Phone className="h-4 w-4" aria-hidden="true" />
                   Số điện thoại <span className="text-destructive">*</span>
                 </label>
                 <Input
+                  id="appointment-phone"
                   type="tel"
                   placeholder="Nhập số điện thoại"
                   value={guestInfo.phone}
@@ -341,19 +401,28 @@ export function AppointmentForm({
                     setGuestInfo((prev) => ({ ...prev, phone: e.target.value }));
                     setErrors((prev) => ({ ...prev, phone: undefined }));
                   }}
+                  required
+                  aria-invalid={!!errors.phone}
+                  aria-describedby={errors.phone ? 'appointment-phone-error' : undefined}
                   className={errors.phone ? 'border-destructive' : ''}
                 />
                 {errors.phone && (
-                  <p className="text-sm text-destructive">{errors.phone}</p>
+                  <p id="appointment-phone-error" role="alert" className="text-sm text-destructive">
+                    {errors.phone}
+                  </p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <Mail className="h-4 w-4" />
+                <label
+                  htmlFor="appointment-email"
+                  className="text-sm font-medium flex items-center gap-2"
+                >
+                  <Mail className="h-4 w-4" aria-hidden="true" />
                   Email <span className="text-destructive">*</span>
                 </label>
                 <Input
+                  id="appointment-email"
                   type="email"
                   placeholder="Nhập email"
                   value={guestInfo.email}
@@ -361,10 +430,15 @@ export function AppointmentForm({
                     setGuestInfo((prev) => ({ ...prev, email: e.target.value }));
                     setErrors((prev) => ({ ...prev, email: undefined }));
                   }}
+                  required
+                  aria-invalid={!!errors.email}
+                  aria-describedby={errors.email ? 'appointment-email-error' : undefined}
                   className={errors.email ? 'border-destructive' : ''}
                 />
                 {errors.email && (
-                  <p className="text-sm text-destructive">{errors.email}</p>
+                  <p id="appointment-email-error" role="alert" className="text-sm text-destructive">
+                    {errors.email}
+                  </p>
                 )}
               </div>
             </>
@@ -395,8 +469,11 @@ export function AppointmentForm({
 
           {/* Notes */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Ghi chú (tùy chọn)</label>
+            <label htmlFor="appointment-notes" className="text-sm font-medium">
+              Ghi chú (tùy chọn)
+            </label>
             <Textarea
+              id="appointment-notes"
               placeholder="Nhập ghi chú nếu có..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -406,7 +483,10 @@ export function AppointmentForm({
 
           {/* Error message from API */}
           {createMutation.error && (
-            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+            <div
+              role="alert"
+              className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg"
+            >
               <p className="text-sm text-destructive">
                 {(createMutation.error as Error).message || 'Đã xảy ra lỗi. Vui lòng thử lại.'}
               </p>

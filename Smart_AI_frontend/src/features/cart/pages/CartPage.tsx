@@ -7,10 +7,20 @@ import { useAuthStore } from '@/stores/authStore';
 import CartItem from '../components/CartItem';
 import CartSummary from '../components/CartSummary';
 
+const formatPrice = (price: number) => {
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+  }).format(price);
+};
+
 const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  // W4-S27: polite live region text for cart mutations (set only on events,
+  // never derived during render)
+  const [announcement, setAnnouncement] = useState('');
   const {
     items,
     isLoading,
@@ -42,24 +52,42 @@ const CartPage: React.FC = () => {
   const handleUpdateQuantity = async (itemId: string, quantity: number) => {
     try {
       await updateQuantity(itemId, quantity);
+      const state = useCartStore.getState();
+      const item = state.items.find((i) => i._id === itemId);
+      setAnnouncement(
+        `Đã cập nhật số lượng ${item?.product?.name ?? 'sản phẩm'}. ${
+          state.getTotalItems()
+        } sản phẩm trong giỏ hàng, tạm tính ${formatPrice(state.getTotalPrice())}.`,
+      );
     } catch {
       // Error is handled in store
+      setAnnouncement(useCartStore.getState().error || 'Không thể cập nhật số lượng.');
     }
   };
 
   const handleRemoveItem = async (itemId: string) => {
+    const name = items.find((i) => i._id === itemId)?.product?.name ?? 'sản phẩm';
     try {
       await removeItem(itemId);
+      const state = useCartStore.getState();
+      setAnnouncement(
+        `Đã xóa ${name} khỏi giỏ hàng. ${
+          state.getTotalItems()
+        } sản phẩm trong giỏ hàng, tạm tính ${formatPrice(state.getTotalPrice())}.`,
+      );
     } catch {
       // Error is handled in store
+      setAnnouncement(useCartStore.getState().error || 'Không thể xóa sản phẩm.');
     }
   };
 
   const handleClearCart = async () => {
     try {
       await clearCart();
+      setAnnouncement('Đã xóa tất cả sản phẩm trong giỏ hàng.');
     } catch {
       // Error is handled in store
+      setAnnouncement(useCartStore.getState().error || 'Không thể xóa giỏ hàng.');
     }
   };
 
@@ -94,6 +122,11 @@ const CartPage: React.FC = () => {
         <ShoppingCart className="h-6 w-6" />
         Giỏ hàng của bạn
       </h1>
+
+      {/* W4-S27: persistent polite live region — announces cart mutations */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
 
       {/* Error Message — only shown while cart items are present (an empty
           cart with an error renders the dedicated error state below) */}
@@ -131,7 +164,7 @@ const CartPage: React.FC = () => {
         )
       ) : (
         /* Cart Content */
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8" aria-busy={isLoading}>
           {/* Cart Items */}
           <div className="lg:col-span-2 space-y-4">
             {isLoading && items.length === 0 ? (

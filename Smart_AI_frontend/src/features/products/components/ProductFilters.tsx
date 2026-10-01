@@ -114,12 +114,16 @@ export function ProductFilters({
     <div className="flex flex-wrap items-end gap-4 p-4 bg-card rounded-lg border mb-6">
       {/* Search Input */}
       <div className="flex flex-col gap-1.5 min-w-[200px] flex-1">
-        <label className="text-sm font-medium text-muted-foreground">
+        <label
+          htmlFor="product-search-input"
+          className="text-sm font-medium text-muted-foreground"
+        >
           Tìm kiếm
         </label>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            id="product-search-input"
             type="text"
             placeholder="Tìm kiếm sản phẩm..."
             value={searchInput}
@@ -132,14 +136,17 @@ export function ProductFilters({
 
       {/* Brand Filter */}
       <div className="flex flex-col gap-1.5 min-w-[150px]">
-        <label className="text-sm font-medium text-muted-foreground">
+        <label
+          htmlFor="product-brand-filter"
+          className="text-sm font-medium text-muted-foreground"
+        >
           Thương hiệu
         </label>
         <Select
           value={draftFilters.brand || 'all'}
           onValueChange={handleBrandChange}
         >
-          <SelectTrigger className="w-[150px]">
+          <SelectTrigger id="product-brand-filter" className="w-[150px]">
             <SelectValue placeholder="Tất cả" />
           </SelectTrigger>
           <SelectContent>
@@ -155,22 +162,31 @@ export function ProductFilters({
 
       {/* Price Range */}
       <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-muted-foreground">
+        <span
+          id="product-price-label"
+          className="text-sm font-medium text-muted-foreground"
+        >
           Khoảng giá
-        </label>
-        <div className="flex items-center gap-2">
+        </span>
+        <div
+          role="group"
+          aria-labelledby="product-price-label"
+          className="flex items-center gap-2"
+        >
           <Input
             type="number"
             placeholder="Từ"
+            aria-label="Giá tối thiểu"
             value={draftFilters.minPrice ?? ''}
             onChange={handleMinPriceChange}
             className="w-[100px]"
             min={0}
           />
-          <span className="text-muted-foreground">-</span>
+          <span className="text-muted-foreground" aria-hidden="true">-</span>
           <Input
             type="number"
             placeholder="Đến"
+            aria-label="Giá tối đa"
             value={draftFilters.maxPrice ?? ''}
             onChange={handleMaxPriceChange}
             className="w-[100px]"
@@ -182,14 +198,17 @@ export function ProductFilters({
 
       {/* Stock Filter */}
       <div className="flex flex-col gap-1.5 min-w-[130px]">
-        <label className="text-sm font-medium text-muted-foreground">
+        <label
+          htmlFor="product-stock-filter"
+          className="text-sm font-medium text-muted-foreground"
+        >
           Tình trạng
         </label>
         <Select
           value={draftFilters.inStock || 'all'}
           onValueChange={handleStockChange}
         >
-          <SelectTrigger className="w-[130px]">
+          <SelectTrigger id="product-stock-filter" className="w-[130px]">
             <SelectValue placeholder="Tất cả" />
           </SelectTrigger>
           <SelectContent>
@@ -202,14 +221,17 @@ export function ProductFilters({
 
       {/* Rating Filter */}
       <div className="flex flex-col gap-1.5 min-w-[130px]">
-        <label className="text-sm font-medium text-muted-foreground">
+        <label
+          htmlFor="product-rating-filter"
+          className="text-sm font-medium text-muted-foreground"
+        >
           Đánh giá
         </label>
         <Select
           value={draftFilters.minRating?.toString() || 'all'}
           onValueChange={handleRatingChange}
         >
-          <SelectTrigger className="w-[130px]">
+          <SelectTrigger id="product-rating-filter" className="w-[130px]">
             <SelectValue placeholder="Tất cả" />
           </SelectTrigger>
           <SelectContent>
@@ -224,14 +246,17 @@ export function ProductFilters({
 
       {/* Sort Options */}
       <div className="flex flex-col gap-1.5 min-w-[180px]">
-        <label className="text-sm font-medium text-muted-foreground">
+        <label
+          htmlFor="product-sort-filter"
+          className="text-sm font-medium text-muted-foreground"
+        >
           Sắp xếp
         </label>
         <Select
           value={currentSortValue}
           onValueChange={handleSortChange}
         >
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger id="product-sort-filter" className="w-[180px]">
             <SelectValue placeholder="Mới nhất" />
           </SelectTrigger>
           <SelectContent>

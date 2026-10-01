@@ -111,38 +111,55 @@ export const CodeBlockCopyButton = ({
   timeout = 2000,
   children,
   className,
+  'aria-label': ariaLabel,
   ...props
 }: CodeBlockCopyButtonProps) => {
   const [isCopied, setIsCopied] = useState(false);
+  // W4-M11: concise, polite status feedback for the copy action.
+  const [feedback, setFeedback] = useState('');
   const { code } = useContext(CodeBlockContext);
 
   const copyToClipboard = async () => {
     if (typeof window === 'undefined' || !navigator.clipboard.writeText) {
+      setFeedback('Không thể sao chép mã');
       onError?.(new Error('Clipboard API not available'));
+      setTimeout(() => setFeedback(''), timeout);
       return;
     }
 
     try {
       await navigator.clipboard.writeText(code);
       setIsCopied(true);
+      setFeedback('Đã sao chép mã');
       onCopy?.();
-      setTimeout(() => setIsCopied(false), timeout);
+      setTimeout(() => {
+        setIsCopied(false);
+        setFeedback('');
+      }, timeout);
     } catch (error) {
+      setFeedback('Không thể sao chép mã');
       onError?.(error as Error);
+      setTimeout(() => setFeedback(''), timeout);
     }
   };
 
   const Icon = isCopied ? CheckIcon : CopyIcon;
 
   return (
-    <Button
-      className={cn('shrink-0', className)}
-      onClick={copyToClipboard}
-      size="icon"
-      variant="ghost"
-      {...props}
-    >
-      {children ?? <Icon size={14} />}
-    </Button>
+    <>
+      <Button
+        className={cn('shrink-0', className)}
+        onClick={copyToClipboard}
+        size="icon"
+        variant="ghost"
+        aria-label={ariaLabel ?? 'Sao chép mã'}
+        {...props}
+      >
+        {children ?? <Icon size={14} />}
+      </Button>
+      <span role="status" aria-live="polite" className="sr-only">
+        {feedback}
+      </span>
+    </>
   );
 };

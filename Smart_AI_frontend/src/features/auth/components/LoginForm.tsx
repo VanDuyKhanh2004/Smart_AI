@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -31,6 +31,19 @@ const LoginForm: React.FC = () => {
   
   const { login, resendVerification, isLoading, error, errorCode, clearError } = useAuthStore();
 
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
+
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
     
@@ -57,6 +70,7 @@ const LoginForm: React.FC = () => {
     setResendError(null);
     
     if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
       return;
     }
     
@@ -102,7 +116,7 @@ const LoginForm: React.FC = () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form ref={formRef} onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="email" className="text-sm font-medium">
               Email
@@ -118,11 +132,16 @@ const LoginForm: React.FC = () => {
                   setErrors((prev) => ({ ...prev, email: undefined }));
                 }
               }}
+              required
+              autoComplete="email"
               aria-invalid={!!errors.email}
+              aria-describedby={errors.email ? 'login-email-error' : undefined}
               disabled={isLoading}
             />
             {errors.email && (
-              <p className="text-sm text-destructive">{errors.email}</p>
+              <p id="login-email-error" role="alert" className="text-sm text-destructive">
+                {errors.email}
+              </p>
             )}
           </div>
           
@@ -141,11 +160,16 @@ const LoginForm: React.FC = () => {
                   setErrors((prev) => ({ ...prev, password: undefined }));
                 }
               }}
+              required
+              autoComplete="current-password"
               aria-invalid={!!errors.password}
+              aria-describedby={errors.password ? 'login-password-error' : undefined}
               disabled={isLoading}
             />
             {errors.password && (
-              <p className="text-sm text-destructive">{errors.password}</p>
+              <p id="login-password-error" role="alert" className="text-sm text-destructive">
+                {errors.password}
+              </p>
             )}
             <div className="text-right">
               <Link
