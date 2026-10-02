@@ -214,11 +214,13 @@ const CheckoutForm: React.FC<CheckoutFormProps> = ({ onSubmit, isLoading = false
             </div>
           </div>
 
+          {/* W4-S41: submit busy state exposed while the order is pending */}
           <Button
             type="submit"
             className="w-full"
             size="lg"
             disabled={isLoading}
+            aria-busy={isLoading}
           >
             {isLoading ? (
               <>

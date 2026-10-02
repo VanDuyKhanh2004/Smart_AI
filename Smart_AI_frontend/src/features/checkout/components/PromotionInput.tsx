@@ -162,8 +162,11 @@ const PromotionInput: React.FC<PromotionInputProps> = ({
           )}
         </Button>
       </div>
+      {/* W4-S38: promotion failure announced assertively once */}
       {error && (
-        <p className="text-sm text-destructive">{error}</p>
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
       )}
     </div>
   );

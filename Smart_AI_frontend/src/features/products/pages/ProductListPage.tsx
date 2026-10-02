@@ -303,6 +303,11 @@ const ProductListPage: React.FC = () => {
         <div role="status" aria-live="polite" className="sr-only">
           {pageAnnouncement}
         </div>
+        {/* W4-S03: refetch/busy announcement — only while re-fetching over
+            existing results; the initial load uses the loader status below */}
+        <div role="status" aria-live="polite" className="sr-only">
+          {loading && products.length > 0 ? 'Đang cập nhật kết quả...' : ''}
+        </div>
       </div>
 
       {/* Product Filters */}
@@ -374,8 +379,11 @@ const ProductListPage: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Product Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
+          {/* Product Grid — W4-S03: marks displayed results as stale during a refetch */}
+          <div
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8"
+            aria-busy={loading}
+          >
             {products.map((product) => (
               <Card
                 key={product._id}

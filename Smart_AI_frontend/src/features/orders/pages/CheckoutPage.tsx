@@ -281,8 +281,13 @@ const CheckoutPage: React.FC = () => {
         {/* Address Selection / Checkout Form */}
         <div>
           {isLoadingAddresses ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            /* W4-S41: address loading announced politely */
+            <div role="status" className="flex items-center justify-center py-8">
+              <div
+                className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                aria-hidden="true"
+              ></div>
+              <span className="sr-only">Đang tải địa chỉ...</span>
             </div>
           ) : showAddressSelector ? (
             <div className="space-y-4">
@@ -303,6 +308,7 @@ const CheckoutPage: React.FC = () => {
                   size="lg"
                   onClick={handleSubmitWithSavedAddress}
                   disabled={isLoading}
+                  aria-busy={isLoading}
                 >
                   {isLoading ? (
                     <>
