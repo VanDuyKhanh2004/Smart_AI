@@ -32,6 +32,9 @@ const ProductDetailPage: React.FC = () => {
   const [addingToCart, setAddingToCart] = useState(false);
   const [addedToCart, setAddedToCart] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
+  // W4-S16: polite live region for add-to-cart success (failures are
+  // announced once through the role="alert" cartError region instead)
+  const [announcement, setAnnouncement] = useState('');
 
   // Review states
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -170,6 +173,7 @@ const ProductDetailPage: React.FC = () => {
 
     // Check stock before adding
     if (quantity > product.inStock) {
+      setAnnouncement('');
       setCartError(`Chỉ còn ${product.inStock} sản phẩm trong kho`);
       return;
     }
@@ -177,13 +181,19 @@ const ProductDetailPage: React.FC = () => {
     setAddingToCart(true);
     setCartError(null);
     setAddedToCart(false);
+    setAnnouncement('');
 
     try {
       await addItem(product._id, quantity, colorToUse);
 
       setAddedToCart(true);
-      // Reset success state after 2 seconds
-      setTimeout(() => setAddedToCart(false), 2000);
+      setAnnouncement(`Đã thêm ${product.name} vào giỏ hàng.`);
+      // Reset success state after 2 seconds (clearing the announcement too so
+      // an identical repeat action is announced again)
+      setTimeout(() => {
+        setAddedToCart(false);
+        setAnnouncement('');
+      }, 2000);
     } catch (err) {
       const axiosError = err as { response?: { data?: { message?: string } } };
       setCartError(axiosError.response?.data?.message || 'Không thể thêm vào giỏ hàng');
@@ -262,7 +272,10 @@ const ProductDetailPage: React.FC = () => {
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Đang tải thông tin sản phẩm...</p>
+            {/* W4-S19: initial load announced politely */}
+            <p className="text-muted-foreground" role="status">
+              Đang tải thông tin sản phẩm...
+            </p>
           </div>
         </div>
       </div>
@@ -274,7 +287,10 @@ const ProductDetailPage: React.FC = () => {
       <div className="py-8">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <p className="text-red-500 mb-4">{error || 'Không tìm thấy sản phẩm'}</p>
+            {/* W4-S20: load failure announced assertively once */}
+            <p className="text-red-500 mb-4" role="alert">
+              {error || 'Không tìm thấy sản phẩm'}
+            </p>
             <div className="space-x-4">
               <Button onClick={() => fetchProduct()} variant="outline">
                 Thử lại
@@ -291,6 +307,11 @@ const ProductDetailPage: React.FC = () => {
 
   return (
     <div className="py-8">
+      {/* W4-S16: persistent polite live region — add-to-cart success */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 mb-6">
         <Button variant="ghost" size="sm" onClick={() => navigate('/products')}>
@@ -396,8 +417,12 @@ const ProductDetailPage: React.FC = () => {
 
           {/* Action Buttons */}
           <div className="space-y-3">
+            {/* W4-S15: add-to-cart failure announced assertively once */}
             {cartError && (
-              <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+              <div
+                role="alert"
+                className="p-3 rounded-md bg-destructive/10 text-destructive text-sm"
+              >
                 {cartError}
               </div>
             )}

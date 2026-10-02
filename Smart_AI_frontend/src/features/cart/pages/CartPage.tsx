@@ -60,8 +60,12 @@ const CartPage: React.FC = () => {
         } sản phẩm trong giỏ hàng, tạm tính ${formatPrice(state.getTotalPrice())}.`,
       );
     } catch {
-      // Error is handled in store
-      setAnnouncement(useCartStore.getState().error || 'Không thể cập nhật số lượng.');
+      // W4-S28: a store failure is rendered in the visible role="alert"
+      // region — only fall back to this polite region when the store has no
+      // error to surface, so one failure is never announced twice.
+      setAnnouncement(
+        useCartStore.getState().error ? '' : 'Không thể cập nhật số lượng.',
+      );
     }
   };
 
@@ -76,8 +80,9 @@ const CartPage: React.FC = () => {
         } sản phẩm trong giỏ hàng, tạm tính ${formatPrice(state.getTotalPrice())}.`,
       );
     } catch {
-      // Error is handled in store
-      setAnnouncement(useCartStore.getState().error || 'Không thể xóa sản phẩm.');
+      setAnnouncement(
+        useCartStore.getState().error ? '' : 'Không thể xóa sản phẩm.',
+      );
     }
   };
 
@@ -86,14 +91,19 @@ const CartPage: React.FC = () => {
       await clearCart();
       setAnnouncement('Đã xóa tất cả sản phẩm trong giỏ hàng.');
     } catch {
-      // Error is handled in store
-      setAnnouncement(useCartStore.getState().error || 'Không thể xóa giỏ hàng.');
+      setAnnouncement(
+        useCartStore.getState().error ? '' : 'Không thể xóa giỏ hàng.',
+      );
     }
   };
 
   const handleCheckout = () => {
     if (!isAuthenticated) {
-      setCheckoutNotice('Vui lòng đăng nhập để thanh toán');
+      const notice = 'Vui lòng đăng nhập để thanh toán';
+      setCheckoutNotice(notice);
+      // W4-S31: announced through the persistent polite region (the visible
+      // box below is transient visual feedback only)
+      setAnnouncement(notice);
       setTimeout(() => {
         navigate('/login', { state: { from: '/checkout' } });
       }, 600);
@@ -129,13 +139,20 @@ const CartPage: React.FC = () => {
       </div>
 
       {/* Error Message — only shown while cart items are present (an empty
-          cart with an error renders the dedicated error state below) */}
+          cart with an error renders the dedicated error state below).
+          W4-S28: announced assertively; mutation failures are not repeated
+          in the polite region above (see the catch blocks). */}
       {error && !isEmpty && (
-        <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
+        <div
+          role="alert"
+          className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm"
+        >
           {error}
         </div>
       )}
 
+      {/* W4-S31: login gate before checkout — visible notice; announced via
+          the polite region above (setAnnouncement in handleCheckout) */}
       {checkoutNotice && (
         <div className="mb-4 p-4 bg-primary/10 border border-primary/20 rounded-md text-primary text-sm">
           {checkoutNotice}
@@ -168,8 +185,13 @@ const CartPage: React.FC = () => {
           {/* Cart Items */}
           <div className="lg:col-span-2 space-y-4">
             {isLoading && items.length === 0 ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              /* W4-S30: first-load spinner announced politely */
+              <div role="status" className="flex items-center justify-center py-8">
+                <div
+                  className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                  aria-hidden="true"
+                ></div>
+                <span className="sr-only">Đang tải giỏ hàng...</span>
               </div>
             ) : (
               items.map((item) => (
