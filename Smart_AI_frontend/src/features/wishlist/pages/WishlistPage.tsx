@@ -30,6 +30,9 @@ import type { WishlistItem } from '@/types/wishlist.type';
  */
 const WishlistPage: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
+  // W4-S47: polite live region text for wishlist mutations (set only on
+  // events, never derived during render)
+  const [announcement, setAnnouncement] = useState('');
   const {
     items,
     isLoading,
@@ -69,10 +72,21 @@ const WishlistPage: React.FC = () => {
         )}
       </h1>
 
+      {/* W4-S47: persistent polite live region — announces remove/move
+          outcomes; failures are only surfaced through the alert below */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
       {/* Error Message — only shown while items are present (an empty list
-          with an error renders the dedicated error state below) */}
+          with an error renders the dedicated error state below).
+          W4-S50: announced assertively; mutation failures are not repeated
+          in the polite region above. */}
       {error && !isEmpty && (
-        <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
+        <div
+          role="alert"
+          className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm"
+        >
           {error}
         </div>
       )}
@@ -98,9 +112,9 @@ const WishlistPage: React.FC = () => {
           </div>
         )
       ) : isLoading && items.length === 0 ? (
-        /* Loading State */
+        /* Loading State — announced politely (initial load only) */
         <div className="flex items-center justify-center py-16">
-          <div className="text-center">
+          <div className="text-center" role="status">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-muted-foreground">Đang tải danh sách yêu thích...</p>
           </div>
@@ -115,6 +129,7 @@ const WishlistPage: React.FC = () => {
               onRemove={removeItem}
               onMoveToCart={moveToCart}
               isLoading={isLoading}
+              onAnnounce={setAnnouncement}
             />
           ))}
         </div>
@@ -129,11 +144,12 @@ interface WishlistItemCardProps {
   onRemove: (productId: string) => Promise<void>;
   onMoveToCart: (productId: string, color: string, removeAfterAdd?: boolean) => Promise<void>;
   isLoading: boolean;
+  onAnnounce: (message: string) => void;
 }
 
 /**
  * WishlistItemCard Component
- * 
+ *
  * Individual wishlist item card with product details and actions.
  */
 const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
@@ -141,6 +157,7 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
   onRemove,
   onMoveToCart,
   isLoading,
+  onAnnounce,
 }) => {
   const { product, addedAt } = item;
   
@@ -183,8 +200,21 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
     setIsRemoving(true);
     try {
       await onRemove(productId);
+      // W4-S47: the removal outcome is announced politely
+      onAnnounce(
+        productData
+          ? `Đã xóa ${productData.name} khỏi danh sách yêu thích.`
+          : 'Đã xóa khỏi danh sách yêu thích.',
+      );
     } catch {
-      // Error handled by store
+      // W4-S50: a store failure is rendered in the visible role="alert"
+      // region — only fall back to this polite region when the store has no
+      // error to surface, so one failure is never announced twice.
+      onAnnounce(
+        useWishlistStore.getState().error
+          ? ''
+          : 'Không thể xóa sản phẩm khỏi danh sách yêu thích.',
+      );
     } finally {
       setIsRemoving(false);
     }
@@ -196,8 +226,16 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
     setIsAddingToCart(true);
     try {
       await onMoveToCart(productId, selectedColor, false);
+      // W4-S47: the move-to-cart outcome is announced politely
+      onAnnounce(`Đã thêm ${productData?.name ?? 'sản phẩm'} vào giỏ hàng.`);
     } catch {
-      // Error handled by store
+      // W4-S47/S50: same dedupe rule — the store error alert is the single
+      // failure channel when it is visible.
+      onAnnounce(
+        useWishlistStore.getState().error
+          ? ''
+          : 'Không thể thêm sản phẩm vào giỏ hàng.',
+      );
     } finally {
       setIsAddingToCart(false);
     }
@@ -221,10 +259,11 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (productId) {
-                  onRemove(productId);
-                }
+                handleRemove();
               }}
+              // W4-S46: named icon-only remove button (the deleted product
+              // has no name left to interpolate)
+              aria-label="Xóa khỏi danh sách yêu thích"
               disabled={isRemoving || !productId}
             >
               {isRemoving ? (
@@ -262,7 +301,7 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
               }}
             />
           </Link>
-          {/* Remove Button */}
+          {/* Remove Button — W4-S45: named icon-only remove button */}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -272,6 +311,7 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
               e.stopPropagation();
               handleRemove();
             }}
+            aria-label={`Xóa ${productData.name} khỏi danh sách yêu thích`}
             disabled={isRemoving}
           >
             {isRemoving ? (
@@ -317,10 +357,10 @@ const WishlistItemCard: React.FC<WishlistItemCardProps> = ({
             <span>Đã thêm: {formatDate(addedAt)}</span>
           </div>
 
-          {/* Color Selector - Requirement 5.2 */}
+          {/* Color Selector - Requirement 5.2 — W4-S48: named trigger */}
           {productData.colors && productData.colors.length > 0 && (
             <Select value={selectedColor} onValueChange={setSelectedColor}>
-              <SelectTrigger className="w-full h-8 text-xs">
+              <SelectTrigger className="w-full h-8 text-xs" aria-label="Chọn màu">
                 <SelectValue placeholder="Chọn màu" />
               </SelectTrigger>
               <SelectContent>

@@ -4,11 +4,20 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerLabel,
+  ...props
+}: React.ComponentProps<"table"> & {
+  /** W4-U01 (opt-in): wraps the table in a named landmark region. */
+  containerLabel?: string
+}) {
   return (
     <div
       data-slot="table-container"
       className="relative w-full overflow-x-auto"
+      role={containerLabel ? "region" : undefined}
+      aria-label={containerLabel}
     >
       <table
         data-slot="table"

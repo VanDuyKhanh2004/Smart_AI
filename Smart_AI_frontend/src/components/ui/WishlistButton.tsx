@@ -51,6 +51,10 @@ const WishlistButton: React.FC<WishlistButtonProps> = ({
       return;
     }
 
+    // W4-U08: click guard replaces the transient `disabled` state so focus is
+    // never dropped from a focused control mid-toggle.
+    if (isToggling) return;
+
     setIsToggling(true);
     try {
       await toggleWishlist(productId);
@@ -68,12 +72,16 @@ const WishlistButton: React.FC<WishlistButtonProps> = ({
       size={size}
       className={cn(
         'transition-colors',
-        inWishlist && 'text-red-500 hover:text-red-600',
+        // W4-U09: active toggle text meets AA (red-600 on white = 4.83:1)
+        inWishlist && 'text-red-600 hover:text-red-700',
         className
       )}
       onClick={handleClick}
-      disabled={isToggling}
-      aria-label={inWishlist ? 'Xóa khỏi yêu thích' : 'Thêm vào yêu thích'}
+      // W4-U08: pressed state + stable name; with visible text the accessible
+      // name comes from that text, so it can never contradict it.
+      aria-busy={isToggling}
+      aria-pressed={inWishlist}
+      aria-label={showText ? undefined : 'Yêu thích'}
     >
       {isToggling ? (
         <Loader2 className={cn('animate-spin', size === 'lg' ? 'h-5 w-5' : 'h-4 w-4')} />
