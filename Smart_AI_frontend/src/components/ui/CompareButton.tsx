@@ -59,12 +59,16 @@ const CompareButton: React.FC<CompareButtonProps> = ({
       size={size}
       className={cn(
         'transition-colors',
-        inCompare && 'text-blue-500 hover:text-blue-600 bg-blue-50 hover:bg-blue-100',
+        // W4-U09: active toggle text meets AA (blue-600 on white = 5.17:1)
+        inCompare && 'text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100',
         className
       )}
       onClick={handleClick}
       disabled={isDisabled}
-      aria-label={getTooltipText()}
+      // W4-U08: pressed state + stable name; with visible text the accessible
+      // name comes from that text, so it can never contradict it.
+      aria-pressed={inCompare}
+      aria-label={showText ? undefined : 'So sánh'}
       title={getTooltipText()}
     >
       <GitCompareArrows

@@ -20,6 +20,11 @@ import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
 import { StarRating } from '@/components/ui/StarRating';
 import CompareTable from '../components/CompareTable';
+import {
+  buildCompareTableData,
+  filterDifferentRows,
+  filterRowsWithValues,
+} from '../utils/compareUtils';
 import type { Product } from '@/types/product.type';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +53,10 @@ const ComparePage: React.FC = () => {
   const [addingToCart, setAddingToCart] = useState<Record<string, boolean>>({});
   const [addedToCart, setAddedToCart] = useState<Record<string, boolean>>({});
   const [shareUrlCopied, setShareUrlCopied] = useState(false);
+  // W4-S54/S55/S56: polite live region for successful outcomes, conditional
+  // alert for failures (one channel per outcome — never both).
+  const [announcement, setAnnouncement] = useState('');
+  const [failure, setFailure] = useState<string | null>(null);
 
   // Stores
   const { items: compareItems, removeFromCompare } = useCompareStore();
@@ -144,6 +153,32 @@ const ComparePage: React.FC = () => {
     }).format(price);
   };
 
+  // W4-S54/S55/S56: one polite success channel and one alert failure channel
+  const announceSuccess = (message: string) => {
+    setFailure(null);
+    setAnnouncement(message);
+  };
+
+  const announceFailure = (message: string) => {
+    setAnnouncement('');
+    setFailure(message);
+  };
+
+  // W4-S57/S54/S55/S56: persistent live regions — mounted across loading,
+  // error and content states so one region serves the whole page.
+  const liveRegions = (
+    <>
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+      {failure && (
+        <div role="alert" className="sr-only">
+          {failure}
+        </div>
+      )}
+    </>
+  );
+
   // Handle add to cart (Requirement 7.1, 7.3)
   const handleAddToCart = async (product: Product) => {
     if (!isAuthenticated) {
@@ -162,12 +197,17 @@ const ComparePage: React.FC = () => {
 
       await addItem(product._id, 1, color);
 
+      // W4-S56: the success is announced politely
+      announceSuccess(`Đã thêm ${product.name} vào giỏ hàng.`);
       setAddedToCart((prev) => ({ ...prev, [product._id]: true }));
       setTimeout(() => {
         setAddedToCart((prev) => ({ ...prev, [product._id]: false }));
       }, 2000);
     } catch (err) {
       console.error('Failed to add to cart:', err);
+      // W4-S56: no store error is rendered on this page, so the failure is
+      // surfaced once through the alert channel instead of console only.
+      announceFailure(`Không thể thêm ${product.name} vào giỏ hàng.`);
     } finally {
       setAddingToCart((prev) => ({ ...prev, [product._id]: false }));
     }
@@ -180,11 +220,29 @@ const ComparePage: React.FC = () => {
 
     try {
       await navigator.clipboard.writeText(shareUrl);
+      // W4-S54: copy success is announced politely
+      announceSuccess('Đã sao chép link so sánh.');
       setShareUrlCopied(true);
       setTimeout(() => setShareUrlCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy share URL:', err);
+      // W4-S54: copy failure goes through the alert channel only
+      announceFailure('Không thể sao chép link so sánh.');
     }
+  };
+
+  // W4-S55: announcing the filtered row count using the same compareUtils
+  // calculation the table itself renders from.
+  const handleShowDifferencesChange = (checked: boolean) => {
+    setShowOnlyDifferences(checked);
+    const tableData = buildCompareTableData(products);
+    const filtered = checked ? filterDifferentRows(tableData) : tableData;
+    const rowCount = filterRowsWithValues(filtered).length;
+    announceSuccess(
+      checked
+        ? `Đã lọc: ${rowCount} thông số khác biệt được hiển thị.`
+        : `Đã hiển thị toàn bộ ${rowCount} thông số.`,
+    );
   };
 
   // Handle remove product from comparison
@@ -208,10 +266,11 @@ const ComparePage: React.FC = () => {
     }
   };
 
-  // Loading state
+  // Loading state — W4-S57: live regions stay mounted across every return
   if (loading) {
     return (
       <div className="py-8">
+        {liveRegions}
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
@@ -222,13 +281,14 @@ const ComparePage: React.FC = () => {
     );
   }
 
-  // Error state
+  // Error state — W4-S57: announced assertively (load failure / <2 products)
   if (error || products.length < 2) {
     return (
       <div className="py-8">
+        {liveRegions}
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <p className="text-red-500 mb-4">{error || 'Không đủ sản phẩm để so sánh'}</p>
+          <div className="text-center" role="alert">
+            <p className="text-red-600 mb-4">{error || 'Không đủ sản phẩm để so sánh'}</p>
             <Button onClick={() => navigate('/products')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Quay về danh sách sản phẩm
@@ -242,6 +302,9 @@ const ComparePage: React.FC = () => {
 
   return (
     <div className="py-8">
+      {/* W4-S57: persistent success/failure channels for share, add-to-cart
+          and filter outcomes */}
+      {liveRegions}
       {/* Breadcrumb and actions */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
@@ -386,7 +449,7 @@ const ComparePage: React.FC = () => {
           <input
             type="checkbox"
             checked={showOnlyDifferences}
-            onChange={(e) => setShowOnlyDifferences(e.target.checked)}
+            onChange={(e) => handleShowDifferencesChange(e.target.checked)}
             className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
           />
           <span className="text-sm">Chỉ hiện khác biệt</span>

@@ -55,7 +55,7 @@ const UserActions: React.FC<UserActionsProps> = ({ isAuthenticated, isLoading })
           <Link to="/wishlist">
             <Heart className="h-5 w-5" aria-hidden="true" />
             {wishlistCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white animate-in zoom-in-50 duration-200">
+              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-medium text-white animate-in zoom-in-50 duration-200">
                 {wishlistCount > 99 ? '99+' : wishlistCount}
               </span>
             )}

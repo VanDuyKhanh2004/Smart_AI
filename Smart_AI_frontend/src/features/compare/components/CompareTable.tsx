@@ -85,8 +85,8 @@ const CompareTable: React.FC<CompareTableProps> = ({
           'text-center min-w-[120px]',
           // Requirement 4.3, 4.4: Highlight best value with green background
           isBest && 'bg-green-50',
-          // Requirement 3.5: Style missing values
-          isMissing && 'text-gray-400'
+          // Requirement 3.5: Style missing values — W4-S63: gray-50 = 4.83:1
+          isMissing && 'text-gray-500'
         )}
       >
         <div className="flex items-center justify-center gap-1">
@@ -95,6 +95,8 @@ const CompareTable: React.FC<CompareTableProps> = ({
           {isBest && (
             <Check className="h-4 w-4 text-green-600 flex-shrink-0" />
           )}
+          {/* W4-S61: the visual check icon alone never carries meaning for AT */}
+          {isBest && <span className="sr-only">(tốt nhất)</span>}
         </div>
       </TableCell>
     );
@@ -160,17 +162,20 @@ const CompareTable: React.FC<CompareTableProps> = ({
 
   return (
     <div className="border rounded-lg overflow-hidden">
-      <Table>
+      <Table containerLabel="Bảng so sánh thông số">
+        {/* W4-S60: accessible caption for the comparison table */}
+        <caption className="sr-only">So sánh thông số kỹ thuật</caption>
         <TableHeader>
           <TableRow className="bg-gray-50">
             {/* Empty header cell for attribute column */}
             <TableHead className="min-w-[150px] sticky left-0 bg-gray-50 z-10">
               Thông số
             </TableHead>
-            {/* Product name headers */}
+            {/* Product name headers — W4-S61: column headers identify products */}
             {products.map((product) => (
               <TableHead
                 key={product._id}
+                scope="col"
                 className="text-center min-w-[120px]"
               >
                 {product.name}

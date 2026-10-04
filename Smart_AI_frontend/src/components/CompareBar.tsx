@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, GitCompareArrows, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,13 @@ const CompareBar: React.FC = () => {
   const { items, removeFromCompare, clearCompare } = useCompareStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  // W4-S52: polite live region text for compare-list changes; the region
+  // itself stays mounted even while the visual bar is hidden.
+  const [announcement, setAnnouncement] = useState('');
+  const prevCountRef = useRef<number | null>(null);
+  // Set by in-bar actions (remove/clear) so their outcome text is used once
+  // instead of the generic count transition below.
+  const pendingMessageRef = useRef<string | null>(null);
 
   // Fetch product details when items change
   useEffect(() => {
@@ -52,19 +59,49 @@ const CompareBar: React.FC = () => {
     fetchProducts();
   }, [items]);
 
-  // Requirement 2.3: Hide bar when empty
-  if (items.length === 0) {
-    return null;
-  }
+  // W4-S52: announce every count change (add/remove/clear) once, through the
+  // persistent polite region that outlives the bar itself.
+  useEffect(() => {
+    const prev = prevCountRef.current;
+    prevCountRef.current = items.length;
+
+    if (prev === null) {
+      // First render with a pre-filled list (page load): announce the bar.
+      if (items.length > 0) {
+        setAnnouncement(`Danh sách so sánh: ${items.length}/${MAX_COMPARE_ITEMS} sản phẩm`);
+      }
+      return;
+    }
+
+    if (items.length === prev) return;
+
+    if (pendingMessageRef.current) {
+      setAnnouncement(pendingMessageRef.current);
+      pendingMessageRef.current = null;
+      return;
+    }
+
+    if (items.length > prev) {
+      setAnnouncement(`Đã thêm vào danh sách so sánh. ${items.length}/${MAX_COMPARE_ITEMS} sản phẩm`);
+    } else {
+      setAnnouncement(`Đã xóa khỏi danh sách so sánh. ${items.length}/${MAX_COMPARE_ITEMS} sản phẩm`);
+    }
+  }, [items]);
 
   const handleRemove = (productId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     // Requirement 2.1: Remove product from comparison list
+    const product = products.find((p) => p._id === productId);
+    const nextCount = Math.max(items.length - 1, 0);
+    pendingMessageRef.current = product
+      ? `Đã xóa ${product.name} khỏi danh sách so sánh. ${nextCount}/${MAX_COMPARE_ITEMS} sản phẩm`
+      : `Đã xóa khỏi danh sách so sánh. ${nextCount}/${MAX_COMPARE_ITEMS} sản phẩm`;
     removeFromCompare(productId);
   };
 
   const handleClearAll = () => {
     // Requirement 2.2: Clear all products
+    pendingMessageRef.current = 'Đã xóa tất cả sản phẩm khỏi danh sách so sánh.';
     clearCompare();
   };
 
@@ -78,11 +115,22 @@ const CompareBar: React.FC = () => {
   const canCompare = items.length >= 2;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t shadow-lg">
-      <div className="container mx-auto px-4 py-3 md:px-8">
-        <div className="flex items-center justify-between gap-4">
-          {/* Product thumbnails */}
-          <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto">
+    <>
+      {/* W4-S52: persistent polite region — stays mounted when the bar hides */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
+      {/* Requirement 2.3: Hide the visual bar when empty */}
+      {items.length > 0 && (
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t shadow-lg">
+        <div className="container mx-auto px-4 py-3 md:px-8">
+          <div className="flex items-center justify-between gap-4">
+            {/* Product thumbnails — W4-S52: busy while names are loading */}
+            <div
+              className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto"
+              aria-busy={isLoading}
+            >
             <GitCompareArrows className="h-5 w-5 text-blue-500 flex-shrink-0" />
             <span className="text-sm font-medium text-gray-600 flex-shrink-0">
               So sánh:
@@ -125,8 +173,9 @@ const CompareBar: React.FC = () => {
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
-                    {/* Product name tooltip */}
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    {/* Product name tooltip — W4-S53: also shown on keyboard
+                        focus, not hover only */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">
                       {product.name}
                     </div>
                   </div>
@@ -139,7 +188,7 @@ const CompareBar: React.FC = () => {
                   key={`empty-${index}`}
                   className="w-12 h-12 border-2 border-dashed border-gray-300 rounded flex items-center justify-center flex-shrink-0"
                 >
-                  <span className="text-gray-400 text-xs">+</span>
+                  <span className="text-gray-500 text-xs">+</span>
                 </div>
               ))}
             </div>
@@ -152,12 +201,12 @@ const CompareBar: React.FC = () => {
               {items.length}/{MAX_COMPARE_ITEMS} sản phẩm
             </span>
 
-            {/* Clear all button - Requirement 2.2 */}
+            {/* Clear all button - Requirement 2.2 — W4-S62: red-600 = 4.83:1 */}
             <Button
               variant="ghost"
               size="sm"
               onClick={handleClearAll}
-              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
             >
               <Trash2 className="h-4 w-4 mr-1" />
               Xóa tất cả
@@ -175,7 +224,9 @@ const CompareBar: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      )}
+    </>
   );
 };
 

@@ -29,6 +29,9 @@ const CompareHistoryPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // W4-S59: polite live region for delete outcomes (failures go through the
+  // shared role="alert" error message below)
+  const [announcement, setAnnouncement] = useState('');
 
   // Fetch comparison history on mount
   useEffect(() => {
@@ -60,12 +63,17 @@ const CompareHistoryPage: React.FC = () => {
 
 
   // Handle delete comparison - Requirement 5.6
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, createdAt: string) => {
+    // W4-S58: re-entry guard replaces the button's `disabled` state so focus
+    // is never dropped from a focused control mid-delete
+    if (deletingId) return;
     try {
       setDeletingId(id);
       const response = await compareService.deleteFromHistory(id);
       if (response.success) {
         setHistoryItems((prev) => prev.filter((item) => item._id !== id));
+        // W4-S59: announce the deletion politely with its timestamp
+        setAnnouncement(`Đã xóa lịch sử so sánh lúc ${formatDate(createdAt)}.`);
       } else {
         setError('Không thể xóa lịch sử so sánh');
       }
@@ -144,9 +152,17 @@ const CompareHistoryPage: React.FC = () => {
         )}
       </h1>
 
-      {/* Error Message */}
+      {/* W4-S59: persistent polite live region for delete outcomes */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
+      {/* Error Message — W4-S59: shared channel for load and delete failures */}
       {error && (
-        <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
+        <div
+          role="alert"
+          className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm"
+        >
           {error}
         </div>
       )}
@@ -171,7 +187,7 @@ const CompareHistoryPage: React.FC = () => {
               key={item._id}
               item={item}
               onView={() => handleViewComparison(item)}
-              onDelete={() => handleDelete(item._id)}
+              onDelete={() => handleDelete(item._id, item.createdAt)}
               isDeleting={deletingId === item._id}
               formatDate={formatDate}
             />
@@ -303,7 +319,10 @@ const CompareHistoryCard: React.FC<CompareHistoryCardProps> = ({
               variant="ghost"
               size="sm"
               onClick={onDelete}
-              disabled={isDeleting}
+              // W4-S58: busy indicator instead of a focus-dropping `disabled`
+              aria-busy={isDeleting}
+              // W4-S59: uniquely named icon-only control (timestamped)
+              aria-label={`Xóa lịch sử so sánh lúc ${formatDate(createdAt)}`}
               className="text-muted-foreground hover:text-destructive"
             >
               {isDeleting ? (
