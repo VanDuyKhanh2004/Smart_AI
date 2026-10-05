@@ -37,6 +37,7 @@ export function StoreCard({
               <button
                 type="button"
                 aria-label={`Chọn cửa hàng ${store.name}`}
+                aria-pressed={isSelected}
                 className="rounded-sm text-left hover:underline focus-visible:underline"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -74,7 +75,7 @@ export function StoreCard({
             <Clock className="h-4 w-4 text-muted-foreground" />
             <Badge
               variant={isOpen ? 'default' : 'destructive'}
-              className={isOpen ? 'bg-green-600 hover:bg-green-600' : ''}
+              className={isOpen ? 'bg-green-700 hover:bg-green-700' : ''}
             >
               {isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
             </Badge>

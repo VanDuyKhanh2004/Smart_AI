@@ -68,7 +68,7 @@ export function StoreDetailModal({
           <div className="flex items-center gap-3 flex-wrap">
             <Badge
               variant={isCurrentlyOpen ? 'default' : 'destructive'}
-              className={isCurrentlyOpen ? 'bg-green-600 hover:bg-green-600' : ''}
+              className={isCurrentlyOpen ? 'bg-green-700 hover:bg-green-700' : ''}
             >
               <Clock className="h-3 w-3 mr-1" />
               {isCurrentlyOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
@@ -128,6 +128,13 @@ export function StoreDetailModal({
             </div>
             <div className="bg-muted/50 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
+                <caption className="sr-only">Giờ mở cửa theo ngày trong tuần</caption>
+                <thead className="sr-only">
+                  <tr>
+                    <th scope="col">Ngày</th>
+                    <th scope="col">Giờ mở cửa</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {DAY_ORDER.map((day) => {
                     const hours = store.businessHours[day];

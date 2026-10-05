@@ -47,10 +47,14 @@ export function StoreList({
       {/* Header with search and find nearest button */}
       <div className="p-4 border-b space-y-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+            aria-hidden="true"
+          />
           <Input
             type="text"
             placeholder="Tìm kiếm cửa hàng..."
+            aria-label="Tìm kiếm cửa hàng"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -62,6 +66,7 @@ export function StoreList({
           className="w-full"
           onClick={onFindNearest}
           disabled={isLoadingLocation}
+          aria-busy={isLoadingLocation}
         >
           {isLoadingLocation ? (
             <>
@@ -77,7 +82,7 @@ export function StoreList({
         </Button>
         
         {hasUserLocation && (
-          <p className="text-xs text-muted-foreground text-center">
+          <p role="status" className="text-xs text-muted-foreground text-center">
             Danh sách đã được sắp xếp theo khoảng cách
           </p>
         )}
@@ -86,7 +91,10 @@ export function StoreList({
       {/* Store list */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {filteredStores.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
+          <div
+            role="status"
+            className="text-center py-8 text-muted-foreground"
+          >
             {searchQuery ? (
               <>
                 <p>Không tìm thấy cửa hàng nào</p>
@@ -98,7 +106,7 @@ export function StoreList({
           </div>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground mb-2">
+            <p role="status" className="text-sm text-muted-foreground mb-2">
               {filteredStores.length} cửa hàng
               {searchQuery && ` phù hợp với "${searchQuery}"`}
             </p>
