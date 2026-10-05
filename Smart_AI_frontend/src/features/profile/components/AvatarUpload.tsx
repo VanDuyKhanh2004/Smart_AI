@@ -46,12 +46,15 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
   };
 
   const handleClick = () => {
+    // S02: never start a second upload while one is in flight
+    if (isUploading) return;
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (isUploading) return;
 
     // Validate file
     const validationError = validateFile(file);
@@ -106,11 +109,22 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
     : undefined;
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex flex-col items-center gap-3" aria-busy={isUploading}>
       <div className="relative">
-        <Avatar 
+        <Avatar
+          role="button"
+          tabIndex={isUploading ? -1 : 0}
+          aria-label="Thay đổi ảnh đại diện"
+          aria-disabled={isUploading || undefined}
+          aria-describedby={error ? 'avatar-upload-error' : undefined}
           className="size-24 cursor-pointer hover:opacity-80 transition-opacity"
           onClick={handleClick}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleClick();
+            }
+          }}
         >
           {avatarSrc ? (
             <AvatarImage src={avatarSrc} alt={userName} />
@@ -121,8 +135,13 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
         </Avatar>
         
         {isUploading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full">
+          <div
+            className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full"
+            role="status"
+            aria-label="Đang tải ảnh đại diện"
+          >
             <div className="size-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            <span className="sr-only">Đang tải ảnh đại diện</span>
           </div>
         )}
       </div>
@@ -142,12 +161,15 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
         size="sm"
         onClick={handleClick}
         disabled={isUploading}
+        aria-describedby={error ? 'avatar-upload-error' : undefined}
       >
         {isUploading ? 'Đang tải...' : 'Đổi ảnh đại diện'}
       </Button>
 
       {error && (
-        <p className="text-sm text-destructive text-center">{error}</p>
+        <p id="avatar-upload-error" className="text-sm text-destructive text-center">
+          {error}
+        </p>
       )}
     </div>
   );

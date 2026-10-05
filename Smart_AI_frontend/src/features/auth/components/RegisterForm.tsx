@@ -251,13 +251,14 @@ const RegisterForm: React.FC = () => {
           </div>
           
           {error && !recoveryEmail && (
-            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+            <div role="alert" className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
               {error}
             </div>
           )}
 
           {(registeredResult || recoveryEmail) && (
             <div
+              role="status"
               className="space-y-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-700"
               data-testid={recoveryEmail ? 'register-recovery' : 'register-success'}
             >
@@ -281,13 +282,13 @@ const RegisterForm: React.FC = () => {
           )}
 
           {resendMessage && (
-            <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
+            <div role="status" className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
               {resendMessage}
             </div>
           )}
 
           {resendError && (
-            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+            <div role="alert" className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
               {resendError}
             </div>
           )}

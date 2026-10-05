@@ -38,7 +38,8 @@ export function AddressList({
   // Loading state
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" role="status" aria-label="Đang tải địa chỉ">
+        <span className="sr-only">Đang tải địa chỉ</span>
         {[1, 2].map((i) => (
           <div
             key={i}

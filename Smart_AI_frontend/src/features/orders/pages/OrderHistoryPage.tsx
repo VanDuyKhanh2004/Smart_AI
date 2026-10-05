@@ -46,6 +46,9 @@ export function OrderHistoryPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
+  // M07: accessible confirmation after a successful cancellation
+  const [cancelledOrderNumber, setCancelledOrderNumber] = useState<string | null>(null);
+
   // Fetch orders
   const fetchOrders = useCallback(async (pageNum: number) => {
     setIsLoading(true);
@@ -118,6 +121,11 @@ export function OrderHistoryPage() {
     );
     setIsDialogOpen(false);
     setSelectedOrder(null);
+    setCancelledOrderNumber(cancelledOrder.orderNumber || null);
+  }, []);
+
+  const handleDismissCancellation = useCallback(() => {
+    setCancelledOrderNumber(null);
   }, []);
 
   // Handle retry
@@ -193,6 +201,27 @@ export function OrderHistoryPage() {
         </Alert>
       )}
 
+      {/* Cancellation confirmation (M07) */}
+      {cancelledOrderNumber !== null && (
+        <Alert variant="success" className="relative">
+          <CheckCircle2 className="size-4" aria-hidden="true" />
+          <AlertTitle>Hủy đơn hàng thành công</AlertTitle>
+          <AlertDescription>
+            Đơn hàng {cancelledOrderNumber} đã được hủy.
+          </AlertDescription>
+          <div className="mt-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleDismissCancellation}
+            >
+              Đóng
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Đơn hàng của tôi</h1>
         <Button
@@ -208,7 +237,7 @@ export function OrderHistoryPage() {
 
       {/* Error State */}
       {error && (
-        <div className="text-center py-8">
+        <div role="alert" className="text-center py-8">
           <p className="text-destructive mb-4">{error}</p>
           <Button onClick={handleRetry}>Thử lại</Button>
         </div>
@@ -216,18 +245,21 @@ export function OrderHistoryPage() {
 
       {/* Loading State - Requirements 2.4 */}
       {isLoading && !error && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <div key={index} className="space-y-3 p-6 border rounded-xl">
-              <div className="flex justify-between">
-                <Skeleton className="h-5 w-32" />
-                <Skeleton className="h-5 w-20" />
+        <div role="status" aria-label="Đang tải đơn hàng">
+          <span className="sr-only">Đang tải đơn hàng</span>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="space-y-3 p-6 border rounded-xl">
+                <div className="flex justify-between">
+                  <Skeleton className="h-5 w-32" />
+                  <Skeleton className="h-5 w-20" />
+                </div>
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
               </div>
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 

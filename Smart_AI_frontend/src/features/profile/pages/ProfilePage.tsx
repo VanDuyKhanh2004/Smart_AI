@@ -32,8 +32,9 @@ const ProfilePage: React.FC = () => {
   // Loading state
   if (isLoading) {
     return (
-      <div className="py-8 flex justify-center">
+      <div className="py-8 flex justify-center" role="status" aria-label="Đang tải">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <span className="sr-only">Đang tải</span>
       </div>
     );
   }
@@ -41,7 +42,7 @@ const ProfilePage: React.FC = () => {
   // Error state - user not found
   if (!user) {
     return (
-      <div className="py-8 text-center">
+      <div className="py-8 text-center" role="alert">
         <p className="text-muted-foreground">Không thể tải thông tin người dùng</p>
         <Button asChild variant="link">
           <Link to="/login">Đăng nhập lại</Link>
@@ -55,6 +56,8 @@ const ProfilePage: React.FC = () => {
       {/* Toast notification */}
       {toast && (
         <div
+          role={toast.type === 'success' ? 'status' : 'alert'}
+          aria-live={toast.type === 'success' ? 'polite' : 'assertive'}
           className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-md shadow-lg ${
             toast.type === 'success'
               ? 'bg-green-100 text-green-800 border border-green-200'
@@ -68,7 +71,7 @@ const ProfilePage: React.FC = () => {
       <h1 className="text-2xl font-bold mb-6">Quản lý tài khoản</h1>
 
       <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 mb-6">
+        <TabsList className="mb-6 flex w-full max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile">Thông tin cá nhân</TabsTrigger>
           <TabsTrigger value="google">Tài khoản Google</TabsTrigger>
           <TabsTrigger value="addresses">Địa chỉ giao hàng</TabsTrigger>

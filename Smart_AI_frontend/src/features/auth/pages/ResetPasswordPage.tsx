@@ -144,7 +144,7 @@ const ResetPasswordPage: React.FC = () => {
               </div>
 
               {message && (
-                <div className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
+                <div role="status" className="p-3 rounded-md bg-emerald-500/10 text-emerald-700 text-sm">
                   {message}
                 </div>
               )}

@@ -184,7 +184,7 @@ export function ComplaintDetailDialog({
           <div className="space-y-1">
             <DetailRow label="Status">
               <Select value={status} onValueChange={handleStatusChange}>
-                <SelectTrigger className="w-40">
+                <SelectTrigger className="w-40" aria-label="Complaint status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -223,10 +223,11 @@ export function ComplaintDetailDialog({
 
           {/* Resolution Notes */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground">
+            <label htmlFor="complaint-resolution-notes" className="text-sm font-medium text-muted-foreground">
               Resolution Notes
             </label>
             <Textarea
+              id="complaint-resolution-notes"
               value={resolutionNotes}
               onChange={(e) => handleNotesChange(e.target.value)}
               placeholder="Add resolution notes..."

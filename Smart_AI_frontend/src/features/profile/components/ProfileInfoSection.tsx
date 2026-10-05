@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,6 +27,19 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
   const [name, setName] = useState(user?.name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [errors, setErrors] = useState<FormErrors>({});
+
+  // W4-A41 (from W3-09): focus the first invalid field after a failed attempt.
+  const formRef = useRef<HTMLFormElement>(null);
+  const shouldFocusInvalidRef = useRef(false);
+
+  useEffect(() => {
+    if (shouldFocusInvalidRef.current) {
+      shouldFocusInvalidRef.current = false;
+      formRef.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+    }
+  }, [errors]);
 
   // Sync form with user data when it changes
   useEffect(() => {
@@ -63,6 +76,7 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
     e.preventDefault();
 
     if (!validateForm()) {
+      shouldFocusInvalidRef.current = true;
       return;
     }
 
@@ -121,7 +135,7 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
           </div>
 
           {/* Form Section */}
-          <form onSubmit={handleSubmit} className="flex-1 space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} noValidate className="flex-1 space-y-4">
             <div className="space-y-2">
               <label htmlFor="name" className="text-sm font-medium">
                 Họ và tên
@@ -137,10 +151,14 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
                   }
                 }}
                 disabled={isLoading}
+                autoComplete="name"
                 aria-invalid={!!errors.name}
+                aria-describedby={errors.name ? 'profile-name-error' : undefined}
               />
               {errors.name && (
-                <p className="text-sm text-destructive">{errors.name}</p>
+                <p id="profile-name-error" role="alert" className="text-sm text-destructive">
+                  {errors.name}
+                </p>
               )}
             </div>
 
@@ -174,10 +192,14 @@ const ProfileInfoSection: React.FC<ProfileInfoSectionProps> = ({
                   }
                 }}
                 disabled={isLoading}
+                autoComplete="tel"
                 aria-invalid={!!errors.phone}
+                aria-describedby={errors.phone ? 'profile-phone-error' : undefined}
               />
               {errors.phone && (
-                <p className="text-sm text-destructive">{errors.phone}</p>
+                <p id="profile-phone-error" role="alert" className="text-sm text-destructive">
+                  {errors.phone}
+                </p>
               )}
             </div>
 

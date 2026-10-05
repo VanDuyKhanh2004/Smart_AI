@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -229,6 +230,11 @@ export function AddressManagementPage() {
             <DialogTitle>
               {editingAddress ? "Chỉnh sửa địa chỉ" : "Thêm địa chỉ mới"}
             </DialogTitle>
+            <DialogDescription>
+              {editingAddress
+                ? "Cập nhật thông tin địa chỉ giao hàng của bạn."
+                : "Nhập thông tin địa chỉ giao hàng mới."}
+            </DialogDescription>
           </DialogHeader>
           {formError && (
             <Alert variant="destructive">

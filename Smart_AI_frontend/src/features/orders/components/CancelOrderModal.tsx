@@ -124,8 +124,11 @@ export function CancelOrderModal({
           {/* Custom Reason Input - Requirements 2.2 */}
           {selectedReason === "other" && (
             <div className="space-y-2">
-              <label className="text-sm font-medium">Nhập lý do khác:</label>
+              <label htmlFor="cancel-reason-textarea" className="text-sm font-medium">
+                Nhập lý do khác:
+              </label>
               <Textarea
+                id="cancel-reason-textarea"
                 value={customReason}
                 onChange={(e) => {
                   setCustomReason(e.target.value);
@@ -135,13 +138,16 @@ export function CancelOrderModal({
                 className="resize-none"
                 rows={3}
                 disabled={isLoading}
+                aria-describedby={error ? "cancel-order-error" : undefined}
               />
             </div>
           )}
 
           {/* Error Message */}
           {error && (
-            <p role="alert" tabIndex={-1} className="text-sm text-destructive">{error}</p>
+            <p id="cancel-order-error" role="alert" tabIndex={-1} className="text-sm text-destructive">
+              {error}
+            </p>
           )}
         </div>
 
