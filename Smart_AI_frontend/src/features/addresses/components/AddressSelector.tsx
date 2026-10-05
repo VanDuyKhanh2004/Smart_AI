@@ -250,7 +250,7 @@ export function AddressSelector({
 
                 {saveNewAddress && (
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">
+                    <label htmlFor="selector-label" className="text-sm font-medium">
                       Nhãn địa chỉ <span className="text-destructive">*</span>
                     </label>
                     <Select
@@ -258,7 +258,12 @@ export function AddressSelector({
                       onValueChange={setNewAddressLabel}
                       disabled={isLoading}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger
+                        id="selector-label"
+                        aria-required="true"
+                        aria-invalid={!!errors.label}
+                        aria-describedby={errors.label ? 'selector-label-error' : undefined}
+                      >
                         <SelectValue placeholder="Chọn nhãn" />
                       </SelectTrigger>
                       <SelectContent>
@@ -270,7 +275,9 @@ export function AddressSelector({
                       </SelectContent>
                     </Select>
                     {errors.label && (
-                      <p role="alert" className="text-sm text-destructive">{errors.label}</p>
+                      <p id="selector-label-error" role="alert" className="text-sm text-destructive">
+                        {errors.label}
+                      </p>
                     )}
                   </div>
                 )}
@@ -290,10 +297,14 @@ export function AddressSelector({
                   value={formData.fullName}
                   onChange={handleChange('fullName')}
                   aria-invalid={!!errors.fullName}
+                  aria-required="true"
+                  aria-describedby={errors.fullName ? 'selector-fullName-error' : undefined}
                   disabled={isLoading}
                 />
                 {errors.fullName && (
-                  <p role="alert" className="text-sm text-destructive">{errors.fullName}</p>
+                  <p id="selector-fullName-error" role="alert" className="text-sm text-destructive">
+                    {errors.fullName}
+                  </p>
                 )}
               </div>
 
@@ -308,10 +319,14 @@ export function AddressSelector({
                   value={formData.phone}
                   onChange={handleChange('phone')}
                   aria-invalid={!!errors.phone}
+                  aria-required="true"
+                  aria-describedby={errors.phone ? 'selector-phone-error' : undefined}
                   disabled={isLoading}
                 />
                 {errors.phone && (
-                  <p role="alert" className="text-sm text-destructive">{errors.phone}</p>
+                  <p id="selector-phone-error" role="alert" className="text-sm text-destructive">
+                    {errors.phone}
+                  </p>
                 )}
               </div>
 
@@ -326,10 +341,14 @@ export function AddressSelector({
                   value={formData.address}
                   onChange={handleChange('address')}
                   aria-invalid={!!errors.address}
+                  aria-required="true"
+                  aria-describedby={errors.address ? 'selector-address-error' : undefined}
                   disabled={isLoading}
                 />
                 {errors.address && (
-                  <p role="alert" className="text-sm text-destructive">{errors.address}</p>
+                  <p id="selector-address-error" role="alert" className="text-sm text-destructive">
+                    {errors.address}
+                  </p>
                 )}
               </div>
 
@@ -345,10 +364,14 @@ export function AddressSelector({
                     value={formData.ward}
                     onChange={handleChange('ward')}
                     aria-invalid={!!errors.ward}
+                    aria-required="true"
+                    aria-describedby={errors.ward ? 'selector-ward-error' : undefined}
                     disabled={isLoading}
                   />
                   {errors.ward && (
-                    <p role="alert" className="text-sm text-destructive">{errors.ward}</p>
+                    <p id="selector-ward-error" role="alert" className="text-sm text-destructive">
+                      {errors.ward}
+                    </p>
                   )}
                 </div>
 
@@ -363,10 +386,14 @@ export function AddressSelector({
                     value={formData.district}
                     onChange={handleChange('district')}
                     aria-invalid={!!errors.district}
+                    aria-required="true"
+                    aria-describedby={errors.district ? 'selector-district-error' : undefined}
                     disabled={isLoading}
                   />
                   {errors.district && (
-                    <p role="alert" className="text-sm text-destructive">{errors.district}</p>
+                    <p id="selector-district-error" role="alert" className="text-sm text-destructive">
+                      {errors.district}
+                    </p>
                   )}
                 </div>
 
@@ -381,10 +408,14 @@ export function AddressSelector({
                     value={formData.city}
                     onChange={handleChange('city')}
                     aria-invalid={!!errors.city}
+                    aria-required="true"
+                    aria-describedby={errors.city ? 'selector-city-error' : undefined}
                     disabled={isLoading}
                   />
                   {errors.city && (
-                    <p role="alert" className="text-sm text-destructive">{errors.city}</p>
+                    <p id="selector-city-error" role="alert" className="text-sm text-destructive">
+                      {errors.city}
+                    </p>
                   )}
                 </div>
               </div>

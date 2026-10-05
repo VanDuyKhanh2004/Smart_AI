@@ -40,6 +40,20 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
   const [showConfirm, setShowConfirm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // S03 (W2B-L1 convention): manage focus across the unlink -> confirm swap
+  const unlinkButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmPanelRef = useRef<HTMLDivElement>(null);
+  const shouldRestoreUnlinkFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (showConfirm) {
+      confirmPanelRef.current?.querySelector<HTMLElement>('button')?.focus();
+    } else if (shouldRestoreUnlinkFocusRef.current) {
+      shouldRestoreUnlinkFocusRef.current = false;
+      unlinkButtonRef.current?.focus();
+    }
+  }, [showConfirm]);
+
   const onSuccessRef = useRef(onSuccess);
   onSuccessRef.current = onSuccess;
   const onErrorRef = useRef(onError);
@@ -109,7 +123,7 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
       <CardContent>
         {user.googleId ? (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-green-600">
+            <div className="flex items-center gap-2 text-sm text-green-700">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
                 <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -120,7 +134,12 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
             </div>
 
             {showConfirm ? (
-              <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4">
+              <div
+                ref={confirmPanelRef}
+                role="group"
+                aria-label="Xác nhận hủy liên kết Google"
+                className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4"
+              >
                 <p className="text-sm text-amber-800">
                   Are you sure you want to unlink your Google account?
                 </p>
@@ -136,7 +155,10 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setShowConfirm(false)}
+                    onClick={() => {
+                      shouldRestoreUnlinkFocusRef.current = true;
+                      setShowConfirm(false);
+                    }}
                     disabled={isLoading}
                   >
                     Cancel
@@ -145,6 +167,7 @@ const GoogleLinkSection: React.FC<GoogleLinkSectionProps> = ({ onSuccess, onErro
               </div>
             ) : (
               <Button
+                ref={unlinkButtonRef}
                 variant="outline"
                 size="sm"
                 onClick={() => setShowConfirm(true)}

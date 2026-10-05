@@ -61,7 +61,7 @@ export function OrderCard({ order, onClick }: OrderCardProps) {
         {order.promotion && (
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Mã giảm giá:</span>
-            <span className="text-green-600 font-medium">
+            <span className="text-green-700 font-medium">
               {order.promotion.code} (-{new Intl.NumberFormat("vi-VN", {
                 style: "currency",
                 currency: "VND",

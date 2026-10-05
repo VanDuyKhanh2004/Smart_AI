@@ -170,7 +170,7 @@ export function OrderDetailDialog({
               {order.promotion && (
                 <DetailRow label="Mã giảm giá">
                   <div className="flex flex-col">
-                    <span className="font-medium text-green-600">
+                    <span className="font-medium text-green-700">
                       {order.promotion.code}
                     </span>
                     <span className="text-xs text-muted-foreground">
@@ -178,7 +178,7 @@ export function OrderDetailDialog({
                         ? `${order.promotion.discountValue}%` 
                         : formatCurrency(order.promotion.discountValue)}
                     </span>
-                    <span className="text-green-600">
+                    <span className="text-green-700">
                       -{formatCurrency(order.promotion.discountAmount)}
                     </span>
                   </div>

@@ -38,6 +38,9 @@ export function ComplaintListPage() {
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
+  // M08: accessible confirmation after a successful mutation
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+
   // Fetch complaints with filters and pagination
   const {
     data: complaintsData,
@@ -118,6 +121,7 @@ export function ComplaintListPage() {
             // Close dialog after successful update
             setIsDialogOpen(false);
             setSelectedComplaint(null);
+            setSaveSuccessMessage("Complaint status updated successfully.");
           },
         }
       );
@@ -135,6 +139,7 @@ export function ComplaintListPage() {
             // Close dialog after successful update
             setIsDialogOpen(false);
             setSelectedComplaint(null);
+            setSaveSuccessMessage("Complaint details updated successfully.");
           },
         }
       );
@@ -161,6 +166,24 @@ export function ComplaintListPage() {
         onRetry={() => refetchStats()}
       />
 
+      {/* Mutation success (M08) — announced politely after the dialog closes */}
+      {saveSuccessMessage && (
+        <Alert variant="success">
+          <AlertTitle>Cập nhật thành công</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{saveSuccessMessage}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setSaveSuccessMessage(null)}
+            >
+              Đóng
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Mutation error (ERR-04) — page-level copy, also passed to the dialog so
           the message is readable above the overlay while it is open (H03) */}
       {updateComplaint.isError && mutationErrorMessage && (
@@ -182,7 +205,7 @@ export function ComplaintListPage() {
       {/* Error State — query failure, kept separate from the mutation Alert
           above and from the table's "no data" state (H15) */}
       {isComplaintsError && (
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
+        <div role="alert" className="flex flex-col items-center gap-3 py-8 text-center">
           <p className="text-destructive">
             Failed to load complaints. Please try again.
           </p>

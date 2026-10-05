@@ -97,7 +97,8 @@ export function ComplaintTable({
   const pageNumbers = generatePageNumbers(pagination.currentPage, pagination.totalPages);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={isLoading}>
+      {isLoading && <span role="status" className="sr-only">Loading complaints</span>}
       <Table>
         <TableHeader>
           <TableRow>

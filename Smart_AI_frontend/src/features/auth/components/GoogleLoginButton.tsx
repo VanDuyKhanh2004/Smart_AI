@@ -91,9 +91,9 @@ const GoogleLoginButton: React.FC = () => {
   }, [handleCredential]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" aria-busy={isLoading}>
       {error && (
-        <div className="rounded bg-red-100 p-2 text-sm text-red-600">
+        <div role="alert" className="rounded bg-red-100 p-2 text-sm text-red-600">
           {error}
         </div>
       )}
@@ -104,7 +104,9 @@ const GoogleLoginButton: React.FC = () => {
       />
 
       {isLoading && (
-        <div className="text-center text-sm">Đang đăng nhập...</div>
+        <div role="status" className="text-center text-sm">
+          Đang đăng nhập...
+        </div>
       )}
     </div>
   );

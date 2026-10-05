@@ -14,8 +14,9 @@ const AdminRoute: React.FC<AdminRouteProps> = ({ children }) => {
   // flight — never redirect before initialize() has resolved.
   if (!hasHydrated || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" role="status" aria-label="Đang tải">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <span className="sr-only">Đang tải</span>
       </div>
     );
   }

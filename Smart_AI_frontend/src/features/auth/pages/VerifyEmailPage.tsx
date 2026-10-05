@@ -188,7 +188,13 @@ const VerifyEmailPage: React.FC = () => {
                       : 'flex h-12 w-12 items-center justify-center rounded-full bg-slate-500/10 text-slate-600'
                 }
               >
-                {isLoading && <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />}
+                {isLoading && (
+                  <span
+                    role="status"
+                    aria-label="Đang xử lý"
+                    className="h-5 w-5 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"
+                  />
+                )}
                 {isSuccess && (
                   <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 13l4 4L19 7" />
@@ -202,7 +208,7 @@ const VerifyEmailPage: React.FC = () => {
                   </svg>
                 )}
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1" role={isError ? 'alert' : 'status'}>
                 <p className="text-sm font-semibold text-slate-800">
                   {isSuccess ? 'Email da duoc kich hoat' : isError ? 'Khong the kich hoat' : 'Dang kich hoat email'}
                 </p>
@@ -240,12 +246,12 @@ const VerifyEmailPage: React.FC = () => {
                   />
                 </div>
                 {resendMessage && (
-                  <div className="rounded-lg bg-emerald-500/10 px-3 py-2 text-emerald-700">
+                  <div role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-emerald-700">
                     {resendMessage}
                   </div>
                 )}
                 {resendError && (
-                  <div className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
+                  <div role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
                     {resendError}
                   </div>
                 )}
