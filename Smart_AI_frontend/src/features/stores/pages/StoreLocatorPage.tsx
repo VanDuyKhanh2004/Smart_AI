@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, MapPin, CheckCircle } from 'lucide-react';
+import { AlertCircle, MapPin, CheckCircle, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { storeService } from '../services/storeService';
 import { StoreMap } from '../components/StoreMap';
 import { StoreList } from '../components/StoreList';
@@ -25,13 +27,19 @@ export function StoreLocatorPage() {
   const [appointmentStore, setAppointmentStore] = useState<StoreWithDistance | null>(null);
   const [isAppointmentFormOpen, setIsAppointmentFormOpen] = useState(false);
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  // React Query v5 resets status to "pending" while refetching, which would
+  // unmount the error UI and hide the busy retry button. Latch the retry so
+  // the alert (with its busy state) stays visible until the fetch settles.
+  const [isRetryingStores, setIsRetryingStores] = useState(false);
 
 
   // Fetch stores
   const {
     data: storesResponse,
     isLoading: isLoadingStores,
+    isFetching: isFetchingStores,
     error: storesError,
+    refetch,
   } = useQuery({
     queryKey: ['stores'],
     queryFn: () => storeService.getAllStores(),
@@ -132,7 +140,6 @@ export function StoreLocatorPage() {
   // Handle appointment success
   const handleAppointmentSuccess = useCallback(() => {
     setShowSuccessMessage(true);
-    setTimeout(() => setShowSuccessMessage(false), 5000);
   }, []);
 
   // Handle find nearest
@@ -148,24 +155,55 @@ export function StoreLocatorPage() {
     }
   }, [locationError]);
 
-  if (isLoadingStores) {
+  // Auto-dismiss the booking success banner after 5 seconds.
+  // The cleanup prevents the timer from updating state after unmount.
+  useEffect(() => {
+    if (!showSuccessMessage) return;
+    const timer = setTimeout(() => setShowSuccessMessage(false), 5000);
+    return () => clearTimeout(timer);
+  }, [showSuccessMessage]);
+
+  if (isLoadingStores && !isRetryingStores) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-200px)]">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <Spinner size="lg" label="Đang tải danh sách cửa hàng" />
           <p className="mt-4 text-muted-foreground">Đang tải danh sách cửa hàng...</p>
         </div>
       </div>
     );
   }
 
-  if (storesError) {
+  if (storesError || isRetryingStores) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-200px)]">
-        <div className="text-center text-destructive">
-          <AlertCircle className="h-12 w-12 mx-auto mb-4" />
+        <div className="text-center text-destructive" role="alert">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4" aria-hidden="true" />
           <p>Không thể tải danh sách cửa hàng</p>
           <p className="text-sm mt-2">Vui lòng thử lại sau</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() => {
+              setIsRetryingStores(true);
+              void refetch().then(
+                () => setIsRetryingStores(false),
+                () => setIsRetryingStores(false),
+              );
+            }}
+            disabled={isFetchingStores}
+            aria-busy={isFetchingStores}
+          >
+            {isFetchingStores ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                Đang thử lại...
+              </>
+            ) : (
+              'Thử lại'
+            )}
+          </Button>
         </div>
       </div>
     );
@@ -186,16 +224,22 @@ export function StoreLocatorPage() {
 
       {/* Location error alert */}
       {locationError && (
-        <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-3">
-          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+        <div
+          role="alert"
+          className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-3"
+        >
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" aria-hidden="true" />
           <p className="text-sm text-destructive">{locationError}</p>
         </div>
       )}
 
       {/* Appointment success message */}
       {showSuccessMessage && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
-          <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
+        <div
+          role="status"
+          className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3"
+        >
+          <CheckCircle className="h-5 w-5 text-green-600 shrink-0" aria-hidden="true" />
           <p className="text-sm text-green-700">Đặt lịch hẹn thành công! Chúng tôi sẽ liên hệ xác nhận sớm nhất.</p>
         </div>
       )}

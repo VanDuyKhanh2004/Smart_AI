@@ -1,11 +1,13 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { format, parseISO, addHours } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { Calendar, Clock, MapPin, Phone, RefreshCw, CalendarX, Store, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, MapPin, Phone, RefreshCw, CalendarX, Store, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import {
   Select,
   SelectContent,
@@ -73,6 +75,10 @@ export function MyAppointmentsPage() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  // Cancellation mutation feedback (kept separate from the list fetch error)
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelSuccess, setCancelSuccess] = useState<Appointment | null>(null);
+  const pendingFocusIdRef = useRef<string | null>(null);
 
 
   // Fetch appointments
@@ -105,6 +111,7 @@ export function MyAppointmentsPage() {
 
   // Handle cancel click
   const handleCancelClick = useCallback((appointment: Appointment) => {
+    setCancelError(null);
     setAppointmentToCancel(appointment);
     setCancelDialogOpen(true);
   }, []);
@@ -125,15 +132,33 @@ export function MyAppointmentsPage() {
               : apt
           )
         );
+        setCancelSuccess(appointmentToCancel);
+        // The "Hủy lịch hẹn" trigger unmounts with the status change, so
+        // remember the card to restore focus to once the dialog closes (S02).
+        pendingFocusIdRef.current = appointmentToCancel.id;
         setCancelDialogOpen(false);
         setAppointmentToCancel(null);
+      } else {
+        setCancelError('Không thể hủy lịch hẹn. Vui lòng thử lại.');
       }
     } catch {
-      setError('Không thể hủy lịch hẹn. Vui lòng thử lại.');
+      setCancelError('Không thể hủy lịch hẹn. Vui lòng thử lại.');
     } finally {
       setIsCancelling(false);
     }
   }, [appointmentToCancel]);
+
+  // Restore focus to the affected appointment card after a successful
+  // cancellation (the dialog trigger unmounts, which would drop focus to body).
+  useEffect(() => {
+    const targetId = pendingFocusIdRef.current;
+    if (!targetId) return;
+    const card = document.getElementById(`appointment-card-${targetId}`);
+    if (card) {
+      pendingFocusIdRef.current = null;
+      card.focus();
+    }
+  }, [appointments]);
 
   // Handle refresh
   const handleRefresh = useCallback(() => {
@@ -178,7 +203,7 @@ export function MyAppointmentsPage() {
         <div className="flex items-center gap-3">
           {/* Status filter - Requirements 5.2 */}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px]" aria-label="Lọc theo trạng thái">
               <SelectValue placeholder="Lọc theo trạng thái" />
             </SelectTrigger>
             <SelectContent>
@@ -194,17 +219,49 @@ export function MyAppointmentsPage() {
             size="sm"
             onClick={handleRefresh}
             disabled={isLoading}
+            aria-busy={isLoading}
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
             Làm mới
           </Button>
         </div>
       </div>
 
-      {/* Error State */}
+      {/* Cancellation success feedback (M08) */}
+      {cancelSuccess && (
+        <Alert
+          role="status"
+          variant="success"
+          className="relative"
+        >
+          <CheckCircle2 className="size-4" aria-hidden="true" />
+          <AlertTitle>Đã hủy lịch hẹn thành công</AlertTitle>
+          <AlertDescription>
+            Lịch hẹn tại {getStoreInfo(cancelSuccess.store).name} ngày{' '}
+            {formatAppointmentDate(cancelSuccess.date)} (
+            {cancelSuccess.timeSlot.start} - {cancelSuccess.timeSlot.end}) đã được
+            hủy.
+          </AlertDescription>
+          <div className="mt-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setCancelSuccess(null)}
+            >
+              Đóng
+            </Button>
+          </div>
+        </Alert>
+      )}
+
+      {/* Error State (fetch errors only) */}
       {error && (
-        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-3">
-          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+        <div
+          role="alert"
+          className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-3"
+        >
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" aria-hidden="true" />
           <p className="text-sm text-destructive">{error}</p>
           <Button variant="outline" size="sm" onClick={handleRefresh} className="ml-auto">
             Thử lại
@@ -214,7 +271,11 @@ export function MyAppointmentsPage() {
 
       {/* Loading State */}
       {isLoading && !error && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div
+          role="status"
+          aria-label="Đang tải lịch hẹn"
+          className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+        >
           {Array.from({ length: 6 }).map((_, index) => (
             <Card key={index}>
               <CardHeader className="pb-3">
@@ -245,7 +306,7 @@ export function MyAppointmentsPage() {
           </p>
           {statusFilter === 'all' && (
             <Button asChild>
-              <a href="/stores">Tìm cửa hàng</a>
+              <Link to="/stores">Tìm cửa hàng</Link>
             </Button>
           )}
         </div>
@@ -261,7 +322,12 @@ export function MyAppointmentsPage() {
             const statusInfo = statusConfig[appointment.status];
 
             return (
-              <Card key={appointment.id} className="overflow-hidden">
+              <Card
+                key={appointment.id}
+                id={`appointment-card-${appointment.id}`}
+                tabIndex={-1}
+                className="overflow-hidden focus:outline-none focus:ring-2 focus:ring-ring/50"
+              >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-base font-semibold line-clamp-1">
@@ -349,7 +415,7 @@ export function MyAppointmentsPage() {
 
       {/* Appointment count info */}
       {!isLoading && !error && appointments.length > 0 && (
-        <p className="text-center text-sm text-muted-foreground">
+        <p role="status" className="text-center text-sm text-muted-foreground">
           Hiển thị {filteredAppointments.length} / {appointments.length} lịch hẹn
         </p>
       )}
@@ -368,6 +434,16 @@ export function MyAppointmentsPage() {
               <p><strong>Cửa hàng:</strong> {getStoreInfo(appointmentToCancel.store).name}</p>
               <p><strong>Ngày:</strong> {formatAppointmentDate(appointmentToCancel.date)}</p>
               <p><strong>Giờ:</strong> {appointmentToCancel.timeSlot.start} - {appointmentToCancel.timeSlot.end}</p>
+            </div>
+          )}
+          {/* Cancellation mutation error (M09) — scoped to the dialog so a
+              failed cancel never removes the appointment list */}
+          {cancelError && (
+            <div
+              role="alert"
+              className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg"
+            >
+              <p className="text-sm text-destructive">{cancelError}</p>
             </div>
           )}
           <DialogFooter>

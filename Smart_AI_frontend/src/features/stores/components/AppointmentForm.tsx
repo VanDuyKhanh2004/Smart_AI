@@ -298,6 +298,19 @@ export function AppointmentForm({
               <Clock className="h-4 w-4" aria-hidden="true" />
               Khung giờ <span className="text-destructive">*</span>
             </span>
+            {/* Persistent live region announcing slot-area transitions
+                (loading → slots / empty) */}
+            <span role="status" className="sr-only">
+              {isLoadingSlots
+                ? 'Đang tải khung giờ'
+                : slotsError
+                  ? ''
+                  : !selectedDate || !purpose
+                    ? ''
+                    : availableSlots.length === 0
+                      ? 'Không có khung giờ trống trong ngày này'
+                      : `${availableSlots.length} khung giờ trống`}
+            </span>
             {!selectedDate ? (
               <p className="text-sm text-muted-foreground">
                 Vui lòng chọn ngày trước
@@ -312,7 +325,7 @@ export function AppointmentForm({
                 Đang tải khung giờ...
               </div>
             ) : slotsError ? (
-              <p className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 Không thể tải khung giờ. Vui lòng thử lại.
               </p>
             ) : availableSlots.length === 0 ? (
@@ -336,6 +349,10 @@ export function AppointmentForm({
                         : 'outline'
                     }
                     size="sm"
+                    aria-pressed={
+                      selectedTimeSlot?.start === slot.start &&
+                      selectedTimeSlot?.end === slot.end
+                    }
                     onClick={() => {
                       setSelectedTimeSlot(slot);
                       setErrors((prev) => ({ ...prev, timeSlot: undefined }));
