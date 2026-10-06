@@ -760,7 +760,7 @@ export function AdminQAPage() {
             <DialogDescription>Viết câu trả lời của bạn cho câu hỏi này.</DialogDescription>
           </DialogHeader>
           {answerError && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" id="qa-answer-error">
               <AlertDescription>{answerError}</AlertDescription>
             </Alert>
           )}
@@ -778,15 +778,24 @@ export function AdminQAPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Câu trả lời:</label>
+                <label htmlFor="qa-answer" className="text-sm font-medium">Câu trả lời:</label>
                 <Textarea
+                  id="qa-answer"
                   value={answerText}
                   onChange={(e) => setAnswerText(e.target.value)}
                   placeholder="Nhập câu trả lời (5-1000 ký tự)..."
                   rows={4}
                   maxLength={1000}
+                  aria-required="true"
+                  aria-invalid={answerText.length > 0 && answerText.trim().length < 5}
+                  aria-describedby={
+                    answerError ? 'qa-answer-help qa-answer-error' : 'qa-answer-help'
+                  }
                 />
-                <div className="flex justify-between text-xs text-muted-foreground">
+                <div
+                  id="qa-answer-help"
+                  className="flex justify-between text-xs text-muted-foreground"
+                >
                   <span>Tối thiểu 5 ký tự</span>
                   <span>{answerText.length}/1000</span>
                 </div>

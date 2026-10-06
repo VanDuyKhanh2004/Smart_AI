@@ -347,6 +347,7 @@ export function AdminAppointmentsPage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
             <Input
               type="date"
+              aria-label="Từ ngày"
               value={filters.startDate}
               onChange={(e) => setFilters((prev) => ({ ...prev, startDate: e.target.value }))}
               placeholder="Từ ngày"
@@ -358,6 +359,7 @@ export function AdminAppointmentsPage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
             <Input
               type="date"
+              aria-label="Đến ngày"
               value={filters.endDate}
               onChange={(e) => setFilters((prev) => ({ ...prev, endDate: e.target.value }))}
               placeholder="Đến ngày"
