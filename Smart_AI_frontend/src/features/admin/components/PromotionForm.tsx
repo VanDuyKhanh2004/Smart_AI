@@ -188,19 +188,23 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
       {!isEditMode && (
         <div className="space-y-2">
           <label htmlFor="code" className="text-sm font-medium">
-            Mã khuyến mãi <span className="text-destructive">*</span>
+            Mã khuyến mãi <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="code"
             value={formData.code}
             onChange={(e) => handleInputChange('code', e.target.value.toUpperCase())}
             placeholder="VD: SALE20, NEWYEAR2024"
+            aria-required="true"
             aria-invalid={!!errors.code}
+            aria-describedby={
+              errors.code ? 'promotion-code-error promotion-code-help' : 'promotion-code-help'
+            }
             disabled={isLoading}
             maxLength={20}
           />
-          {errors.code && <p role="alert" className="text-sm text-destructive">{errors.code}</p>}
-          <p className="text-xs text-muted-foreground">Chỉ chứa chữ cái và số, 4-20 ký tự</p>
+          {errors.code && <p id="promotion-code-error" role="alert" className="text-sm text-destructive">{errors.code}</p>}
+          <p id="promotion-code-help" className="text-xs text-muted-foreground">Chỉ chứa chữ cái và số, 4-20 ký tự</p>
         </div>
       )}
 
@@ -224,14 +228,14 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <label htmlFor="discountType" className="text-sm font-medium">
-            Loại giảm giá <span className="text-destructive">*</span>
+            Loại giảm giá <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Select
             value={formData.discountType}
             onValueChange={(value: DiscountType) => handleInputChange('discountType', value)}
             disabled={isLoading || isEditMode}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger id="discountType" aria-required="true" className="w-full">
               <SelectValue placeholder="Chọn loại" />
             </SelectTrigger>
             <SelectContent>
@@ -243,7 +247,7 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
 
         <div className="space-y-2">
           <label htmlFor="discountValue" className="text-sm font-medium">
-            Giá trị giảm <span className="text-destructive">*</span>
+            Giá trị giảm <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="discountValue"
@@ -251,12 +255,14 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             value={formData.discountValue}
             onChange={(e) => handleInputChange('discountValue', e.target.value ? Number(e.target.value) : '')}
             placeholder={formData.discountType === 'percentage' ? '1-100' : 'Số tiền'}
+            aria-required="true"
             aria-invalid={!!errors.discountValue}
+            aria-describedby={errors.discountValue ? 'promotion-discount-value-error' : undefined}
             disabled={isLoading}
             min={1}
             max={formData.discountType === 'percentage' ? 100 : undefined}
           />
-          {errors.discountValue && <p role="alert" className="text-sm text-destructive">{errors.discountValue}</p>}
+          {errors.discountValue && <p id="promotion-discount-value-error" role="alert" className="text-sm text-destructive">{errors.discountValue}</p>}
         </div>
       </div>
 
@@ -273,10 +279,11 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             onChange={(e) => handleInputChange('minOrderValue', e.target.value ? Number(e.target.value) : '')}
             placeholder="0"
             aria-invalid={!!errors.minOrderValue}
+            aria-describedby={errors.minOrderValue ? 'promotion-min-order-error' : undefined}
             disabled={isLoading}
             min={0}
           />
-          {errors.minOrderValue && <p role="alert" className="text-sm text-destructive">{errors.minOrderValue}</p>}
+          {errors.minOrderValue && <p id="promotion-min-order-error" role="alert" className="text-sm text-destructive">{errors.minOrderValue}</p>}
         </div>
 
         <div className="space-y-2">
@@ -289,17 +296,18 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
             value={formData.maxDiscountAmount ?? ''}
             onChange={(e) => handleInputChange('maxDiscountAmount', e.target.value ? Number(e.target.value) : null)}
             placeholder="Không giới hạn"
+            aria-describedby="promotion-max-discount-help"
             disabled={isLoading}
             min={0}
           />
-          <p className="text-xs text-muted-foreground">Để trống = không giới hạn</p>
+          <p id="promotion-max-discount-help" className="text-xs text-muted-foreground">Để trống = không giới hạn</p>
         </div>
       </div>
 
       {/* Usage Limit */}
       <div className="space-y-2">
         <label htmlFor="usageLimit" className="text-sm font-medium">
-          Giới hạn sử dụng <span className="text-destructive">*</span>
+          Giới hạn sử dụng <span className="text-destructive" aria-hidden="true">*</span>
         </label>
         <Input
           id="usageLimit"
@@ -307,43 +315,49 @@ export function PromotionForm({ promotion, onSubmit, onCancel, isLoading = false
           value={formData.usageLimit}
           onChange={(e) => handleInputChange('usageLimit', e.target.value ? Number(e.target.value) : '')}
           placeholder="Số lần sử dụng tối đa"
+          aria-required="true"
           aria-invalid={!!errors.usageLimit}
+          aria-describedby={errors.usageLimit ? 'promotion-usage-limit-error' : undefined}
           disabled={isLoading}
           min={1}
         />
-        {errors.usageLimit && <p role="alert" className="text-sm text-destructive">{errors.usageLimit}</p>}
+        {errors.usageLimit && <p id="promotion-usage-limit-error" role="alert" className="text-sm text-destructive">{errors.usageLimit}</p>}
       </div>
 
       {/* Date Range */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <label htmlFor="startDate" className="text-sm font-medium">
-            Ngày bắt đầu <span className="text-destructive">*</span>
+            Ngày bắt đầu <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="startDate"
             type="datetime-local"
             value={formData.startDate}
             onChange={(e) => handleInputChange('startDate', e.target.value)}
+            aria-required="true"
             aria-invalid={!!errors.startDate}
+            aria-describedby={errors.startDate ? 'promotion-start-date-error' : undefined}
             disabled={isLoading || isEditMode}
           />
-          {errors.startDate && <p role="alert" className="text-sm text-destructive">{errors.startDate}</p>}
+          {errors.startDate && <p id="promotion-start-date-error" role="alert" className="text-sm text-destructive">{errors.startDate}</p>}
         </div>
 
         <div className="space-y-2">
           <label htmlFor="endDate" className="text-sm font-medium">
-            Ngày kết thúc <span className="text-destructive">*</span>
+            Ngày kết thúc <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="endDate"
             type="datetime-local"
             value={formData.endDate}
             onChange={(e) => handleInputChange('endDate', e.target.value)}
+            aria-required="true"
             aria-invalid={!!errors.endDate}
+            aria-describedby={errors.endDate ? 'promotion-end-date-error' : undefined}
             disabled={isLoading}
           />
-          {errors.endDate && <p role="alert" className="text-sm text-destructive">{errors.endDate}</p>}
+          {errors.endDate && <p id="promotion-end-date-error" role="alert" className="text-sm text-destructive">{errors.endDate}</p>}
         </div>
       </div>
 

@@ -225,37 +225,41 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
     <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
       <div className="space-y-2">
         <label htmlFor="name" className="text-sm font-medium">
-          Tên sản phẩm <span className="text-destructive">*</span>
+          Tên sản phẩm <span className="text-destructive" aria-hidden="true">*</span>
         </label>
         <Input
           id="name"
           value={formData.name}
           onChange={(e) => handleInputChange('name', e.target.value)}
           placeholder="Nhập tên sản phẩm"
+          aria-required="true"
           aria-invalid={!!errors.name}
+          aria-describedby={errors.name ? 'product-name-error' : undefined}
           disabled={isLoading}
         />
-        {errors.name && <p role="alert" className="text-sm text-destructive">{errors.name}</p>}
+        {errors.name && <p id="product-name-error" role="alert" className="text-sm text-destructive">{errors.name}</p>}
       </div>
 
       <div className="space-y-2">
         <label htmlFor="brand" className="text-sm font-medium">
-          Thương hiệu <span className="text-destructive">*</span>
+          Thương hiệu <span className="text-destructive" aria-hidden="true">*</span>
         </label>
         <Input
           id="brand"
           value={formData.brand}
           onChange={(e) => handleInputChange('brand', e.target.value)}
           placeholder="Nhập thương hiệu"
+          aria-required="true"
           aria-invalid={!!errors.brand}
+          aria-describedby={errors.brand ? 'product-brand-error' : undefined}
           disabled={isLoading}
         />
-        {errors.brand && <p role="alert" className="text-sm text-destructive">{errors.brand}</p>}
+        {errors.brand && <p id="product-brand-error" role="alert" className="text-sm text-destructive">{errors.brand}</p>}
       </div>
 
       <div className="space-y-2">
         <label htmlFor="price" className="text-sm font-medium">
-          Giá (VNĐ) <span className="text-destructive">*</span>
+          Giá (VNĐ) <span className="text-destructive" aria-hidden="true">*</span>
         </label>
         <Input
           id="price"
@@ -263,27 +267,31 @@ export function ProductForm({ onSubmit, onCancel, isLoading = false, uploadProgr
           value={formData.price || ''}
           onChange={(e) => handleInputChange('price', Number(e.target.value))}
           placeholder="Nhập giá sản phẩm"
+          aria-required="true"
           aria-invalid={!!errors.price}
+          aria-describedby={errors.price ? 'product-price-error' : undefined}
           disabled={isLoading}
           min={0}
         />
-        {errors.price && <p role="alert" className="text-sm text-destructive">{errors.price}</p>}
+        {errors.price && <p id="product-price-error" role="alert" className="text-sm text-destructive">{errors.price}</p>}
       </div>
 
       <div className="space-y-2">
         <label htmlFor="description" className="text-sm font-medium">
-          Mô tả <span className="text-destructive">*</span>
+          Mô tả <span className="text-destructive" aria-hidden="true">*</span>
         </label>
         <Textarea
           id="description"
           value={formData.description}
           onChange={(e) => handleInputChange('description', e.target.value)}
           placeholder="Nhập mô tả sản phẩm"
+          aria-required="true"
           aria-invalid={!!errors.description}
+          aria-describedby={errors.description ? 'product-description-error' : undefined}
           disabled={isLoading}
           rows={3}
         />
-        {errors.description && <p role="alert" className="text-sm text-destructive">{errors.description}</p>}
+        {errors.description && <p id="product-description-error" role="alert" className="text-sm text-destructive">{errors.description}</p>}
       </div>
 
       <fieldset className="space-y-3">

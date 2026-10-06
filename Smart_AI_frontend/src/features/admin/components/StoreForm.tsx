@@ -34,13 +34,13 @@ interface FormErrors {
 }
 
 const DAYS_OF_WEEK = [
-  { key: 'monday', label: 'Thứ 2' },
-  { key: 'tuesday', label: 'Thứ 3' },
-  { key: 'wednesday', label: 'Thứ 4' },
-  { key: 'thursday', label: 'Thứ 5' },
-  { key: 'friday', label: 'Thứ 6' },
-  { key: 'saturday', label: 'Thứ 7' },
-  { key: 'sunday', label: 'Chủ nhật' },
+  { key: 'monday', label: 'Thứ 2', fullLabel: 'Thứ hai' },
+  { key: 'tuesday', label: 'Thứ 3', fullLabel: 'Thứ ba' },
+  { key: 'wednesday', label: 'Thứ 4', fullLabel: 'Thứ tư' },
+  { key: 'thursday', label: 'Thứ 5', fullLabel: 'Thứ năm' },
+  { key: 'friday', label: 'Thứ 6', fullLabel: 'Thứ sáu' },
+  { key: 'saturday', label: 'Thứ 7', fullLabel: 'Thứ bảy' },
+  { key: 'sunday', label: 'Chủ nhật', fullLabel: 'Chủ nhật' },
 ] as const;
 
 const DEFAULT_BUSINESS_HOUR: BusinessHour = {
@@ -193,12 +193,14 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
         
         <div className="space-y-2">
           <label htmlFor="name" className="text-sm font-medium">
-            Tên cửa hàng <span className="text-destructive">*</span>
+            Tên cửa hàng <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="name"
             value={name}
+            aria-required="true"
             aria-invalid={!!errors.name}
+            aria-describedby={errors.name ? 'store-name-error' : undefined}
             onChange={(e) => {
               setName(e.target.value);
               if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
@@ -206,18 +208,20 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             placeholder="Nhập tên cửa hàng"
             disabled={isLoading}
           />
-          {errors.name && <p role="alert" className="text-sm text-destructive">{errors.name}</p>}
+          {errors.name && <p id="store-name-error" role="alert" className="text-sm text-destructive">{errors.name}</p>}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <label htmlFor="phone" className="text-sm font-medium">
-              Số điện thoại <span className="text-destructive">*</span>
+              Số điện thoại <span className="text-destructive" aria-hidden="true">*</span>
             </label>
             <Input
               id="phone"
               value={phone}
+              aria-required="true"
               aria-invalid={!!errors.phone}
+              aria-describedby={errors.phone ? 'store-phone-error' : undefined}
               onChange={(e) => {
                 setPhone(e.target.value);
                 if (errors.phone) setErrors((prev) => ({ ...prev, phone: undefined }));
@@ -225,7 +229,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
               placeholder="0123456789"
               disabled={isLoading}
             />
-            {errors.phone && <p role="alert" className="text-sm text-destructive">{errors.phone}</p>}
+            {errors.phone && <p id="store-phone-error" role="alert" className="text-sm text-destructive">{errors.phone}</p>}
           </div>
           <div className="space-y-2">
             <label htmlFor="email" className="text-sm font-medium">Email</label>
@@ -260,12 +264,14 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
         
         <div className="space-y-2">
           <label htmlFor="street" className="text-sm font-medium">
-            Số nhà, đường <span className="text-destructive">*</span>
+            Số nhà, đường <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="street"
             value={street}
+            aria-required="true"
             aria-invalid={!!errors.street}
+            aria-describedby={errors.street ? 'store-street-error' : undefined}
             onChange={(e) => {
               setStreet(e.target.value);
               if (errors.street) setErrors((prev) => ({ ...prev, street: undefined }));
@@ -273,7 +279,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             placeholder="123 Đường ABC"
             disabled={isLoading}
           />
-          {errors.street && <p role="alert" className="text-sm text-destructive">{errors.street}</p>}
+          {errors.street && <p id="store-street-error" role="alert" className="text-sm text-destructive">{errors.street}</p>}
         </div>
 
         <div className="grid grid-cols-3 gap-4">
@@ -289,12 +295,14 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
           </div>
           <div className="space-y-2">
             <label htmlFor="district" className="text-sm font-medium">
-              Quận/Huyện <span className="text-destructive">*</span>
+              Quận/Huyện <span className="text-destructive" aria-hidden="true">*</span>
             </label>
             <Input
               id="district"
               value={district}
+              aria-required="true"
               aria-invalid={!!errors.district}
+              aria-describedby={errors.district ? 'store-district-error' : undefined}
               onChange={(e) => {
                 setDistrict(e.target.value);
                 if (errors.district) setErrors((prev) => ({ ...prev, district: undefined }));
@@ -302,16 +310,18 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
               placeholder="Quận 1"
               disabled={isLoading}
             />
-            {errors.district && <p role="alert" className="text-sm text-destructive">{errors.district}</p>}
+            {errors.district && <p id="store-district-error" role="alert" className="text-sm text-destructive">{errors.district}</p>}
           </div>
           <div className="space-y-2">
             <label htmlFor="city" className="text-sm font-medium">
-              Thành phố <span className="text-destructive">*</span>
+              Thành phố <span className="text-destructive" aria-hidden="true">*</span>
             </label>
             <Input
               id="city"
               value={city}
+              aria-required="true"
               aria-invalid={!!errors.city}
+              aria-describedby={errors.city ? 'store-city-error' : undefined}
               onChange={(e) => {
                 setCity(e.target.value);
                 if (errors.city) setErrors((prev) => ({ ...prev, city: undefined }));
@@ -319,18 +329,20 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
               placeholder="Hà Nội"
               disabled={isLoading}
             />
-            {errors.city && <p role="alert" className="text-sm text-destructive">{errors.city}</p>}
+            {errors.city && <p id="store-city-error" role="alert" className="text-sm text-destructive">{errors.city}</p>}
           </div>
         </div>
 
         <div className="space-y-2">
           <label htmlFor="fullAddress" className="text-sm font-medium">
-            Địa chỉ đầy đủ <span className="text-destructive">*</span>
+            Địa chỉ đầy đủ <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="fullAddress"
             value={fullAddress}
+            aria-required="true"
             aria-invalid={!!errors.fullAddress}
+            aria-describedby={errors.fullAddress ? 'store-full-address-error' : undefined}
             onChange={(e) => {
               setFullAddress(e.target.value);
               if (errors.fullAddress) setErrors((prev) => ({ ...prev, fullAddress: undefined }));
@@ -338,7 +350,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
             placeholder="123 Đường ABC, Phường 1, Quận 1, Hà Nội"
             disabled={isLoading}
           />
-          {errors.fullAddress && <p role="alert" className="text-sm text-destructive">{errors.fullAddress}</p>}
+          {errors.fullAddress && <p id="store-full-address-error" role="alert" className="text-sm text-destructive">{errors.fullAddress}</p>}
         </div>
       </div>
 
@@ -395,12 +407,13 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
         <h3 className="font-medium text-lg">Giờ mở cửa</h3>
         
         <div className="space-y-3">
-          {DAYS_OF_WEEK.map(({ key, label }) => (
+          {DAYS_OF_WEEK.map(({ key, label, fullLabel }) => (
             <div key={key} className="flex items-center gap-4">
               <div className="w-24 text-sm font-medium">{label}</div>
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
+                  aria-label={`Đóng cửa ${fullLabel}`}
                   checked={businessHours[key].isClosed}
                   onChange={(e) => handleBusinessHourChange(key, 'isClosed', e.target.checked)}
                   disabled={isLoading}
@@ -412,6 +425,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
                 <>
                   <Input
                     type="time"
+                    aria-label={`Giờ mở cửa ${fullLabel}`}
                     value={businessHours[key].open}
                     onChange={(e) => handleBusinessHourChange(key, 'open', e.target.value)}
                     disabled={isLoading}
@@ -420,6 +434,7 @@ export function StoreForm({ store, onSubmit, onCancel, isLoading = false }: Stor
                   <span className="text-sm">-</span>
                   <Input
                     type="time"
+                    aria-label={`Giờ đóng cửa ${fullLabel}`}
                     value={businessHours[key].close}
                     onChange={(e) => handleBusinessHourChange(key, 'close', e.target.value)}
                     disabled={isLoading}
