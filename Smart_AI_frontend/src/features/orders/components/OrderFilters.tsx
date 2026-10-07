@@ -92,7 +92,7 @@ export function OrderFilters({
             value={filters.status ?? "all"}
             onValueChange={handleStatusChange}
           >
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-[160px]" aria-label="Lọc theo trạng thái">
               <SelectValue placeholder="Trạng thái" />
             </SelectTrigger>
             <SelectContent>

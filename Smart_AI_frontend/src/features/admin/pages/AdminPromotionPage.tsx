@@ -262,7 +262,7 @@ export function AdminPromotionPage() {
       <div className="flex items-center gap-4">
         <span className="text-sm text-muted-foreground">Lọc theo trạng thái:</span>
         <Select value={statusFilter} onValueChange={handleStatusFilterChange}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[180px]" aria-label="Lọc theo trạng thái">
             <SelectValue placeholder="Tất cả" />
           </SelectTrigger>
           <SelectContent>

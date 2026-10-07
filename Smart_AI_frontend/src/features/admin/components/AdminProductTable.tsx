@@ -83,7 +83,7 @@ export function AdminProductTable({
     // H15: a failed fetch must never read as "no products"
     if (isError) {
       return (
-        <div className="text-center py-8 space-y-3">
+        <div className="text-center py-8 space-y-3" role="alert">
           <p className="text-destructive">Không thể tải danh sách sản phẩm.</p>
           {onRetry && (
             <div>

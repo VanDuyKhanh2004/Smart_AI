@@ -86,7 +86,7 @@ export function AdminDashboardPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <Select value={period} onValueChange={handlePeriodChange}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[180px]" aria-label="Khoảng thời gian hiển thị">
             <SelectValue placeholder="Chọn khoảng thời gian" />
           </SelectTrigger>
           <SelectContent>

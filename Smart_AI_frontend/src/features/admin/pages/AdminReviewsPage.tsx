@@ -253,7 +253,7 @@ export function AdminReviewsPage() {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Trạng thái:</span>
           <Select value={statusFilter} onValueChange={handleStatusFilterChange}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px]" aria-label="Lọc theo trạng thái">
               <SelectValue placeholder="Chọn trạng thái" />
             </SelectTrigger>
             <SelectContent>
@@ -270,7 +270,7 @@ export function AdminReviewsPage() {
       {/* Error message — only while there are rows; an empty table with an
           error renders the retry row inside the table (W3-11) */}
       {error && reviews.length > 0 && (
-        <div className="p-4 bg-destructive/10 text-destructive rounded-lg">
+        <div className="p-4 bg-destructive/10 text-destructive rounded-lg" role="alert">
           {error}
         </div>
       )}
@@ -296,7 +296,7 @@ export function AdminReviewsPage() {
               error ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-8">
-                    <span className="text-destructive">{error}</span>
+                    <span className="text-destructive" role="alert">{error}</span>
                     <Button
                       variant="outline"
                       size="sm"

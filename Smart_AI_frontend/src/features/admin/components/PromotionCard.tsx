@@ -64,6 +64,7 @@ export function PromotionCard({
               onClick={() => onToggle(promotion)}
               disabled={isToggling || status === 'expired' || status === 'depleted'}
               title={promotion.isActive ? 'Tạm dừng' : 'Kích hoạt'}
+              aria-label={`${promotion.isActive ? 'Tạm dừng' : 'Kích hoạt'} mã ${promotion.code}`}
             >
               {promotion.isActive ? (
                 <ToggleRight className="h-4 w-4 text-green-600" />
@@ -76,6 +77,7 @@ export function PromotionCard({
               size="sm"
               onClick={() => onEdit(promotion)}
               title="Chỉnh sửa"
+              aria-label={`Chỉnh sửa mã ${promotion.code}`}
             >
               <Edit className="h-4 w-4" />
             </Button>
@@ -85,6 +87,7 @@ export function PromotionCard({
               onClick={() => onDelete(promotion)}
               disabled={isDeleting}
               title="Xóa"
+              aria-label={`Xóa mã ${promotion.code}`}
               className="text-destructive hover:text-destructive"
             >
               <Trash2 className="h-4 w-4" />
