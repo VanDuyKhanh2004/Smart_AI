@@ -213,7 +213,7 @@ export function AdminStoresPage() {
               listError ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8">
-                    <span className="text-destructive">{listError}</span>
+                    <span className="text-destructive" role="alert">{listError}</span>
                     <Button
                       variant="outline"
                       size="sm"
@@ -259,6 +259,7 @@ export function AdminStoresPage() {
                         size="icon"
                         onClick={() => handleToggleStatus(store)}
                         title={store.isActive ? 'Ẩn cửa hàng' : 'Hiện cửa hàng'}
+                        aria-label={`${store.isActive ? 'Ẩn cửa hàng' : 'Hiện cửa hàng'} ${store.name}`}
                       >
                         {store.isActive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </Button>
@@ -267,6 +268,7 @@ export function AdminStoresPage() {
                         size="icon"
                         onClick={() => openEditForm(store)}
                         title="Chỉnh sửa"
+                        aria-label={`Chỉnh sửa ${store.name}`}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -275,6 +277,7 @@ export function AdminStoresPage() {
                         size="icon"
                         onClick={() => openDeleteDialog(store)}
                         title="Xóa"
+                        aria-label={`Xóa ${store.name}`}
                         className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="h-4 w-4" />

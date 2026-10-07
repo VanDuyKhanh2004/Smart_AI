@@ -149,7 +149,7 @@ describe('Dialog mutation failures stay inside the dialog (H03)', () => {
     mockDeletePromotion.mockRejectedValue(new Error('server error'));
     render(<AdminPromotionPage />);
 
-    const deleteButton = await screen.findByRole('button', { name: 'Xóa' });
+    const deleteButton = await screen.findByRole('button', { name: /Xóa/ });
     fireEvent.click(deleteButton);
 
     const dialog = await screen.findByRole('dialog');

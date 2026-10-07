@@ -312,7 +312,7 @@ export function AdminAppointmentsPage() {
             value={filters.store}
             onValueChange={(value) => setFilters((prev) => ({ ...prev, store: value }))}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Lọc theo cửa hàng">
               <SelectValue placeholder="Chọn cửa hàng" />
             </SelectTrigger>
             <SelectContent>
@@ -330,7 +330,7 @@ export function AdminAppointmentsPage() {
             value={filters.status}
             onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value as AppointmentStatus | 'all' }))}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Lọc theo trạng thái">
               <SelectValue placeholder="Trạng thái" />
             </SelectTrigger>
             <SelectContent>
@@ -399,7 +399,7 @@ export function AdminAppointmentsPage() {
               listError ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-8">
-                    <span className="text-destructive">{listError}</span>
+                    <span className="text-destructive" role="alert">{listError}</span>
                     <Button
                       variant="outline"
                       size="sm"
@@ -465,6 +465,7 @@ export function AdminAppointmentsPage() {
                             size="icon"
                             onClick={() => { setActionError(null); setConfirmDialog({ appointment, action: 'confirm' }); }}
                             title="Xác nhận"
+                            aria-label={`Xác nhận lịch hẹn của ${contact.name}`}
                             className="text-green-600 hover:text-green-700 hover:bg-green-100"
                           >
                             <Check className="h-4 w-4" />
@@ -476,6 +477,7 @@ export function AdminAppointmentsPage() {
                             size="icon"
                             onClick={() => { setActionError(null); setConfirmDialog({ appointment, action: 'complete' }); }}
                             title="Hoàn thành"
+                            aria-label={`Hoàn thành lịch hẹn của ${contact.name}`}
                             className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
                           >
                             <CheckCircle className="h-4 w-4" />
@@ -487,6 +489,7 @@ export function AdminAppointmentsPage() {
                             size="icon"
                             onClick={() => { setActionError(null); setCancelDialog(appointment); }}
                             title="Hủy"
+                            aria-label={`Hủy lịch hẹn của ${contact.name}`}
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
                           >
                             <X className="h-4 w-4" />

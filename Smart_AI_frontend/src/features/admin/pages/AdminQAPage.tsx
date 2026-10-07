@@ -485,7 +485,7 @@ export function AdminQAPage() {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Trạng thái:</span>
           <Select value={statusFilter} onValueChange={handleStatusFilterChange}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px]" aria-label="Lọc theo trạng thái">
               <SelectValue placeholder="Chọn trạng thái" />
             </SelectTrigger>
             <SelectContent>
@@ -501,7 +501,7 @@ export function AdminQAPage() {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Sản phẩm:</span>
           <Select value={productFilter} onValueChange={handleProductFilterChange}>
-            <SelectTrigger className="w-[220px]">
+            <SelectTrigger className="w-[220px]" aria-label="Lọc theo sản phẩm">
               <SelectValue placeholder="Chọn sản phẩm" />
             </SelectTrigger>
             <SelectContent>
@@ -519,7 +519,7 @@ export function AdminQAPage() {
       {/* Error message — only while there are rows; an empty table with an
           error renders the retry row inside the table (W3-11) */}
       {error && questions.length > 0 && (
-        <div className="p-4 bg-destructive/10 text-destructive rounded-lg">
+        <div className="p-4 bg-destructive/10 text-destructive rounded-lg" role="alert">
           {error}
         </div>
       )}
@@ -546,7 +546,7 @@ export function AdminQAPage() {
               error ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-8">
-                    <span className="text-destructive">{error}</span>
+                    <span className="text-destructive" role="alert">{error}</span>
                     <Button
                       variant="outline"
                       size="sm"
