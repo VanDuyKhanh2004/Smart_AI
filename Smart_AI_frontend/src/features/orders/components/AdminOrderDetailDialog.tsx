@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { OrderStatusBadge } from "./OrderStatusBadge";
 import { getOrderStatusLabel } from "./order-status-meta";
 import type { Order, OrderStatus, UpdateOrderStatusRequest } from "@/types/order.type";
@@ -68,6 +69,8 @@ export function AdminOrderDetailDialog({
   const [cancelReason, setCancelReason] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // S13: success feedback only after the update is confirmed by the server
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const orderStatus = order?.status;
 
@@ -89,6 +92,7 @@ export function AdminOrderDetailDialog({
   const handleStatusChange = (value: string) => {
     setSelectedStatus(value as OrderStatus);
     setError(null);
+    setSuccessMessage(null);
   };
 
   const handleUpdateStatus = async () => {
@@ -96,6 +100,7 @@ export function AdminOrderDetailDialog({
 
     setIsUpdating(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       const data: UpdateOrderStatusRequest = {
@@ -109,6 +114,7 @@ export function AdminOrderDetailDialog({
       setSelectedStatus(null);
       setNote("");
       setCancelReason("");
+      setSuccessMessage("Cập nhật trạng thái đơn hàng thành công");
     } catch (err) {
       const axiosErr = err as AxiosError<{ message?: string; code?: string }>;
       const backendMessage = axiosErr?.response?.data?.message;
@@ -129,6 +135,7 @@ export function AdminOrderDetailDialog({
     setNote("");
     setCancelReason("");
     setError(null);
+    setSuccessMessage(null);
     onClose();
   };
 
@@ -152,7 +159,11 @@ export function AdminOrderDetailDialog({
                 value={selectedStatus ?? order.status}
                 onValueChange={handleStatusChange}
               >
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger
+                  className="w-[180px]"
+                  aria-label="Cập nhật trạng thái"
+                  aria-describedby={error ? "order-status-error" : undefined}
+                >
                   <SelectValue placeholder="Chọn trạng thái" />
                 </SelectTrigger>
                 <SelectContent>
@@ -193,17 +204,31 @@ export function AdminOrderDetailDialog({
             {/* Cancel reason input */}
             {selectedStatus === "cancelled" && (
               <div className="space-y-2">
+                <label htmlFor="order-cancel-reason" className="text-sm font-medium">
+                  Lý do hủy đơn <span aria-hidden="true" className="text-destructive">*</span>
+                </label>
                 <Textarea
+                  id="order-cancel-reason"
                   placeholder="Lý do hủy đơn"
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   rows={2}
+                  aria-required="true"
+                  aria-describedby={error ? "order-status-error" : undefined}
                 />
               </div>
             )}
 
+            {successMessage && (
+              <Alert variant="success">
+                <AlertDescription>{successMessage}</AlertDescription>
+              </Alert>
+            )}
+
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p id="order-status-error" role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
             )}
           </div>
 

@@ -83,6 +83,7 @@ export function OrderFilters({
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
             className="pl-9"
+            aria-label="Tìm kiếm đơn hàng"
           />
         </div>
 
@@ -130,6 +131,7 @@ export function OrderFilters({
             value={filters.startDate ?? ""}
             onChange={handleStartDateChange}
             className="w-[160px]"
+            aria-label="Từ ngày"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -139,6 +141,7 @@ export function OrderFilters({
             value={filters.endDate ?? ""}
             onChange={handleEndDateChange}
             className="w-[160px]"
+            aria-label="Đến ngày"
           />
         </div>
       </div>

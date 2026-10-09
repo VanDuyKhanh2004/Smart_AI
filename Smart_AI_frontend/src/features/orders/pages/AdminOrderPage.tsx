@@ -235,7 +235,7 @@ export function AdminOrderPage() {
       {/* Error message — only while there are rows; an empty table with an
           error renders the retry state inside OrderTable (W3-11) */}
       {error && orders.length > 0 && (
-        <div className="p-4 bg-destructive/10 text-destructive rounded-lg">
+        <div className="p-4 bg-destructive/10 text-destructive rounded-lg" role="alert">
           {error}
         </div>
       )}
