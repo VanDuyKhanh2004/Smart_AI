@@ -98,7 +98,7 @@ export function OrderTable({
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-8">
+      <div role="status" aria-busy="true" className="flex items-center justify-center py-8">
         <div className="text-muted-foreground">Đang tải...</div>
       </div>
     );

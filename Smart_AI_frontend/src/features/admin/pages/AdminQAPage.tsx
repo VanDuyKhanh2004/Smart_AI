@@ -196,6 +196,7 @@ function AnswerItemRow({ answer, onDelete, isDeleting }: AnswerItemProps) {
           className="text-red-600 hover:text-red-700 hover:bg-red-50"
           onClick={() => onDelete(answer._id)}
           disabled={isDeleting}
+          aria-label={`Xóa câu trả lời của ${answer.user?.name || "N/A"}`}
         >
           <Trash2 className="w-4 h-4" />
         </Button>
@@ -585,6 +586,8 @@ export function AdminQAPage() {
                             size="sm"
                             variant="ghost"
                             onClick={() => toggleExpanded(questionId)}
+                            aria-expanded={isExpanded}
+                            aria-label={`Câu trả lời của ${question.user?.name || "N/A"}`}
                           >
                             {isExpanded ? (
                               <ChevronUp className="w-4 h-4" />
@@ -654,6 +657,7 @@ export function AdminQAPage() {
                             className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             onClick={() => handleDeleteQuestion(questionId)}
                             disabled={isDeleting === questionId}
+                            aria-label={`Xóa câu hỏi của ${question.user?.name || "N/A"}`}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
