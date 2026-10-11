@@ -120,6 +120,7 @@ const PromotionInput: React.FC<PromotionInputProps> = ({
               size="sm"
               onClick={handleRemove}
               disabled={disabled}
+              aria-label={`Xóa mã khuyến mãi ${promotion.code}`}
               className="h-8 w-8 p-0 text-green-700 hover:text-red-600 hover:bg-red-50"
             >
               <X className="h-4 w-4" />
@@ -133,12 +134,13 @@ const PromotionInput: React.FC<PromotionInputProps> = ({
   // Show input form
   return (
     <div className="space-y-2">
-      <label className="text-sm font-medium flex items-center gap-2">
+      <label htmlFor="checkout-promotion-code" className="text-sm font-medium flex items-center gap-2">
         <Tag className="h-4 w-4" />
         Mã khuyến mãi
       </label>
       <div className="flex gap-2">
         <Input
+          id="checkout-promotion-code"
           type="text"
           placeholder="Nhập mã khuyến mãi"
           value={code}
