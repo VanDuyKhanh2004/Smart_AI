@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/authStore';
 import type { CartItem } from '@/types/cart.type';
 import type { Address } from '@/types/address.type';
 import type { User } from '@/types/auth.type';
+import type { Promotion } from '@/types/promotion.type';
 
 const mockNavigate = vi.fn();
 
@@ -265,5 +266,60 @@ describe('W4-S38 promotion failure feedback', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     // The alert is the only live region here — nothing is announced twice.
     expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+describe('Wave 4B-2 G-D promotion input a11y (M16/M17)', () => {
+  const appliedPromotion: { promotion: Promotion; discountAmount: number } = {
+    promotion: {
+      _id: 'p1',
+      code: 'SALE10',
+      discountType: 'percentage',
+      discountValue: 10,
+      minOrderValue: 0,
+      usageLimit: 100,
+      usedCount: 0,
+      startDate: '2024-01-01T00:00:00.000Z',
+      endDate: '2030-01-01T00:00:00.000Z',
+      isActive: true,
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    },
+    discountAmount: 10000,
+  };
+
+  it('M16: associates the promotion-code label with the promotion input', () => {
+    render(
+      <PromotionInput
+        orderTotal={100000}
+        appliedPromotion={null}
+        onApplyPromotion={vi.fn()}
+        onRemovePromotion={vi.fn()}
+      />
+    );
+
+    const input = screen.getByLabelText('Mã khuyến mãi');
+    expect(input).toHaveAttribute('type', 'text');
+    expect(input.id).toBeTruthy();
+    expect(document.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
+    expect(input).toHaveAttribute('placeholder', 'Nhập mã khuyến mãi');
+  });
+
+  it('M17: names the remove-promotion button with the applied promotion code', () => {
+    const onRemovePromotion = vi.fn();
+    render(
+      <PromotionInput
+        orderTotal={100000}
+        appliedPromotion={appliedPromotion}
+        onApplyPromotion={vi.fn()}
+        onRemovePromotion={onRemovePromotion}
+      />
+    );
+
+    const removeButton = screen.getByRole('button', {
+      name: 'Xóa mã khuyến mãi SALE10',
+    });
+    fireEvent.click(removeButton);
+    expect(onRemovePromotion).toHaveBeenCalledTimes(1);
   });
 });
