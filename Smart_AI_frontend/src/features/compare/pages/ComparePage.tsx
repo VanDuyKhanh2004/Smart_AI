@@ -272,8 +272,11 @@ const ComparePage: React.FC = () => {
       <div className="py-8">
         {liveRegions}
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+          <div className="text-center" role="status">
+            <Loader2
+              className="h-12 w-12 animate-spin text-primary mx-auto mb-4"
+              aria-hidden="true"
+            />
             <p className="text-muted-foreground">Đang tải so sánh sản phẩm...</p>
           </div>
         </div>

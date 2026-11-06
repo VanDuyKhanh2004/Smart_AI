@@ -363,15 +363,23 @@ const ProductDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Color Selection */}
+          {/* Color Selection — S32: labelled group with pressed selection
+              (mirrors the W4-S13 quantity group below) */}
           {product.colors && product.colors.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium mb-3">Màu sắc:</h3>
-              <div className="flex flex-wrap gap-2">
+              <h3 id="color-heading" className="text-sm font-medium mb-3">
+                Màu sắc:
+              </h3>
+              <div
+                role="group"
+                aria-labelledby="color-heading"
+                className="flex flex-wrap gap-2"
+              >
                 {product.colors.map((color) => (
                   <button
                     key={color}
                     onClick={() => setSelectedColor(color)}
+                    aria-pressed={selectedColor === color}
                     className={`px-3 py-2 rounded-md border text-sm font-medium transition-colors ${
                       selectedColor === color
                         ? 'border-primary bg-primary text-primary-foreground'

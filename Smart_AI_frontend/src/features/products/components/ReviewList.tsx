@@ -48,7 +48,7 @@ export function ReviewList({
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
-            <div className="animate-pulse text-muted-foreground">
+            <div role="status" className="animate-pulse text-muted-foreground">
               Đang tải đánh giá...
             </div>
           </div>

@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import { Send, AlertCircle, Loader2 } from 'lucide-react';
 
 const MAX_COMMENT_LENGTH = 1000;
+const RATING_REQUIRED_MESSAGE = 'Vui lòng chọn số sao đánh giá';
+const COMMENT_TOO_LONG_MESSAGE = `Nhận xét không được vượt quá ${MAX_COMMENT_LENGTH} ký tự`;
 
 interface ReviewFormProps {
   canReview: boolean;
@@ -26,6 +28,10 @@ export function ReviewForm({
   const [rating, setRating] = React.useState<number>(0);
   const [comment, setComment] = React.useState<string>('');
   const [error, setError] = React.useState<string | null>(null);
+  // S27/S28: route each failure to the control that actually caused it.
+  const isRatingError = error === RATING_REQUIRED_MESSAGE;
+  const isCommentError = error === COMMENT_TOO_LONG_MESSAGE;
+  const isSubmitError = !!error && !isRatingError && !isCommentError;
   // W3-09: focus the first invalid control after a failed validation attempt.
   const formRef = React.useRef<HTMLFormElement>(null);
   const shouldFocusInvalidRef = React.useRef(false);
@@ -34,7 +40,9 @@ export function ReviewForm({
     if (shouldFocusInvalidRef.current) {
       shouldFocusInvalidRef.current = false;
       const target =
-        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+        Array.from(
+          formRef.current?.querySelectorAll<HTMLElement>('[aria-invalid="true"]') ?? [],
+        ).find((el) => el.tabIndex >= 0) ??
         formRef.current?.querySelector<HTMLElement>('[role="alert"]');
       target?.focus();
     }
@@ -50,9 +58,9 @@ export function ReviewForm({
 
     if (!isValid) {
       if (rating < 1) {
-        setError('Vui lòng chọn số sao đánh giá');
+        setError(RATING_REQUIRED_MESSAGE);
       } else if (isCommentTooLong) {
-        setError(`Nhận xét không được vượt quá ${MAX_COMMENT_LENGTH} ký tự`);
+        setError(COMMENT_TOO_LONG_MESSAGE);
       }
       shouldFocusInvalidRef.current = true;
       return;
@@ -103,7 +111,9 @@ export function ReviewForm({
         <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
           {/* Rating selector */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">
+            {/* S27: the radiogroup cannot take a <label htmlFor>, so the
+                label references the group via aria-labelledby instead. */}
+            <label id="review-rating-label" className="text-sm font-medium">
               Đánh giá <span className="text-destructive">*</span>
             </label>
             <div className="flex items-center gap-3">
@@ -112,6 +122,10 @@ export function ReviewForm({
                 interactive
                 onChange={handleRatingChange}
                 size="lg"
+                aria-labelledby="review-rating-label"
+                aria-required
+                aria-describedby={isRatingError ? 'review-error' : undefined}
+                aria-invalid={isRatingError}
               />
               {rating > 0 && (
                 <span className="text-sm text-muted-foreground">
@@ -136,8 +150,12 @@ export function ReviewForm({
                 'min-h-[100px] resize-none',
                 isCommentTooLong && 'border-destructive focus-visible:ring-destructive/50'
               )}
-              aria-invalid={isCommentTooLong}
-              aria-describedby="comment-counter"
+              aria-invalid={isCommentTooLong || isSubmitError}
+              aria-describedby={
+                error && !isRatingError
+                  ? 'comment-counter review-error'
+                  : 'comment-counter'
+              }
             />
             <div
               id="comment-counter"
@@ -150,9 +168,14 @@ export function ReviewForm({
             </div>
           </div>
 
-          {/* Error message */}
+          {/* Error message — S27/S28: the id is associated with the failing control */}
           {error && (
-            <div role="alert" tabIndex={-1} className="flex items-center gap-2 text-sm text-destructive">
+            <div
+              id="review-error"
+              role="alert"
+              tabIndex={-1}
+              className="flex items-center gap-2 text-sm text-destructive"
+            >
               <AlertCircle className="h-4 w-4" />
               <span>{error}</span>
             </div>

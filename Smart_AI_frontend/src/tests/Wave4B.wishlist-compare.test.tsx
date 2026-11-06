@@ -587,12 +587,18 @@ describe('W4-S54/S55/S56/S57 compare page feedback', () => {
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
-  it('keeps the polite region mounted while the page loads (S57)', () => {
+  it('keeps the polite region mounted while the page loads (S57/S29)', () => {
     mocks.getCompareProducts.mockReturnValue(new Promise(() => {}));
     renderComparePage();
 
     expect(screen.getByText('Đang tải so sánh sản phẩm...')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toBeInTheDocument();
+    // W4-S57 polite region + S29 loading announcement region both stay mounted.
+    expect(screen.getAllByRole('status')).toHaveLength(2);
+    expect(
+      screen
+        .getByText('Đang tải so sánh sản phẩm...')
+        .closest('[role="status"]'),
+    ).toBeInTheDocument();
   });
 
   it('gives the comparison table a caption, column scopes, named region and best markers (S60/S61/U01)', async () => {

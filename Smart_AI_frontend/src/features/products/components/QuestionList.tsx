@@ -33,7 +33,7 @@ export function QuestionList({
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
-            <div className="animate-pulse text-muted-foreground">
+            <div role="status" className="animate-pulse text-muted-foreground">
               Đang tải câu hỏi...
             </div>
           </div>
@@ -85,18 +85,22 @@ export function QuestionList({
           </div>
         )}
 
-        {/* Pagination */}
+        {/* Pagination — M19: landmark + named controls + polite page status */}
         {pagination && pagination.totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 mt-6 pt-6 border-t">
+          <nav
+            aria-label="Phân trang câu hỏi"
+            className="flex items-center justify-center gap-2 mt-6 pt-6 border-t"
+          >
             <Button
               variant="outline"
               size="sm"
               onClick={() => onPageChange?.(pagination.currentPage - 1)}
               disabled={!pagination.hasPrevPage}
+              aria-label="Trang trước"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-sm text-muted-foreground">
+            <span role="status" className="text-sm text-muted-foreground">
               Trang {pagination.currentPage} / {pagination.totalPages}
             </span>
             <Button
@@ -104,10 +108,11 @@ export function QuestionList({
               size="sm"
               onClick={() => onPageChange?.(pagination.currentPage + 1)}
               disabled={!pagination.hasNextPage}
+              aria-label="Trang sau"
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
-          </div>
+          </nav>
         )}
       </CardContent>
     </Card>

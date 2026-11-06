@@ -111,18 +111,23 @@ export function QuestionForm({
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4" ref={formRef}>
           <div className="space-y-2">
+            {/* M18: the textarea's programmatic name (placeholder is not a label) */}
+            <label htmlFor="question-text" className="sr-only">
+              Câu hỏi của bạn
+            </label>
             <Textarea
               id="question-text"
               placeholder="Nhập câu hỏi của bạn về sản phẩm này..."
               value={questionText}
               onChange={handleTextChange}
               disabled={isSubmitting}
+              aria-required
               className={cn(
                 'min-h-[100px] resize-none',
                 (isTooShort || isTooLong) && 'border-destructive focus-visible:ring-destructive/50'
               )}
-              aria-invalid={isTooShort || isTooLong}
-              aria-describedby="question-counter"
+              aria-invalid={isTooShort || isTooLong || !!error}
+              aria-describedby={error ? 'question-counter question-error' : 'question-counter'}
             />
             <div
               id="question-counter"
@@ -136,8 +141,14 @@ export function QuestionForm({
             </div>
           </div>
 
+          {/* S28: the id is merged into the textarea's aria-describedby */}
           {error && (
-            <div role="alert" tabIndex={-1} className="flex items-center gap-2 text-sm text-destructive">
+            <div
+              id="question-error"
+              role="alert"
+              tabIndex={-1}
+              className="flex items-center gap-2 text-sm text-destructive"
+            >
               <AlertCircle className="h-4 w-4" />
               <span>{error}</span>
             </div>
