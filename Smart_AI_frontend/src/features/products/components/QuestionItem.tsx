@@ -40,6 +40,13 @@ export function QuestionItem({ question, onUpvote, onDelete }: QuestionItemProps
   const questionId = question._id || (question as unknown as { id: string }).id;
   const questionUserId = question.user._id || (question.user as unknown as { id: string }).id;
   const isOwner = user?._id === questionUserId;
+  // M20: the visible count alone is the content-derived name, so the purpose
+  // ("Thích"/"Bỏ thích") must be carried by an explicit aria-label.
+  const upvoteLabel = !isAuthenticated
+    ? `Đăng nhập để thích (${question.upvoteCount} lượt)`
+    : question.hasUpvoted
+      ? `Bỏ thích (${question.upvoteCount} lượt)`
+      : `Thích (${question.upvoteCount} lượt)`;
 
   const handleUpvote = async () => {
     if (!isAuthenticated || isUpvoting || !questionId) return;
@@ -90,6 +97,8 @@ export function QuestionItem({ question, onUpvote, onDelete }: QuestionItemProps
                   'h-8 px-2',
                   question.hasUpvoted && 'text-primary'
                 )}
+                aria-pressed={question.hasUpvoted}
+                aria-label={upvoteLabel}
                 title={isAuthenticated ? (question.hasUpvoted ? 'Bỏ thích' : 'Thích') : 'Đăng nhập để thích'}
               >
                 <ThumbsUp className={cn('h-4 w-4 mr-1', question.hasUpvoted && 'fill-current')} />
@@ -102,6 +111,8 @@ export function QuestionItem({ question, onUpvote, onDelete }: QuestionItemProps
                   size="sm"
                   onClick={handleDelete}
                   disabled={isDeleting}
+                  aria-label="Xóa câu hỏi"
+                  aria-busy={isDeleting}
                   className="h-8 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
                   title="Xóa câu hỏi"
                 >

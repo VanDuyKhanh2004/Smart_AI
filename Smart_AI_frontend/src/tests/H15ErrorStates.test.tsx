@@ -200,6 +200,8 @@ describe('H15: ReviewList states', () => {
     render(<ReviewList reviews={[]} stats={emptyStats} isLoading />);
 
     expect(screen.getByText('Đang tải đánh giá...')).toBeInTheDocument();
+    // S29 (G-E): the loading copy is announced through role="status".
+    expect(screen.getByRole('status')).toHaveTextContent('Đang tải đánh giá...');
     expect(
       screen.queryByText('Chưa có đánh giá nào cho sản phẩm này.')
     ).toBeNull();

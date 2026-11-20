@@ -8,6 +8,11 @@ interface StarRatingProps {
   interactive?: boolean;
   onChange?: (rating: number) => void;
   className?: string;
+  /** S27: association pass-through — applied to the interactive radiogroup only. */
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  "aria-required"?: boolean;
+  "aria-invalid"?: boolean;
 }
 
 const sizeClasses = {
@@ -23,15 +28,53 @@ function StarRating({
   interactive = false,
   onChange,
   className,
+  "aria-labelledby": ariaLabelledby,
+  "aria-describedby": ariaDescribedby,
+  "aria-required": ariaRequired,
+  "aria-invalid": ariaInvalid,
 }: StarRatingProps) {
   const [hoverRating, setHoverRating] = React.useState<number | null>(null);
+  const starRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
 
   const displayRating = hoverRating ?? rating;
+
+  // S34: roving tabindex — the checked star (or the first star while nothing
+  // is selected) is the group's single tab stop.
+  const tabStopIndex = interactive && rating >= 1 ? Math.min(rating, maxRating) : 1;
 
   const handleClick = (starIndex: number) => {
     if (interactive && onChange) {
       onChange(starIndex);
     }
+  };
+
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    starIndex: number,
+  ) => {
+    if (!interactive || !onChange) return;
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        next = Math.min(maxRating, starIndex + 1);
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        next = Math.max(1, starIndex - 1);
+        break;
+      case "Home":
+        next = 1;
+        break;
+      case "End":
+        next = maxRating;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    onChange(next);
+    starRefs.current[next - 1]?.focus();
   };
 
   const handleMouseEnter = (starIndex: number) => {
@@ -50,7 +93,17 @@ function StarRating({
     <div
       className={cn("flex items-center gap-0.5", className)}
       role={interactive ? "radiogroup" : "img"}
-      aria-label={interactive ? "Chọn đánh giá" : `Đánh giá ${rating} trên ${maxRating} sao`}
+      aria-label={
+        interactive
+          ? ariaLabelledby
+            ? undefined
+            : "Chọn đánh giá"
+          : `Đánh giá ${rating} trên ${maxRating} sao`
+      }
+      aria-labelledby={interactive ? ariaLabelledby : undefined}
+      aria-describedby={interactive ? ariaDescribedby : undefined}
+      aria-required={interactive ? ariaRequired : undefined}
+      aria-invalid={interactive ? ariaInvalid : undefined}
     >
       {Array.from({ length: maxRating }, (_, index) => {
         const starIndex = index + 1;
@@ -60,9 +113,13 @@ function StarRating({
         return (
           <button
             key={starIndex}
+            ref={(node) => {
+              starRefs.current[index] = node;
+            }}
             type="button"
             disabled={!interactive}
             onClick={() => handleClick(starIndex)}
+            onKeyDown={(event) => handleKeyDown(event, starIndex)}
             onMouseEnter={() => handleMouseEnter(starIndex)}
             onMouseLeave={handleMouseLeave}
             className={cn(
@@ -73,7 +130,7 @@ function StarRating({
             aria-label={interactive ? `${starIndex} sao` : undefined}
             role={interactive ? "radio" : undefined}
             aria-checked={interactive ? starIndex === rating : undefined}
-            tabIndex={interactive ? 0 : -1}
+            tabIndex={interactive ? (starIndex === tabStopIndex ? 0 : -1) : -1}
           >
             {/* Empty star (background) */}
             <svg
