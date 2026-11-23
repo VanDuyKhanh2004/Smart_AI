@@ -110,9 +110,88 @@ describe('resolveApiBaseUrl', () => {
     expect((error as Error).message).not.toContain('backend.example.com');
   });
 
-  it('rejects URL pointing at the frontend origin as typed invalid', () => {
+  it('rejects same-origin /api path in development', () => {
     const error = captureError(() => resolveApiBaseUrl({
       configuredUrl: 'http://localhost:3000/api',
+      isDev: true,
+      frontendOrigin: 'http://localhost:3000',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).toContain('frontend origin');
+  });
+
+  it('accepts same-origin /api path in production (Vercel proxy)', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/api',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('http://localhost:3000/api');
+  });
+
+  it('accepts same-origin /api/ path in production (trailing slash normalized)', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/api/',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('http://localhost:3000/api');
+  });
+
+  it('accepts same-origin /api/v1 path in production', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/api/v1',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    })).toBe('http://localhost:3000/api/v1');
+  });
+
+  it('rejects same-origin /apix path in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/apix',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).toContain('frontend origin');
+  });
+
+  it('rejects same-origin /api-unknown path in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/api-unknown',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).toContain('frontend origin');
+  });
+
+  it('rejects same-origin /apiv2 path in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/apiv2',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).toContain('frontend origin');
+  });
+
+  it('rejects same-origin non-/api path in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/products',
+      isDev: false,
+      frontendOrigin: 'http://localhost:3000',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+    expect((error as Error).message).toContain('frontend origin');
+  });
+
+  it('rejects same-origin root path in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: 'http://localhost:3000/',
       isDev: false,
       frontendOrigin: 'http://localhost:3000',
     }));

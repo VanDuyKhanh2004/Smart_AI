@@ -22,6 +22,7 @@ export class ApiConfigError extends Error {
   }
 }
 
+
 export interface ResolveApiBaseUrlOptions {
   configuredUrl?: string;
   isDev?: boolean;
@@ -65,11 +66,17 @@ export function resolveApiBaseUrl(options?: ResolveApiBaseUrlOptions): string {
   }
 
   if (url.origin === frontendOrigin) {
-    throw new ApiConfigError(
-      'invalid',
-      'VITE_API_BASE_URL resolves to the frontend origin. ' +
-      'API requests to this URL would be rewritten to index.html by Vercel.'
-    );
+    // Same-origin API base URL is allowed in production only when the path
+    // is served by the Vercel `/api/*` proxy rewrite to the Render backend.
+    // In development there is no such proxy, so same-origin would return
+    // the SPA fallback instead of the API response.
+    if (isDev || !url.pathname.startsWith('/api/') && url.pathname !== '/api') {
+      throw new ApiConfigError(
+        'invalid',
+        'VITE_API_BASE_URL resolves to the frontend origin. ' +
+        'API requests to this URL would be rewritten to index.html by Vercel.'
+      );
+    }
   }
 
   return value;
