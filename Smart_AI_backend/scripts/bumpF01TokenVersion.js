@@ -40,7 +40,6 @@ const BUMPED_AT_FIELD = "f01TokenVersionBumpedAt";
 const MARKER_COLLECTION = "migrations";
 const MARKER_STATUS_RUNNING = "running";
 const MARKER_STATUS_COMPLETED = "completed";
-const DEFAULT_STALE_AFTER_MS = 15 * 60 * 1000;
 const DEFAULT_LEASE_TTL_MS = 30 * 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 1000;
 
@@ -113,7 +112,6 @@ function createMongoMarkerStore(connection = mongoose.connection) {
       runId,
       now,
       resume = false,
-      staleAfterMs = DEFAULT_STALE_AFTER_MS,
       leaseTtlMs = DEFAULT_LEASE_TTL_MS,
     }) {
       try {
@@ -232,7 +230,6 @@ async function runBump({
   now = new Date(),
   runId = crypto.randomUUID(),
   resume = false,
-  staleAfterMs = DEFAULT_STALE_AFTER_MS,
   leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS,
 } = {}) {
@@ -257,7 +254,6 @@ async function runBump({
     runId,
     now,
     resume,
-    staleAfterMs,
     leaseTtlMs,
   });
 
@@ -426,7 +422,6 @@ module.exports = {
   MARKER_COLLECTION,
   MARKER_STATUS_RUNNING,
   MARKER_STATUS_COMPLETED,
-  DEFAULT_STALE_AFTER_MS,
   DEFAULT_LEASE_TTL_MS,
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   buildFilter,

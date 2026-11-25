@@ -618,12 +618,12 @@ describe("F-01 tokenVersion migration script", () => {
       async getStatus() {
         return this.status;
       },
-      async claim({ runId, now, resume, staleAfterMs }) {
+      async claim({ runId, now, resume, leaseTtlMs }) {
         if (!resume) {
           return { claimed: false, status: this.status };
         }
         const age = now.getTime() - this.startedAt.getTime();
-        if (age < staleAfterMs) {
+        if (age < leaseTtlMs) {
           return { claimed: false, status: this.status, active: true };
         }
         this.runId = runId;
@@ -638,7 +638,7 @@ describe("F-01 tokenVersion migration script", () => {
     };
 
     await expect(
-      runBump({ model, markers: markerStore, dryRun: false, resume: true, staleAfterMs: 10_000 }),
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, leaseTtlMs: 10_000 }),
     ).rejects.toThrow(/not old enough|currently running/);
 
     expect(model.updateMany).not.toHaveBeenCalled();
@@ -649,7 +649,7 @@ describe("F-01 tokenVersion migration script", () => {
       markers: markerStore,
       dryRun: false,
       resume: true,
-      staleAfterMs: 0,
+      leaseTtlMs: 0,
       now: new Date(startedAt.getTime() + 1000),
     });
 
@@ -675,12 +675,12 @@ describe("F-01 tokenVersion migration script", () => {
       async getStatus() {
         return this.status;
       },
-      async claim({ resume, staleAfterMs, now }) {
+      async claim({ resume, leaseTtlMs, now }) {
         if (!resume) {
           return { claimed: false, status: this.status };
         }
         const age = now.getTime() - this.startedAt.getTime();
-        if (age < staleAfterMs) {
+        if (age < leaseTtlMs) {
           return { claimed: false, status: this.status, active: true };
         }
         return { claimed: true, status: this.status, resumed: true };
@@ -691,7 +691,7 @@ describe("F-01 tokenVersion migration script", () => {
     };
 
     await expect(
-      runBump({ model, markers: markerStore, dryRun: false, resume: true, staleAfterMs: 60_000 }),
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, leaseTtlMs: 60_000 }),
     ).rejects.toThrow(/currently running|not old enough/);
 
     expect(model.updateMany).not.toHaveBeenCalled();
@@ -721,9 +721,9 @@ describe("F-01 tokenVersion migration script", () => {
       async getStatus() {
         return this.status;
       },
-      async claim({ runId, now, resume, staleAfterMs }) {
+      async claim({ runId, now, resume, leaseTtlMs }) {
         const age = now.getTime() - this.startedAt.getTime();
-        if (age < staleAfterMs) {
+        if (age < leaseTtlMs) {
           return { claimed: false, status: this.status, active: true };
         }
         this.runId = runId;
@@ -742,7 +742,7 @@ describe("F-01 tokenVersion migration script", () => {
       markers: markerStore,
       dryRun: false,
       resume: true,
-      staleAfterMs: 0,
+      leaseTtlMs: 0,
     });
 
     expect(recovered.resumed).toBe(true);
