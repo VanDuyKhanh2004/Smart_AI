@@ -86,6 +86,8 @@ jest.mock('../models/User', () => {
     findOne: jest.fn(),
     findById: jest.fn(),
     findByIdAndUpdate: jest.fn(),
+    findOneAndUpdate: jest.fn(),
+    updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
     create: jest.fn(),
     findByEmailWithPassword: jest.fn(),
     findByUnlockToken: jest.fn(),
@@ -178,6 +180,17 @@ describe('Auth Controller — centralized error handling', () => {
       return thenableChainable(val);
     });
     User.findByIdAndUpdate.mockResolvedValue({});
+    User.findOneAndUpdate.mockImplementation(async (filter, update) => {
+      if (update && update.$inc && update.$inc.tokenVersion) {
+        return { ...mockUser, _id: filter._id, tokenVersion: 1 };
+      }
+      if (update && update.$set && Object.prototype.hasOwnProperty.call(update.$set, 'refreshTokenHash')) {
+        mockUser.tokenVersion = filter.tokenVersion;
+        Object.assign(mockUser, update.$set);
+        return { ...mockUser, _id: filter._id, tokenVersion: filter.tokenVersion };
+      }
+      return null;
+    });
     User.create.mockResolvedValue(mockUser);
     User.findByEmailWithPassword.mockResolvedValue(null);
     User.findByUnlockToken.mockResolvedValue(null);

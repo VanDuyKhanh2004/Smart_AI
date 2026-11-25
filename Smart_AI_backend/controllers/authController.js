@@ -31,7 +31,6 @@ const {
   setCsrfCookie,
   clearAuthCookies,
   generateSessionId,
-  applyRefreshSession,
   clearRefreshSession,
   isWithinRefreshConflictWindow,
 } = require('../configs/authCookies');
@@ -160,23 +159,87 @@ const handleNonCurrentRefreshToken = async (user, state, res) => {
   throw new UnauthorizedError('Refresh token không hợp lệ', 'REFRESH_TOKEN_INVALID');
 };
 
-const issueLoginSession = (user, res) => {
+/**
+ * Atomically claim a fresh single session for this user and persist only the
+ * hash of the refresh token. Tokens are created before the guarded write so
+ * the cookie payload is ready, but cookies are emitted by the controller only
+ * after this helper resolves successfully.
+ *
+ * Race safety:
+ * - `$inc: tokenVersion` is atomic across concurrent logins.
+ * - The refresh-session write is guarded by the tokenVersion this request
+ *   observed from the increment, so an earlier login that lost the race
+ *   cannot overwrite the later session's hash. The loser receives a
+ *   deterministic conflict instead of a usable token.
+ */
+const createLoginSession = async (user) => {
+  const bumped = await User.findOneAndUpdate(
+    { _id: user._id },
+    {
+      $inc: { tokenVersion: 1 },
+      $set: { loginAttempts: 0, lockUntil: null },
+    },
+    { new: true, select: '+loginAttempts +lockUntil' },
+  );
+
+  if (!bumped || bumped.tokenVersion === undefined) {
+    throw new UnauthorizedError('Không thể tạo phiên đăng nhập', 'LOGIN_SESSION_FAILED');
+  }
+
+  const tokenVersion = bumped.tokenVersion;
   const sessionId = generateSessionId();
-  const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken(user, { sessionId });
+  const tokenSubject = {
+    _id: user._id,
+    email: user.email,
+    tokenVersion,
+  };
+  const accessToken = generateAccessToken(tokenSubject);
+  const refreshToken = generateRefreshToken(tokenSubject, { sessionId });
 
-  applyRefreshSession(user, {
-    tokenHash: hashToken(refreshToken),
-    sessionId,
-  });
+  const persisted = await User.findOneAndUpdate(
+    { _id: user._id, tokenVersion },
+    {
+      $set: {
+        refreshTokenHash: hashToken(refreshToken),
+        refreshTokenPrevHash: null,
+        refreshTokenSessionId: sessionId,
+        refreshTokenRotatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
 
-  setAuthCookies(res, {
+  if (!persisted) {
+    throw new ConflictError(
+      'Một phiên đăng nhập khác vừa được tạo. Vui lòng thử lại.',
+      'LOGIN_SESSION_CONFLICT',
+    );
+  }
+
+  user.tokenVersion = tokenVersion;
+  user.loginAttempts = 0;
+  user.lockUntil = null;
+
+  return {
     accessToken,
     refreshToken,
     csrfToken: generateCsrfToken(),
-  });
+    tokenVersion,
+  };
+};
 
-  return { accessToken, refreshToken };
+/**
+ * Persist the welcome-email flags. Kept separate from session creation so a
+ * failure here cannot emit cookies before the session hash is durable.
+ */
+const markWelcomeEmailSent = async (user) => {
+  const now = new Date();
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { welcomeEmailSent: true, firstLoginAt: now } },
+  );
+  user.welcomeEmailSent = true;
+  user.firstLoginAt = now;
 };
 
 /**
@@ -268,31 +331,25 @@ const login = asyncHandler(async (req, res) => {
     throw new ForbiddenError('Vui long xac nhan email truoc khi dang nhap', 'EMAIL_NOT_VERIFIED');
   }
 
-  if (user.loginAttempts || user.lockUntil) {
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-  }
-
-  // A fresh login starts a new single session: bumping tokenVersion revokes
-  // access tokens issued for any previous session.
-  user.tokenVersion = (user.tokenVersion || 0) + 1;
-
-  const { accessToken, refreshToken } = issueLoginSession(user, res);
+  // A fresh login starts a new single session: the helper atomically bumps
+  // tokenVersion and persists the new session hash before any cookie is set.
+  const session = await createLoginSession(user);
 
   if (!user.welcomeEmailSent && (user.emailVerified || user.googleId)) {
     enqueueWelcomeEmail(user, req.requestId);
-    user.welcomeEmailSent = true;
-    user.firstLoginAt = new Date();
+    await markWelcomeEmailSent(user);
   }
 
-  await user.save({ validateBeforeSave: false });
+  // Cookies are emitted only after tokenVersion and the refresh-session hash
+  // have been persisted successfully.
+  setAuthCookies(res, session);
 
   res.status(200).json({
     success: true,
     data: {
       user: user.toJSON(),
-      accessToken,
-      refreshToken
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken
     }
   });
 });
@@ -328,10 +385,16 @@ const logout = asyncHandler(async (req, res) => {
  * @access  Public (refresh cookie or legacy body token)
  */
 const refreshTokenFn = asyncHandler(async (req, res) => {
-  const cookieToken = req.cookies && req.cookies[REFRESH_COOKIE_NAME];
   const bodyToken = req.body && req.body.refreshToken;
-  const usingCookie = typeof cookieToken === 'string' && cookieToken.length > 0;
-  const token = usingCookie ? cookieToken : bodyToken;
+  const cookieToken = req.cookies && req.cookies[REFRESH_COOKIE_NAME];
+  const hasBodyToken = typeof bodyToken === 'string' && bodyToken.length > 0;
+  const hasCookieToken = typeof cookieToken === 'string' && cookieToken.length > 0;
+
+  // The body token takes precedence so the documented legacy transition path
+  // stays non-rotating (and CSRF-exempt in the middleware). A request with no
+  // body token uses the HttpOnly cookie and always rotates under CSRF.
+  const usingCookie = !hasBodyToken && hasCookieToken;
+  const token = hasBodyToken ? bodyToken : cookieToken;
 
   if (!token) {
     throw new BadRequestError('Refresh token là bắt buộc', 'VALIDATION_ERROR');
@@ -549,26 +612,23 @@ const googleLogin = asyncHandler(async (req, res) => {
     throw new AppError('JWT_REFRESH_SECRET chưa được cấu hình trên server', 500, 'SERVER_ERROR');
   }
 
-  // Google login is a fresh login: start a new single session and revoke the
-  // previous session's access tokens.
-  user.tokenVersion = (user.tokenVersion || 0) + 1;
-
-  const { accessToken, refreshToken } = issueLoginSession(user, res);
+  // Google login is a fresh login: the helper atomically bumps tokenVersion
+  // and persists the session hash before cookies are emitted.
+  const session = await createLoginSession(user);
 
   if (!user.welcomeEmailSent) {
     enqueueWelcomeEmail(user, req.requestId);
-    user.welcomeEmailSent = true;
-    user.firstLoginAt = new Date();
+    await markWelcomeEmailSent(user);
   }
 
-  await user.save({ validateBeforeSave: false });
+  setAuthCookies(res, session);
 
   res.status(200).json({
     success: true,
     data: {
       user: user.toJSON(),
-      accessToken,
-      refreshToken
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken
     }
   });
 });

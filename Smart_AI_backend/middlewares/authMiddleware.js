@@ -1,7 +1,15 @@
 const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/jwt');
 const logger = require('../utils/logger');
-const { extractAccessToken, getBearerToken } = require('./cookieAuth');
+const { resolveAccessCredentials } = require('./cookieAuth');
+
+const CREDENTIAL_CONFLICT_RESPONSE = {
+  success: false,
+  error: {
+    code: 'AUTH_CREDENTIAL_CONFLICT',
+    message: 'Thông tin xác thực Bearer và cookie không khớp nhau'
+  }
+};
 
 function markCookieAuthResponse(res) {
   if (!res) return;
@@ -16,9 +24,16 @@ function markCookieAuthResponse(res) {
  */
 const protect = async (req, res, next) => {
   try {
-    const bearerToken = getBearerToken(req);
-    const token = extractAccessToken(req);
-    const usingCookie = !bearerToken && Boolean(token);
+    const credentials = resolveAccessCredentials(req);
+
+    // Never silently pick one credential when the client supplied two that
+    // disagree. This also prevents an explicit invalid Bearer token from
+    // falling back to a valid cookie.
+    if (credentials.conflict) {
+      return res.status(401).json(CREDENTIAL_CONFLICT_RESPONSE);
+    }
+
+    const token = credentials.token;
 
     if (!token) {
       return res.status(401).json({
@@ -101,7 +116,7 @@ const protect = async (req, res, next) => {
       });
     }
 
-    if (usingCookie) {
+    if (credentials.hasCookie) {
       markCookieAuthResponse(res);
     }
 
@@ -126,9 +141,13 @@ const protect = async (req, res, next) => {
  */
 const optionalAuth = async (req, res, next) => {
   try {
-    const bearerToken = getBearerToken(req);
-    const token = extractAccessToken(req);
-    const usingCookie = !bearerToken && Boolean(token);
+    const credentials = resolveAccessCredentials(req);
+
+    if (credentials.conflict) {
+      return res.status(401).json(CREDENTIAL_CONFLICT_RESPONSE);
+    }
+
+    const token = credentials.token;
 
     if (!token) {
       return next();
@@ -143,7 +162,7 @@ const optionalAuth = async (req, res, next) => {
         if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
           // Stale token — continue without authenticating
         } else {
-          if (usingCookie) {
+          if (credentials.hasCookie) {
             markCookieAuthResponse(res);
           }
           req.user = user;

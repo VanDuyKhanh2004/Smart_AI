@@ -39,6 +39,7 @@ jest.mock("../models/User", () => ({
   findOne: jest.fn(),
   findByIdAndUpdate: jest.fn(),
   findOneAndUpdate: jest.fn(),
+  updateOne: jest.fn(),
   create: jest.fn(),
   findByEmailWithPassword: jest.fn(),
   findByUnlockToken: jest.fn(),
@@ -58,6 +59,7 @@ const {
 } = require("../utils/jwt");
 const { hashToken } = require("../utils/tokenHash");
 const { generateCsrfToken, verifyCsrfToken } = require("../utils/csrf");
+const { CSRF_COOKIE_NAME } = require("../configs/authCookies");
 
 const USER_ID = "507f191e810c19729de860ea";
 const ORIGIN = "http://localhost:5173";
@@ -134,6 +136,32 @@ function cookieHeader(name, value) {
   return `${name}=${value}`;
 }
 
+function csrfPair(token = generateCsrfToken()) {
+  return { token, cookie: `${CSRF_COOKIE_NAME}=${token}` };
+}
+
+function mockLoginPersistence(user, { tokenVersion = 1 } = {}) {
+  User.findOneAndUpdate.mockImplementation(async (filter, update) => {
+    if (update && update.$inc && update.$inc.tokenVersion) {
+      return chain({ ...user, tokenVersion });
+    }
+
+    if (
+      update &&
+      update.$set &&
+      Object.prototype.hasOwnProperty.call(update.$set, "refreshTokenHash") &&
+      !Object.prototype.hasOwnProperty.call(filter, "refreshTokenHash")
+    ) {
+      user.tokenVersion = filter.tokenVersion;
+      if (filter.tokenVersion !== user.tokenVersion) return null;
+      Object.assign(user, update.$set);
+      return chain(user);
+    }
+
+    return null;
+  });
+}
+
 function prepareSession(user, { tokenVersion = 2, sessionId = "session-1" } = {}) {
   user.tokenVersion = tokenVersion;
   const token = generateRefreshToken(user, { sessionId });
@@ -163,12 +191,27 @@ describe("F-01 authentication cookies", () => {
     jest.clearAllMocks();
     app = buildApp();
     User.findByIdAndUpdate.mockResolvedValue({});
+    User.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    User.findOneAndUpdate.mockImplementation(async (filter, update) => {
+      if (update && update.$inc && update.$inc.tokenVersion) {
+        return chain({ _id: filter._id, tokenVersion: 1 });
+      }
+      if (
+        update &&
+        update.$set &&
+        Object.prototype.hasOwnProperty.call(update.$set, "refreshTokenHash")
+      ) {
+        return chain({ _id: filter._id, tokenVersion: filter.tokenVersion });
+      }
+      return null;
+    });
     User.create.mockResolvedValue(makeUser());
   });
 
   it("sets access/refresh/CSRF cookies on password login while keeping the JSON contract", async () => {
     const user = makeUser();
     User.findByEmailWithPassword.mockResolvedValue(user);
+    mockLoginPersistence(user, { tokenVersion: 1 });
 
     const res = await request(app)
       .post("/api/auth/login")
@@ -204,6 +247,109 @@ describe("F-01 authentication cookies", () => {
     expect(user.refreshTokenHash).toBe(hashToken(res.body.data.refreshToken));
     expect(user.refreshTokenHash).not.toBe(res.body.data.refreshToken);
     expect(user.refreshToken).toBeUndefined();
+  });
+
+  it("does not emit authentication cookies when session persistence fails", async () => {
+    const user = makeUser();
+    User.findByEmailWithPassword.mockResolvedValue(user);
+    User.findOneAndUpdate
+      .mockResolvedValueOnce(chain({ ...user, tokenVersion: 1 }))
+      .mockRejectedValueOnce(new Error("db write failed"));
+
+    const res = await request(app)
+      .post("/api/auth/login")
+      .set("Origin", ORIGIN)
+      .send({ email: user.email, password: "correct" });
+
+    expect(res.status).toBe(500);
+    const cookies = res.headers["set-cookie"] || [];
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_access="))).toBe(false);
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_refresh="))).toBe(false);
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_csrf="))).toBe(false);
+  });
+
+  it("returns a deterministic conflict without cookies when a concurrent login wins the session write", async () => {
+    const user = makeUser();
+    User.findByEmailWithPassword.mockResolvedValue(user);
+    User.findOneAndUpdate
+      .mockResolvedValueOnce(chain({ ...user, tokenVersion: 1 }))
+      .mockResolvedValueOnce(null);
+
+    const res = await request(app)
+      .post("/api/auth/login")
+      .set("Origin", ORIGIN)
+      .send({ email: user.email, password: "correct" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("LOGIN_SESSION_CONFLICT");
+    const cookies = res.headers["set-cookie"] || [];
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_access="))).toBe(false);
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_refresh="))).toBe(false);
+  });
+
+  it("invalidates the earlier login access token when a later login wins", async () => {
+    const user = makeUser();
+    User.findByEmailWithPassword.mockResolvedValue(user);
+
+    mockLoginPersistence(user, { tokenVersion: 1 });
+    const first = await request(app)
+      .post("/api/auth/login")
+      .set("Origin", ORIGIN)
+      .send({ email: user.email, password: "correct" });
+
+    expect(first.status).toBe(200);
+    const firstAccessToken = first.body.data.accessToken;
+
+    mockLoginPersistence(user, { tokenVersion: 2 });
+    const second = await request(app)
+      .post("/api/auth/login")
+      .set("Origin", ORIGIN)
+      .send({ email: user.email, password: "correct" });
+
+    expect(second.status).toBe(200);
+    expect(second.body.data.accessToken).not.toBe(firstAccessToken);
+    expect(user.tokenVersion).toBe(2);
+
+    User.findById.mockImplementation(() => chain(user));
+    const stale = await request(app)
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${firstAccessToken}`);
+
+    expect(stale.status).toBe(401);
+    expect(stale.body.error.code).toBe("TOKEN_REVOKED");
+
+    const current = await request(app)
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${second.body.data.accessToken}`);
+
+    expect(current.status).toBe(200);
+  });
+
+  it("does not emit cookies on Google login when session persistence fails", async () => {
+    const user = makeUser({ googleId: "google-sub-1" });
+    User.findOne.mockResolvedValue(user);
+    mockVerifyIdToken.mockResolvedValue({
+      getPayload: () => ({
+        sub: "google-sub-1",
+        email: user.email,
+        name: user.name,
+        picture: null,
+        email_verified: true,
+      }),
+    });
+    User.findOneAndUpdate
+      .mockResolvedValueOnce(chain({ ...user, tokenVersion: 1 }))
+      .mockRejectedValueOnce(new Error("db write failed"));
+
+    const res = await request(app)
+      .post("/api/auth/google-login")
+      .set("Origin", ORIGIN)
+      .send({ credential: "google-credential" });
+
+    expect(res.status).toBe(500);
+    const cookies = res.headers["set-cookie"] || [];
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_access="))).toBe(false);
+    expect(cookies.some((cookie) => cookie.startsWith("__sa_refresh="))).toBe(false);
   });
 
   it("sets cookies on Google login and bumps tokenVersion", async () => {
@@ -361,11 +507,13 @@ describe("F-01 refresh rotation, concurrency and reuse", () => {
   it("rotates the refresh token, stores only hashes and keeps the same session id", async () => {
     const user = makeUser();
     const oldToken = prepareSession(user);
+    const csrf = csrfPair();
 
     const res = await request(app)
       .post("/api/auth/refresh")
       .set("Origin", ORIGIN)
-      .set("Cookie", cookieHeader("__sa_refresh", oldToken));
+      .set("Cookie", `${cookieHeader("__sa_refresh", oldToken)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
 
     expect(res.status).toBe(200);
     expect(res.body.data.accessToken).toBeTruthy();
@@ -390,20 +538,24 @@ describe("F-01 refresh rotation, concurrency and reuse", () => {
   it("returns a deterministic 409 for the previous token inside the conflict window without revoking", async () => {
     const user = makeUser();
     const oldToken = prepareSession(user);
+    const csrf = csrfPair();
 
     const first = await request(app)
       .post("/api/auth/refresh")
       .set("Origin", ORIGIN)
-      .set("Cookie", cookieHeader("__sa_refresh", oldToken));
+      .set("Cookie", `${cookieHeader("__sa_refresh", oldToken)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
 
     expect(first.status).toBe(200);
     const rotatedHash = user.refreshTokenHash;
     const version = user.tokenVersion;
 
+    const secondToken = csrfPair();
     const second = await request(app)
       .post("/api/auth/refresh")
       .set("Origin", ORIGIN)
-      .set("Cookie", cookieHeader("__sa_refresh", oldToken));
+      .set("Cookie", `${cookieHeader("__sa_refresh", oldToken)}; ${secondToken.cookie}`)
+      .set("X-CSRF-Token", secondToken.token);
 
     expect(second.status).toBe(409);
     expect(second.body.error.code).toBe("REFRESH_TOKEN_CONFLICT");
@@ -423,10 +575,12 @@ describe("F-01 refresh rotation, concurrency and reuse", () => {
     user.refreshTokenRotatedAt = new Date(Date.now() - 60_000);
     User.findById.mockImplementation(() => chain(user));
 
+    const csrf = csrfPair();
     const res = await request(app)
       .post("/api/auth/refresh")
       .set("Origin", ORIGIN)
-      .set("Cookie", cookieHeader("__sa_refresh", oldToken));
+      .set("Cookie", `${cookieHeader("__sa_refresh", oldToken)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe("REFRESH_TOKEN_REUSED");
@@ -454,10 +608,12 @@ describe("F-01 refresh rotation, concurrency and reuse", () => {
       .mockImplementationOnce(() => chain(user))
       .mockImplementationOnce(() => chain(winner));
 
+    const csrf = csrfPair();
     const res = await request(app)
       .post("/api/auth/refresh")
       .set("Origin", ORIGIN)
-      .set("Cookie", cookieHeader("__sa_refresh", token));
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe("REFRESH_TOKEN_CONFLICT");
@@ -482,6 +638,113 @@ describe("F-01 refresh rotation, concurrency and reuse", () => {
 
     expect(first).not.toBe(second);
     expect(verifyRefreshToken(first).jti).not.toBe(verifyRefreshToken(second).jti);
+  });
+});
+
+describe("F-01 cookie refresh CSRF enforcement", () => {
+  let app;
+
+  beforeEach(() => {
+    resetRateLimiters();
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("rejects a cookie-only refresh with no Origin", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("CSRF_ORIGIN_INVALID");
+  });
+
+  it("rejects a cookie-only refresh from an unknown Origin", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", "https://evil.example.com")
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("CSRF_ORIGIN_INVALID");
+  });
+
+  it("rejects a cookie-only refresh with a missing CSRF token", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", cookieHeader("__sa_refresh", token));
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("CSRF_TOKEN_INVALID");
+  });
+
+  it("rejects a cookie-only refresh with a mismatched CSRF token", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", generateCsrfToken());
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("CSRF_TOKEN_INVALID");
+  });
+
+  it("rejects a cookie-only refresh with an invalid CSRF signature", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", "__sa_refresh=" + token + "; __sa_csrf=forged")
+      .set("X-CSRF-Token", "forged");
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("CSRF_TOKEN_INVALID");
+  });
+
+  it("allows a cookie-only refresh when CSRF is valid and proceeds to rotation", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(200);
+    expect(setCookieValue(res, "__sa_refresh")).toBeTruthy();
+  });
+
+  it("keeps the legacy body-token refresh CSRF-exempt (documented exception)", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refreshToken: token });
+
+    expect(res.status).toBe(200);
   });
 });
 

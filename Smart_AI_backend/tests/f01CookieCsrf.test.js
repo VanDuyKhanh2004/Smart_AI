@@ -412,16 +412,22 @@ describe("F-01 tokenVersion migration script", () => {
       countDocuments: jest.fn().mockResolvedValue(4),
       updateMany: jest.fn(),
     };
+    const markers = {
+      getStatus: jest.fn().mockResolvedValue(null),
+      claim: jest.fn(),
+      complete: jest.fn(),
+    };
 
-    const result = await runBump({ model, dryRun: true });
+    const result = await runBump({ model, markers, dryRun: true });
 
     expect(result).toEqual(
       expect.objectContaining({ dryRun: true, candidates: 4, matched: 0, modified: 0 }),
     );
     expect(model.updateMany).not.toHaveBeenCalled();
+    expect(markers.claim).not.toHaveBeenCalled();
   });
 
-  it("apply writes once and a second run is a no-op (idempotent marker)", async () => {
+  it("apply writes once and a second run is a no-op (global marker)", async () => {
     const docs = [
       { _id: "u1", tokenVersion: 0 },
       { _id: "u2", tokenVersion: 5, f01TokenVersionBumpMarker: MARKER },
@@ -443,20 +449,120 @@ describe("F-01 tokenVersion migration script", () => {
       }),
     };
 
-    const first = await runBump({ model, dryRun: false });
+    const markerStore = {
+      status: null,
+      async getStatus() {
+        return this.status === "completed" ? "completed" : null;
+      },
+      async claim({ runId }) {
+        if (this.status === "completed") {
+          return { claimed: false, status: "completed" };
+        }
+        if (this.status === "running") {
+          return { claimed: false, status: "running" };
+        }
+        this.status = "running";
+        this.runId = runId;
+        return { claimed: true, status: "running" };
+      },
+      async complete({ runId }) {
+        if (this.runId !== runId) return false;
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    const first = await runBump({ model, markers: markerStore, dryRun: false });
     expect(first).toEqual(
-      expect.objectContaining({ dryRun: false, candidates: 1, matched: 1, modified: 1 }),
+      expect.objectContaining({ dryRun: false, alreadyApplied: false, candidates: 1, matched: 1, modified: 1 }),
     );
     expect(docs[0].tokenVersion).toBe(1);
     expect(docs[0].f01TokenVersionBumpMarker).toBe(MARKER);
     expect(docs[1].tokenVersion).toBe(5);
 
-    const second = await runBump({ model, dryRun: false });
+    const second = await runBump({ model, markers: markerStore, dryRun: false });
     expect(second).toEqual(
-      expect.objectContaining({ dryRun: false, candidates: 0, matched: 0, modified: 0 }),
+      expect.objectContaining({ dryRun: false, alreadyApplied: true, matched: 0, modified: 0 }),
     );
     expect(docs[0].tokenVersion).toBe(1);
     expect(docs[1].tokenVersion).toBe(5);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not touch users created after a completed migration", async () => {
+    const docs = [{ _id: "u1", tokenVersion: 0 }];
+    const model = {
+      countDocuments: jest.fn(async () => docs.filter((doc) => doc.f01TokenVersionBumpMarker !== MARKER).length),
+      updateMany: jest.fn(async (filter, update) => {
+        const targets = docs.filter((doc) => doc.f01TokenVersionBumpMarker !== MARKER);
+        for (const doc of targets) {
+          doc.tokenVersion += update.$inc.tokenVersion;
+          Object.assign(doc, update.$set);
+        }
+        return { matchedCount: targets.length, modifiedCount: targets.length };
+      }),
+    };
+
+    const markerStore = {
+      status: "completed",
+      async getStatus() {
+        return "completed";
+      },
+      async claim() {
+        return { claimed: false, status: "completed" };
+      },
+      async complete() {
+        return true;
+      },
+    };
+
+    const result = await runBump({ model, markers: markerStore, dryRun: false });
+
+    expect(result.alreadyApplied).toBe(true);
+    expect(model.updateMany).not.toHaveBeenCalled();
+    expect(docs[0].tokenVersion).toBe(0);
+
+    docs.push({ _id: "new-user", tokenVersion: 0 });
+    const second = await runBump({ model, markers: markerStore, dryRun: false });
+    expect(second.alreadyApplied).toBe(true);
+    expect(docs[1].tokenVersion).toBe(0);
+  });
+
+  it("aborts concurrent invocations without a second write", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+    };
+
+    const markerStore = {
+      status: null,
+      async getStatus() {
+        return this.status;
+      },
+      async claim() {
+        if (this.status === null) {
+          this.status = "running";
+          return { claimed: true, status: "running" };
+        }
+        return { claimed: false, status: this.status };
+      },
+      async complete() {
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    const [first, second] = await Promise.allSettled([
+      runBump({ model, markers: markerStore, dryRun: false }),
+      runBump({ model, markers: markerStore, dryRun: false }),
+    ]);
+
+    const fulfilled = [first, second].filter((result) => result.status === "fulfilled");
+    const rejected = [first, second].filter((result) => result.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
   });
 });
 

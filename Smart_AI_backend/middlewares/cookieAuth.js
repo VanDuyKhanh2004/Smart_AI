@@ -1,6 +1,7 @@
 "use strict";
 
 const { parseCookieHeader } = require("../utils/cookies");
+const { timingSafeEqualStrings } = require("../utils/tokenHash");
 const {
   ACCESS_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
@@ -44,11 +45,72 @@ function getBearerToken(req) {
 }
 
 /**
- * Access token resolution for protect/optionalAuth. Bearer remains the legacy
- * transport and always wins; the HttpOnly access cookie is the fallback.
+ * Resolve the access credential for protect/optionalAuth.
+ *
+ * Bearer remains the legacy transport and the HttpOnly access cookie is the
+ * fallback, but the two are never silently mixed:
+ * - Bearer only            -> bearer
+ * - cookie only           -> cookie
+ * - both, same token      -> both (accepted)
+ * - both, different token -> conflict (must be rejected by the caller)
+ *
+ * A request that explicitly supplies an invalid Bearer token must never fall
+ * back to the cookie, so callers only reuse `token` when `conflict` is false.
+ */
+function resolveAccessCredentials(req) {
+  const bearerToken = getBearerToken(req);
+  const cookieToken = getCookie(req, ACCESS_COOKIE_NAME) || null;
+  const hasBearer = Boolean(bearerToken);
+  const hasCookie = Boolean(cookieToken);
+
+  if (hasBearer && hasCookie) {
+    const matches = timingSafeEqualStrings(bearerToken, cookieToken);
+
+    return {
+      token: bearerToken,
+      source: "both",
+      hasBearer,
+      hasCookie,
+      conflict: !matches,
+    };
+  }
+
+  if (hasBearer) {
+    return {
+      token: bearerToken,
+      source: "bearer",
+      hasBearer,
+      hasCookie,
+      conflict: false,
+    };
+  }
+
+  if (hasCookie) {
+    return {
+      token: cookieToken,
+      source: "cookie",
+      hasBearer,
+      hasCookie,
+      conflict: false,
+    };
+  }
+
+  return {
+    token: null,
+    source: "none",
+    hasBearer,
+    hasCookie,
+    conflict: false,
+  };
+}
+
+/**
+ * Legacy helper kept for callers that only need the token value. Conflict
+ * detection must use resolveAccessCredentials(); this returns the Bearer value
+ * in the conflicting case and is never sufficient on its own.
  */
 function extractAccessToken(req) {
-  return getBearerToken(req) || getCookie(req, ACCESS_COOKIE_NAME) || null;
+  return resolveAccessCredentials(req).token;
 }
 
 function hasAuthCookies(req) {
@@ -89,6 +151,7 @@ module.exports = {
   parseCookies,
   getCookie,
   getBearerToken,
+  resolveAccessCredentials,
   extractAccessToken,
   hasAuthCookies,
   isCookieAuthenticatedRequest,
