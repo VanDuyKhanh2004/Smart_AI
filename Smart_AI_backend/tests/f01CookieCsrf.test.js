@@ -778,3 +778,297 @@ describe("F-01 logging redaction configuration", () => {
     );
   });
 });
+
+
+describe("F-01 migration lease and heartbeat", () => {
+  it("renews the heartbeat for the active owner", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "owner",
+      heartbeatAt: new Date(),
+      async getStatus() { return this.status; },
+      async claim() { return { claimed: true, status: "running" }; },
+      async renew({ runId, now }) {
+        if (this.runId !== runId) return false;
+        this.heartbeatAt = now;
+        return true;
+      },
+      async complete({ runId }) {
+        if (this.runId !== runId) return false;
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    const result = await runBump({
+      model,
+      markers: markerStore,
+      dryRun: false,
+      runId: "owner",
+      heartbeatIntervalMs: 5,
+      leaseTtlMs: 1000,
+    });
+
+    expect(result.alreadyApplied).toBe(false);
+    expect(model.updateMany).toHaveBeenCalled();
+  });
+
+  it("does not take over a run with a fresh heartbeat", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "active-owner",
+      heartbeatAt: new Date(),
+      async getStatus() { return this.status; },
+      async claim({ resume, leaseTtlMs, now }) {
+        if (!resume) return { claimed: false, status: this.status };
+        const age = now.getTime() - this.heartbeatAt.getTime();
+        if (age < leaseTtlMs) {
+          return { claimed: false, status: this.status, active: true };
+        }
+        return { claimed: true, status: this.status, resumed: true };
+      },
+      async renew() { return true; },
+      async complete() { return true; },
+    };
+
+    await expect(
+      runBump({
+        model,
+        markers: markerStore,
+        dryRun: false,
+        resume: true,
+        leaseTtlMs: 60_000,
+        heartbeatIntervalMs: 100000,
+      }),
+    ).rejects.toThrow(/currently running/);
+
+    expect(model.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows exactly one takeover when the heartbeat is stale", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "old-owner",
+      heartbeatAt: new Date(Date.now() - 1000),
+      takenOver: false,
+      async getStatus() { return this.status; },
+      async claim({ runId, resume, leaseTtlMs, now }) {
+        if (!resume) return { claimed: false, status: this.status };
+        const age = now.getTime() - this.heartbeatAt.getTime();
+        if (age < leaseTtlMs) {
+          return { claimed: false, status: this.status, active: true };
+        }
+        if (this.takenOver) {
+          return { claimed: false, status: this.status, active: true };
+        }
+        this.takenOver = true;
+        this.runId = runId;
+        this.heartbeatAt = now;
+        return { claimed: true, status: this.status, resumed: true };
+      },
+      async renew({ runId }) {
+        return this.runId === runId;
+      },
+      async complete({ runId }) {
+        if (this.runId !== runId) return false;
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    const [first, second] = await Promise.allSettled([
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, leaseTtlMs: 0, heartbeatIntervalMs: 100000 }),
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, leaseTtlMs: 0, heartbeatIntervalMs: 100000 }),
+    ]);
+
+    const fulfilled = [first, second].filter((r) => r.status === "fulfilled");
+    const rejected = [first, second].filter((r) => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents an old owner from renewing or completing after takeover", async () => {
+    const markerStore = {
+      status: "running",
+      runId: "new-owner",
+      heartbeatAt: new Date(),
+      async getStatus() { return this.status; },
+      async claim() { return { claimed: false, status: this.status }; },
+      async renew({ runId }) {
+        return runId === this.runId;
+      },
+      async complete({ runId }) {
+        return runId === this.runId;
+      },
+    };
+
+    expect(await markerStore.renew({ runId: "old-owner", now: new Date() })).toBe(false);
+    expect(await markerStore.complete({ runId: "old-owner", now: new Date() })).toBe(false);
+    expect(await markerStore.renew({ runId: "new-owner", now: new Date() })).toBe(true);
+  });
+
+  it("stops processing when ownership is lost", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { matchedCount: 1, modifiedCount: 1 };
+      }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "owner",
+      heartbeatAt: new Date(),
+      async getStatus() { return this.status; },
+      async claim() { return { claimed: true, status: "running" }; },
+      async renew() { return false; },
+      async complete() { return true; },
+    };
+
+    await expect(
+      runBump({
+        model,
+        markers: markerStore,
+        dryRun: false,
+        runId: "owner",
+        heartbeatIntervalMs: 5,
+      }),
+    ).rejects.toThrow(/lost ownership/);
+  });
+
+  it("refuses recovery when the heartbeat is missing or invalid", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "old-owner",
+      heartbeatAt: null,
+      async getStatus() { return this.status; },
+      async claim({ resume }) {
+        if (!resume) return { claimed: false, status: this.status };
+        return { claimed: false, status: this.status, invalidHeartbeat: true };
+      },
+      async renew() { return true; },
+      async complete() { return true; },
+    };
+
+    await expect(
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, heartbeatIntervalMs: 100000 }),
+    ).rejects.toThrow(/manual inspection/);
+
+    expect(model.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not increment already migrated users after recovery", async () => {
+    const docs = [
+      { _id: "u1", tokenVersion: 0 },
+      { _id: "u2", tokenVersion: 3, f01TokenVersionBumpMarker: MARKER },
+    ];
+    const model = {
+      countDocuments: jest.fn(async () => docs.filter((d) => d.f01TokenVersionBumpMarker !== MARKER).length),
+      updateMany: jest.fn(async (filter, update) => {
+        const targets = docs.filter((d) => d.f01TokenVersionBumpMarker !== MARKER);
+        for (const doc of targets) {
+          doc.tokenVersion += update.$inc.tokenVersion;
+          Object.assign(doc, update.$set);
+        }
+        return { matchedCount: targets.length, modifiedCount: targets.length };
+      }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "old-owner",
+      heartbeatAt: new Date(Date.now() - 1000),
+      async getStatus() { return this.status; },
+      async claim({ runId, now, resume, leaseTtlMs }) {
+        if (!resume) return { claimed: false, status: this.status };
+        const age = now.getTime() - this.heartbeatAt.getTime();
+        if (age < leaseTtlMs) return { claimed: false, status: this.status, active: true };
+        this.runId = runId;
+        this.heartbeatAt = now;
+        return { claimed: true, status: this.status, resumed: true };
+      },
+      async renew({ runId }) {
+        return runId === this.runId;
+      },
+      async complete({ runId }) {
+        if (runId !== this.runId) return false;
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    const recovered = await runBump({
+      model,
+      markers: markerStore,
+      dryRun: false,
+      resume: true,
+      leaseTtlMs: 0,
+      heartbeatIntervalMs: 100000,
+    });
+
+    expect(recovered.resumed).toBe(true);
+    expect(docs[0].tokenVersion).toBe(1);
+    expect(docs[1].tokenVersion).toBe(3);
+
+    const second = await runBump({ model, markers: markerStore, dryRun: false });
+    expect(second.alreadyApplied).toBe(true);
+    expect(docs[0].tokenVersion).toBe(1);
+    expect(docs[1].tokenVersion).toBe(3);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps completed migration a no-op", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(2),
+      updateMany: jest.fn(),
+    };
+    const markerStore = {
+      status: "completed",
+      async getStatus() { return "completed"; },
+      async claim() { return { claimed: false, status: "completed" }; },
+      async renew() { return true; },
+      async complete() { return true; },
+    };
+
+    const result = await runBump({ model, markers: markerStore, dryRun: false });
+    expect(result.alreadyApplied).toBe(true);
+    expect(model.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("dry-run remains read-only", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(4),
+      updateMany: jest.fn(),
+    };
+    const markerStore = {
+      status: "running",
+      heartbeatAt: new Date(),
+      async getStatus() { return this.status; },
+      async claim() { return { claimed: false, status: this.status }; },
+      async renew() { return true; },
+      async complete() { return true; },
+    };
+
+    const result = await runBump({ model, markers: markerStore, dryRun: true });
+    expect(result.dryRun).toBe(true);
+    expect(result.candidates).toBe(4);
+    expect(model.updateMany).not.toHaveBeenCalled();
+  });
+});
