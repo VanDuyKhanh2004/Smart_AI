@@ -420,15 +420,30 @@ const refreshTokenFn = asyncHandler(async (req, res) => {
   }
 
   if (usingCookie) {
-    // Session binding is defense-in-depth: a token with a different sid must
-    // not be able to rotate the stored session even if its digest matched.
+    // Cookie-based refresh is session-bound: a valid sid is mandatory and must
+    // match the stored session id exactly. Tokens without sid (including
+    // pre-rotation or forged tokens) can never bypass session binding.
     if (
-      decoded.sid &&
-      user.refreshTokenSessionId &&
+      typeof decoded.sid !== "string" ||
+      decoded.sid.trim().length === 0
+    ) {
+      clearAuthCookies(res);
+      throw new UnauthorizedError(
+        "Refresh token không hợp lệ",
+        "REFRESH_TOKEN_INVALID",
+      );
+    }
+
+    if (
+      typeof user.refreshTokenSessionId !== "string" ||
+      user.refreshTokenSessionId.trim().length === 0 ||
       decoded.sid !== user.refreshTokenSessionId
     ) {
       clearAuthCookies(res);
-      throw new UnauthorizedError('Refresh token không hợp lệ', 'REFRESH_TOKEN_INVALID');
+      throw new UnauthorizedError(
+        "Refresh token không hợp lệ",
+        "REFRESH_TOKEN_INVALID",
+      );
     }
 
     const sessionId = decoded.sid || user.refreshTokenSessionId || generateSessionId();

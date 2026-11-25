@@ -748,6 +748,159 @@ describe("F-01 cookie refresh CSRF enforcement", () => {
   });
 });
 
+describe("F-01 cookie refresh sid enforcement", () => {
+  let app;
+
+  beforeEach(() => {
+    resetRateLimiters();
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  function storeSession(user, token) {
+    user.tokenVersion = 2;
+    user.refreshTokenHash = hashToken(token);
+    user.refreshTokenPrevHash = null;
+    user.refreshTokenSessionId = "session-1";
+    user.refreshTokenRotatedAt = new Date();
+    User.findById.mockImplementation(() => chain(user));
+  }
+
+  it("rejects a cookie refresh token with no sid", async () => {
+    const user = makeUser();
+    user.tokenVersion = 2;
+    const token = generateRefreshToken(user); // no sessionId => no sid
+    storeSession(user, token);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("REFRESH_TOKEN_INVALID");
+  });
+
+  it("rejects an empty sid", async () => {
+    const user = makeUser();
+    const jwt = require("jsonwebtoken");
+    const token = jwt.sign(
+      { id: USER_ID, email: user.email, tokenVersion: 2, type: "refresh", jti: "jti-empty", sid: "" },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" },
+    );
+    storeSession(user, token);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("REFRESH_TOKEN_INVALID");
+  });
+
+  it("rejects a malformed (non-string) sid", async () => {
+    const user = makeUser();
+    const jwt = require("jsonwebtoken");
+    const token = jwt.sign(
+      { id: USER_ID, email: user.email, tokenVersion: 2, type: "refresh", jti: "jti-bad", sid: 123 },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" },
+    );
+    storeSession(user, token);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("REFRESH_TOKEN_INVALID");
+  });
+
+  it("rejects when there is no stored session identifier", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+    user.refreshTokenSessionId = null;
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("REFRESH_TOKEN_INVALID");
+  });
+
+  it("rejects a mismatched sid", async () => {
+    const user = makeUser();
+    const jwt = require("jsonwebtoken");
+    const token = jwt.sign(
+      { id: USER_ID, email: user.email, tokenVersion: 2, type: "refresh", jti: "jti-other", sid: "other-session" },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" },
+    );
+    storeSession(user, token);
+    user.refreshTokenSessionId = "session-1";
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("REFRESH_TOKEN_INVALID");
+  });
+
+  it("accepts a matching sid and rotates", async () => {
+    const user = makeUser();
+    const token = prepareSession(user);
+    const csrf = csrfPair();
+
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", token)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(200);
+    expect(setCookieValue(res, "__sa_refresh")).toBeTruthy();
+  });
+
+  it("preserves reuse detection when sid is valid", async () => {
+    const user = makeUser();
+    user.tokenVersion = 2;
+    const oldToken = generateRefreshToken(user, { sessionId: "session-1" });
+
+    user.refreshTokenHash = hashToken("newer-token");
+    user.refreshTokenPrevHash = hashToken(oldToken);
+    user.refreshTokenSessionId = "session-1";
+    user.refreshTokenRotatedAt = new Date(Date.now() - 60_000);
+    User.findById.mockImplementation(() => chain(user));
+
+    const csrf = csrfPair();
+    const res = await request(app)
+      .post("/api/auth/refresh")
+      .set("Origin", ORIGIN)
+      .set("Cookie", `${cookieHeader("__sa_refresh", oldToken)}; ${csrf.cookie}`)
+      .set("X-CSRF-Token", csrf.token);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("REFRESH_TOKEN_REUSED");
+  });
+});
+
 describe("F-01 cookie authentication and revocation", () => {
   let app;
 

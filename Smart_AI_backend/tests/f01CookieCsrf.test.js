@@ -400,10 +400,14 @@ describe("F-01 tokenVersion migration script", () => {
   });
 
   it("defaults to dry-run and requires --apply for writes", () => {
-    expect(parseArgs(["node", "script"])).toEqual({ dryRun: true });
-    expect(parseArgs(["node", "script", "--dry-run"])).toEqual({ dryRun: true });
-    expect(parseArgs(["node", "script", "--apply"])).toEqual({ dryRun: false });
+    expect(parseArgs(["node", "script"])).toEqual({ dryRun: true, resume: false });
+    expect(parseArgs(["node", "script", "--dry-run"])).toEqual({ dryRun: true, resume: false });
+    expect(parseArgs(["node", "script", "--apply"])).toEqual({ dryRun: false, resume: false });
+    expect(parseArgs(["node", "script", "--resume"])).toEqual({ dryRun: false, resume: true });
+    expect(parseArgs(["node", "script", "--recover"])).toEqual({ dryRun: false, resume: true });
     expect(() => parseArgs(["node", "script", "--apply", "--dry-run"])).toThrow();
+    expect(() => parseArgs(["node", "script", "--resume", "--dry-run"])).toThrow();
+    expect(() => parseArgs(["node", "script", "--apply", "--resume"])).toThrow();
     expect(() => parseArgs(["node", "script", "--force"])).toThrow();
   });
 
@@ -562,6 +566,193 @@ describe("F-01 tokenVersion migration script", () => {
 
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not mutate state on a dry-run even when the marker is running", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(3),
+      updateMany: jest.fn(),
+    };
+    const markerStore = {
+      status: "running",
+      startedAt: new Date(Date.now() - 60_000),
+      async getStatus() {
+        return this.status;
+      },
+      async claim() {
+        return { claimed: false, status: this.status };
+      },
+      async complete() {
+        return true;
+      },
+    };
+
+    const result = await runBump({ model, markers: markerStore, dryRun: true });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.alreadyApplied).toBe(false);
+    expect(result.candidates).toBe(3);
+    expect(model.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("recovers an abandoned running migration only after the staleness threshold", async () => {
+    const docs = [{ _id: "u1", tokenVersion: 0 }];
+    const model = {
+      countDocuments: jest.fn(async () => docs.filter((doc) => doc.f01TokenVersionBumpMarker !== MARKER).length),
+      updateMany: jest.fn(async (filter, update) => {
+        const targets = docs.filter((doc) => doc.f01TokenVersionBumpMarker !== MARKER);
+        for (const doc of targets) {
+          doc.tokenVersion += update.$inc.tokenVersion;
+          Object.assign(doc, update.$set);
+        }
+        return { matchedCount: targets.length, modifiedCount: targets.length };
+      }),
+    };
+
+    const startedAt = new Date(Date.now() - 1000);
+    const markerStore = {
+      status: "running",
+      runId: "old-run",
+      startedAt,
+      async getStatus() {
+        return this.status;
+      },
+      async claim({ runId, now, resume, staleAfterMs }) {
+        if (!resume) {
+          return { claimed: false, status: this.status };
+        }
+        const age = now.getTime() - this.startedAt.getTime();
+        if (age < staleAfterMs) {
+          return { claimed: false, status: this.status, active: true };
+        }
+        this.runId = runId;
+        this.startedAt = now;
+        return { claimed: true, status: "running", resumed: true };
+      },
+      async complete({ runId }) {
+        if (this.runId !== runId) return false;
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    await expect(
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, staleAfterMs: 10_000 }),
+    ).rejects.toThrow(/not old enough|currently running/);
+
+    expect(model.updateMany).not.toHaveBeenCalled();
+    expect(docs[0].tokenVersion).toBe(0);
+
+    const recovered = await runBump({
+      model,
+      markers: markerStore,
+      dryRun: false,
+      resume: true,
+      staleAfterMs: 0,
+      now: new Date(startedAt.getTime() + 1000),
+    });
+
+    expect(recovered.resumed).toBe(true);
+    expect(docs[0].tokenVersion).toBe(1);
+    expect(docs[0].f01TokenVersionBumpMarker).toBe(MARKER);
+
+    const second = await runBump({ model, markers: markerStore, dryRun: false });
+    expect(second.alreadyApplied).toBe(true);
+    expect(docs[0].tokenVersion).toBe(1);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to take over a genuinely active running migration", async () => {
+    const model = {
+      countDocuments: jest.fn().mockResolvedValue(1),
+      updateMany: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
+    };
+    const markerStore = {
+      status: "running",
+      runId: "active-run",
+      startedAt: new Date(),
+      async getStatus() {
+        return this.status;
+      },
+      async claim({ resume, staleAfterMs, now }) {
+        if (!resume) {
+          return { claimed: false, status: this.status };
+        }
+        const age = now.getTime() - this.startedAt.getTime();
+        if (age < staleAfterMs) {
+          return { claimed: false, status: this.status, active: true };
+        }
+        return { claimed: true, status: this.status, resumed: true };
+      },
+      async complete() {
+        return true;
+      },
+    };
+
+    await expect(
+      runBump({ model, markers: markerStore, dryRun: false, resume: true, staleAfterMs: 60_000 }),
+    ).rejects.toThrow(/currently running|not old enough/);
+
+    expect(model.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not increment tokenVersion twice after recovery of a partially applied run", async () => {
+    const docs = [
+      { _id: "u1", tokenVersion: 0 },
+      { _id: "u2", tokenVersion: 3, f01TokenVersionBumpMarker: MARKER },
+    ];
+    const model = {
+      countDocuments: jest.fn(async () => docs.filter((doc) => doc.f01TokenVersionBumpMarker !== MARKER).length),
+      updateMany: jest.fn(async (filter, update) => {
+        const targets = docs.filter((doc) => doc.f01TokenVersionBumpMarker !== MARKER);
+        for (const doc of targets) {
+          doc.tokenVersion += update.$inc.tokenVersion;
+          Object.assign(doc, update.$set);
+        }
+        return { matchedCount: targets.length, modifiedCount: targets.length };
+      }),
+    };
+
+    const markerStore = {
+      status: "running",
+      runId: "old-run",
+      startedAt: new Date(Date.now() - 1000),
+      async getStatus() {
+        return this.status;
+      },
+      async claim({ runId, now, resume, staleAfterMs }) {
+        const age = now.getTime() - this.startedAt.getTime();
+        if (age < staleAfterMs) {
+          return { claimed: false, status: this.status, active: true };
+        }
+        this.runId = runId;
+        this.startedAt = now;
+        return { claimed: true, status: "running", resumed: true };
+      },
+      async complete({ runId }) {
+        if (this.runId !== runId) return false;
+        this.status = "completed";
+        return true;
+      },
+    };
+
+    const recovered = await runBump({
+      model,
+      markers: markerStore,
+      dryRun: false,
+      resume: true,
+      staleAfterMs: 0,
+    });
+
+    expect(recovered.resumed).toBe(true);
+    expect(docs[0].tokenVersion).toBe(1);
+    expect(docs[1].tokenVersion).toBe(3);
+
+    const second = await runBump({ model, markers: markerStore, dryRun: false });
+    expect(second.alreadyApplied).toBe(true);
+    expect(docs[0].tokenVersion).toBe(1);
+    expect(docs[1].tokenVersion).toBe(3);
     expect(model.updateMany).toHaveBeenCalledTimes(1);
   });
 });

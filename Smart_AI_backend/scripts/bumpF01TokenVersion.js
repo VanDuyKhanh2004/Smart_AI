@@ -32,6 +32,7 @@ const BUMPED_AT_FIELD = 'f01TokenVersionBumpedAt';
 const MARKER_COLLECTION = 'migrations';
 const MARKER_STATUS_RUNNING = 'running';
 const MARKER_STATUS_COMPLETED = 'completed';
+const DEFAULT_STALE_AFTER_MS = 15 * 60 * 1000;
 
 function buildFilter() {
   return { [MARKER_FIELD]: { $ne: MARKER } };
@@ -69,17 +70,32 @@ function parseArgs(argv = []) {
   const args = argv.slice(2);
   const hasApply = args.includes('--apply');
   const hasDryRun = args.includes('--dry-run');
-  const unknown = args.filter((arg) => arg !== '--apply' && arg !== '--dry-run');
+  const hasResume = args.includes('--resume') || args.includes('--recover');
+  const unknown = args.filter(
+    (arg) =>
+      arg !== '--apply' &&
+      arg !== '--dry-run' &&
+      arg !== '--resume' &&
+      arg !== '--recover',
+  );
 
   if (hasApply && hasDryRun) {
     throw new Error('Use either --dry-run or --apply, not both');
+  }
+
+  if (hasResume && hasDryRun) {
+    throw new Error('Use either --dry-run or --resume, not both');
+  }
+
+  if (hasApply && hasResume) {
+    throw new Error('Use either --apply or --resume, not both');
   }
 
   if (unknown.length > 0) {
     throw new Error(`Unknown argument(s): ${unknown.join(', ')}`);
   }
 
-  return { dryRun: !hasApply };
+  return { dryRun: !hasApply && !hasResume, resume: hasResume };
 }
 
 /**
@@ -93,7 +109,7 @@ function createMongoMarkerStore(connection = mongoose.connection) {
   const collection = connection.collection(MARKER_COLLECTION);
 
   return {
-    async claim({ marker, runId, now }) {
+    async claim({ marker, runId, now, resume = false, staleAfterMs = DEFAULT_STALE_AFTER_MS }) {
       try {
         await collection.insertOne({
           _id: marker,
@@ -109,10 +125,40 @@ function createMongoMarkerStore(connection = mongoose.connection) {
         }
 
         const existing = await collection.findOne({ _id: marker });
-        return {
-          claimed: false,
-          status: existing ? existing.status : 'unknown',
-        };
+        if (!existing) {
+          return { claimed: false, status: 'unknown' };
+        }
+
+        if (existing.status === MARKER_STATUS_COMPLETED) {
+          return { claimed: false, status: MARKER_STATUS_COMPLETED };
+        }
+
+        if (existing.status !== MARKER_STATUS_RUNNING) {
+          return { claimed: false, status: existing.status };
+        }
+
+        // An interrupted run may only be resumed explicitly, and only after it
+        // has been abandoned long enough to prove it is not still active.
+        if (!resume) {
+          return { claimed: false, status: MARKER_STATUS_RUNNING };
+        }
+
+        const startedAt = existing.startedAt ? new Date(existing.startedAt).getTime() : 0;
+        if (!Number.isFinite(startedAt) || now.getTime() - startedAt < staleAfterMs) {
+          return { claimed: false, status: MARKER_STATUS_RUNNING, active: true };
+        }
+
+        const takeover = await collection.findOneAndUpdate(
+          { _id: marker, status: MARKER_STATUS_RUNNING, runId: existing.runId },
+          { $set: { runId, startedAt: now } },
+          { returnDocument: 'after' },
+        );
+
+        if (!takeover) {
+          return { claimed: false, status: MARKER_STATUS_RUNNING, active: true };
+        }
+
+        return { claimed: true, status: MARKER_STATUS_RUNNING, resumed: true };
       }
     },
 
@@ -145,6 +191,8 @@ async function runBump({
   dryRun = true,
   now = new Date(),
   runId = crypto.randomUUID(),
+  resume = false,
+  staleAfterMs = DEFAULT_STALE_AFTER_MS,
 } = {}) {
   const filter = buildFilter();
 
@@ -162,23 +210,40 @@ async function runBump({
     };
   }
 
-  const claim = await markers.claim({ marker: MARKER, runId, now });
+  const claim = await markers.claim({ marker: MARKER, runId, now, resume, staleAfterMs });
 
   if (!claim.claimed) {
     if (claim.status === MARKER_STATUS_RUNNING) {
+      if (claim.active) {
+        throw new Error(
+          'F-01 migration is currently running in another invocation; refusing to take over an active run',
+        );
+      }
+
+      if (resume) {
+        throw new Error(
+          'F-01 migration recovery refused: the interrupted run is not old enough to be considered abandoned',
+        );
+      }
+
       throw new Error(
         'F-01 migration is already running in another invocation; refusing to write',
       );
     }
 
-    return {
-      marker: MARKER,
-      dryRun: false,
-      alreadyApplied: true,
-      candidates: 0,
-      matched: 0,
-      modified: 0,
-    };
+    if (claim.status === MARKER_STATUS_COMPLETED) {
+      return {
+        marker: MARKER,
+        dryRun: false,
+        alreadyApplied: true,
+        candidates: 0,
+        matched: 0,
+        modified: 0,
+        resumed: false,
+      };
+    }
+
+    throw new Error(`F-01 migration marker is in an unexpected state: ${claim.status}`);
   }
 
   const result = await model.updateMany(filter, buildUpdate(now));
@@ -199,6 +264,7 @@ async function runBump({
     candidates: matched,
     matched,
     modified,
+    resumed: !!claim.resumed,
   };
 }
 
@@ -237,11 +303,13 @@ async function main() {
   );
 
   try {
-    const result = await runBump({ dryRun: options.dryRun });
+    const result = await runBump({ dryRun: options.dryRun, resume: options.resume });
     logger.info(result, 'F-01 tokenVersion migration result');
 
     if (!options.dryRun && result.alreadyApplied) {
       logger.info('Migration already applied; no users were modified.');
+    } else if (!options.dryRun && result.resumed) {
+      logger.info('Interrupted migration resumed safely; already-migrated users were not bumped again.');
     } else if (!options.dryRun) {
       logger.info(
         'Migration applied. Existing browser sessions must sign in again; cookies were not modified.',
