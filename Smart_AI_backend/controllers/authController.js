@@ -23,7 +23,17 @@ const {
   ConflictError,
   RateLimitError,
 } = require('../utils/errors');
-const { hashToken } = require('../utils/tokenHash');
+const { hashToken, hashMatches } = require('../utils/tokenHash');
+const { generateCsrfToken } = require('../utils/csrf');
+const {
+  REFRESH_COOKIE_NAME,
+  setAuthCookies,
+  setCsrfCookie,
+  clearAuthCookies,
+  generateSessionId,
+  clearRefreshSession,
+  isWithinRefreshConflictWindow,
+} = require('../configs/authCookies');
 const logger = require('../utils/logger');
 const {
   claimResendCooldown,
@@ -83,6 +93,153 @@ const buildResetPasswordUrl = (token, email) => {
   const baseUrl = getFrontendBaseUrl();
   const emailParam = email ? `&email=${encodeURIComponent(email)}` : '';
   return `${baseUrl}/reset-password?token=${token}${emailParam}`;
+};
+
+const REFRESH_SESSION_SELECT =
+  '+refreshTokenHash +refreshTokenPrevHash +refreshTokenSessionId +refreshTokenRotatedAt +loginAttempts +lockUntil';
+
+const loadUserForRefresh = (userId) => User.findById(userId).select(REFRESH_SESSION_SELECT);
+
+const revokeRefreshSession = async (user) => {
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  clearRefreshSession(user);
+  await user.save({ validateBeforeSave: false });
+};
+
+const assertRefreshTokenVersion = (user, decoded) => {
+  const decodedTokenVersion = decoded.tokenVersion ?? 0;
+  if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
+    throw new UnauthorizedError('Token đã bị thu hồi. Vui lòng đăng nhập lại.', 'TOKEN_REVOKED');
+  }
+};
+
+/**
+ * Classify the presented refresh token against the stored session:
+ * - current: the active token, safe to consume/rotate
+ * - conflict: the immediately previous token inside the short race window
+ * - reuse: any other token while a session is active
+ */
+const classifyStoredRefreshToken = (user, token) => {
+  if (!user.refreshTokenHash) {
+    return 'invalid';
+  }
+
+  if (hashMatches(token, user.refreshTokenHash)) {
+    return 'current';
+  }
+
+  if (
+    hashMatches(token, user.refreshTokenPrevHash) &&
+    isWithinRefreshConflictWindow(user.refreshTokenRotatedAt)
+  ) {
+    return 'conflict';
+  }
+
+  return 'reuse';
+};
+
+const handleNonCurrentRefreshToken = async (user, state, res) => {
+  if (state === 'conflict') {
+    throw new ConflictError(
+      'Yêu cầu làm mới token đã được xử lý bởi một yêu cầu khác. Vui lòng thử lại.',
+      'REFRESH_TOKEN_CONFLICT',
+    );
+  }
+
+  if (state === 'reuse') {
+    await revokeRefreshSession(user);
+    clearAuthCookies(res);
+    throw new UnauthorizedError(
+      'Refresh token đã được sử dụng trước đó. Vui lòng đăng nhập lại.',
+      'REFRESH_TOKEN_REUSED',
+    );
+  }
+
+  clearAuthCookies(res);
+  throw new UnauthorizedError('Refresh token không hợp lệ', 'REFRESH_TOKEN_INVALID');
+};
+
+/**
+ * Atomically claim a fresh single session for this user and persist only the
+ * hash of the refresh token. Tokens are created before the guarded write so
+ * the cookie payload is ready, but cookies are emitted by the controller only
+ * after this helper resolves successfully.
+ *
+ * Race safety:
+ * - `$inc: tokenVersion` is atomic across concurrent logins.
+ * - The refresh-session write is guarded by the tokenVersion this request
+ *   observed from the increment, so an earlier login that lost the race
+ *   cannot overwrite the later session's hash. The loser receives a
+ *   deterministic conflict instead of a usable token.
+ */
+const createLoginSession = async (user) => {
+  const bumped = await User.findOneAndUpdate(
+    { _id: user._id },
+    {
+      $inc: { tokenVersion: 1 },
+      $set: { loginAttempts: 0, lockUntil: null },
+    },
+    { new: true, select: '+loginAttempts +lockUntil' },
+  );
+
+  if (!bumped || bumped.tokenVersion === undefined) {
+    throw new UnauthorizedError('Không thể tạo phiên đăng nhập', 'LOGIN_SESSION_FAILED');
+  }
+
+  const tokenVersion = bumped.tokenVersion;
+  const sessionId = generateSessionId();
+  const tokenSubject = {
+    _id: user._id,
+    email: user.email,
+    tokenVersion,
+  };
+  const accessToken = generateAccessToken(tokenSubject);
+  const refreshToken = generateRefreshToken(tokenSubject, { sessionId });
+
+  const persisted = await User.findOneAndUpdate(
+    { _id: user._id, tokenVersion },
+    {
+      $set: {
+        refreshTokenHash: hashToken(refreshToken),
+        refreshTokenPrevHash: null,
+        refreshTokenSessionId: sessionId,
+        refreshTokenRotatedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+
+  if (!persisted) {
+    throw new ConflictError(
+      'Một phiên đăng nhập khác vừa được tạo. Vui lòng thử lại.',
+      'LOGIN_SESSION_CONFLICT',
+    );
+  }
+
+  user.tokenVersion = tokenVersion;
+  user.loginAttempts = 0;
+  user.lockUntil = null;
+
+  return {
+    accessToken,
+    refreshToken,
+    csrfToken: generateCsrfToken(),
+    tokenVersion,
+  };
+};
+
+/**
+ * Persist the welcome-email flags. Kept separate from session creation so a
+ * failure here cannot emit cookies before the session hash is durable.
+ */
+const markWelcomeEmailSent = async (user) => {
+  const now = new Date();
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { welcomeEmailSent: true, firstLoginAt: now } },
+  );
+  user.welcomeEmailSent = true;
+  user.firstLoginAt = now;
 };
 
 /**
@@ -174,30 +331,25 @@ const login = asyncHandler(async (req, res) => {
     throw new ForbiddenError('Vui long xac nhan email truoc khi dang nhap', 'EMAIL_NOT_VERIFIED');
   }
 
-  if (user.loginAttempts || user.lockUntil) {
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-  }
-
-  const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken(user);
-
-  user.refreshToken = refreshToken;
-  await user.save({ validateBeforeSave: false });
+  // A fresh login starts a new single session: the helper atomically bumps
+  // tokenVersion and persists the new session hash before any cookie is set.
+  const session = await createLoginSession(user);
 
   if (!user.welcomeEmailSent && (user.emailVerified || user.googleId)) {
     enqueueWelcomeEmail(user, req.requestId);
-    user.welcomeEmailSent = true;
-    user.firstLoginAt = new Date();
-    await user.save({ validateBeforeSave: false });
+    await markWelcomeEmailSent(user);
   }
+
+  // Cookies are emitted only after tokenVersion and the refresh-session hash
+  // have been persisted successfully.
+  setAuthCookies(res, session);
 
   res.status(200).json({
     success: true,
     data: {
       user: user.toJSON(),
-      accessToken,
-      refreshToken
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken
     }
   });
 });
@@ -208,7 +360,18 @@ const login = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const logout = asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(req.user._id, { refreshToken: null });
+  // Revoke every access token for this user and drop the refresh session.
+  await User.findByIdAndUpdate(req.user._id, {
+    $inc: { tokenVersion: 1 },
+    $set: {
+      refreshTokenHash: null,
+      refreshTokenPrevHash: null,
+      refreshTokenSessionId: null,
+      refreshTokenRotatedAt: null,
+    },
+  });
+
+  clearAuthCookies(res);
 
   res.status(200).json({
     success: true,
@@ -219,10 +382,19 @@ const logout = asyncHandler(async (req, res) => {
 /**
  * @desc    Refresh access token
  * @route   POST /api/auth/refresh
- * @access  Public
+ * @access  Public (refresh cookie or legacy body token)
  */
 const refreshTokenFn = asyncHandler(async (req, res) => {
-  const { refreshToken: token } = req.body;
+  const bodyToken = req.body && req.body.refreshToken;
+  const cookieToken = req.cookies && req.cookies[REFRESH_COOKIE_NAME];
+  const hasBodyToken = typeof bodyToken === 'string' && bodyToken.length > 0;
+  const hasCookieToken = typeof cookieToken === 'string' && cookieToken.length > 0;
+
+  // The body token takes precedence so the documented legacy transition path
+  // stays non-rotating (and CSRF-exempt in the middleware). A request with no
+  // body token uses the HttpOnly cookie and always rotates under CSRF.
+  const usingCookie = !hasBodyToken && hasCookieToken;
+  const token = hasBodyToken ? bodyToken : cookieToken;
 
   if (!token) {
     throw new BadRequestError('Refresh token là bắt buộc', 'VALIDATION_ERROR');
@@ -235,25 +407,127 @@ const refreshTokenFn = asyncHandler(async (req, res) => {
     throw new UnauthorizedError('Refresh token không hợp lệ hoặc đã hết hạn', 'REFRESH_TOKEN_INVALID');
   }
 
-  const user = await User.findById(decoded.id).select('+refreshToken');
-  if (!user || user.refreshToken !== token) {
+  const user = await loadUserForRefresh(decoded.id);
+  if (!user) {
     throw new UnauthorizedError('Refresh token không hợp lệ', 'REFRESH_TOKEN_INVALID');
   }
 
-  // Enforce token version — rejects refresh tokens issued before password
-  // change/reset. Legacy tokens (no tokenVersion) are treated as version 0.
-  const decodedTokenVersion = decoded.tokenVersion ?? 0;
-  if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
-    throw new UnauthorizedError('Token đã bị thu hồi. Vui lòng đăng nhập lại.', 'TOKEN_REVOKED');
+  assertRefreshTokenVersion(user, decoded);
+
+  const state = classifyStoredRefreshToken(user, token);
+  if (state !== 'current') {
+    await handleNonCurrentRefreshToken(user, state, res);
   }
 
+  if (usingCookie) {
+    // Cookie-based refresh is session-bound: a valid sid is mandatory and must
+    // match the stored session id exactly. Tokens without sid (including
+    // pre-rotation or forged tokens) can never bypass session binding.
+    if (
+      typeof decoded.sid !== "string" ||
+      decoded.sid.trim().length === 0
+    ) {
+      clearAuthCookies(res);
+      throw new UnauthorizedError(
+        "Refresh token không hợp lệ",
+        "REFRESH_TOKEN_INVALID",
+      );
+    }
+
+    if (
+      typeof user.refreshTokenSessionId !== "string" ||
+      user.refreshTokenSessionId.trim().length === 0 ||
+      decoded.sid !== user.refreshTokenSessionId
+    ) {
+      clearAuthCookies(res);
+      throw new UnauthorizedError(
+        "Refresh token không hợp lệ",
+        "REFRESH_TOKEN_INVALID",
+      );
+    }
+
+    const sessionId = decoded.sid || user.refreshTokenSessionId || generateSessionId();
+    const incomingHash = hashToken(token);
+    const accessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user, { sessionId });
+    const newHash = hashToken(newRefreshToken);
+    const rotatedAt = new Date();
+
+    // Atomic compare-and-swap: exactly one concurrent request may consume the
+    // current digest. The losing request never receives the replacement token
+    // and never destroys the winner's new session.
+    const updated = await User.findOneAndUpdate(
+      {
+        _id: user._id,
+        refreshTokenHash: incomingHash,
+        tokenVersion: user.tokenVersion ?? 0,
+      },
+      {
+        $set: {
+          refreshTokenHash: newHash,
+          refreshTokenPrevHash: incomingHash,
+          refreshTokenSessionId: sessionId,
+          refreshTokenRotatedAt: rotatedAt,
+        },
+      },
+      { new: true },
+    );
+
+    if (!updated) {
+      const latest = await loadUserForRefresh(user._id);
+      const latestVersion = latest ? (latest.tokenVersion ?? 0) : null;
+      const currentVersion = user.tokenVersion ?? 0;
+
+      if (latestVersion !== null && latestVersion !== currentVersion) {
+        clearAuthCookies(res);
+        throw new UnauthorizedError('Token đã bị thu hồi. Vui lòng đăng nhập lại.', 'TOKEN_REVOKED');
+      }
+
+      throw new ConflictError(
+        'Yêu cầu làm mới token đã được xử lý bởi một yêu cầu khác. Vui lòng thử lại.',
+        'REFRESH_TOKEN_CONFLICT',
+      );
+    }
+
+    setAuthCookies(res, { accessToken, refreshToken: newRefreshToken });
+
+    return res.status(200).json({
+      success: true,
+      data: { accessToken }
+    });
+  }
+
+  // Legacy body-token path: keep the existing non-rotating behaviour for the
+  // current frontend. Cookies are also issued so the client can migrate to the
+  // cookie flow without a protocol break; no refresh token is rotated here.
   const accessToken = generateAccessToken(user);
+
+  setAuthCookies(res, {
+    accessToken,
+    refreshToken: token,
+    csrfToken: generateCsrfToken(),
+  });
 
   res.status(200).json({
     success: true,
     data: {
       accessToken
     }
+  });
+});
+
+/**
+ * @desc    Issue/read the CSRF double-submit token
+ * @route   GET /api/auth/csrf
+ * @access  Public
+ */
+const getCsrfToken = asyncHandler(async (req, res) => {
+  const csrfToken = generateCsrfToken();
+  setCsrfCookie(res, csrfToken);
+
+  res.status(200).json({
+    success: true,
+    data: { csrfToken }
   });
 });
 
@@ -353,25 +627,23 @@ const googleLogin = asyncHandler(async (req, res) => {
     throw new AppError('JWT_REFRESH_SECRET chưa được cấu hình trên server', 500, 'SERVER_ERROR');
   }
 
-  const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken(user);
-
-  user.refreshToken = refreshToken;
-  await user.save({ validateBeforeSave: false });
+  // Google login is a fresh login: the helper atomically bumps tokenVersion
+  // and persists the session hash before cookies are emitted.
+  const session = await createLoginSession(user);
 
   if (!user.welcomeEmailSent) {
     enqueueWelcomeEmail(user, req.requestId);
-    user.welcomeEmailSent = true;
-    user.firstLoginAt = new Date();
-    await user.save({ validateBeforeSave: false });
+    await markWelcomeEmailSent(user);
   }
+
+  setAuthCookies(res, session);
 
   res.status(200).json({
     success: true,
     data: {
       user: user.toJSON(),
-      accessToken,
-      refreshToken
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken
     }
   });
 });
@@ -668,10 +940,12 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.password = password;
   user.passwordResetToken = undefined;
   user.passwordResetExpires = undefined;
-  user.refreshToken = null;
+  clearRefreshSession(user);
   user.tokenVersion = (user.tokenVersion || 0) + 1;
 
   await user.save();
+
+  clearAuthCookies(res);
 
   res.status(200).json({
     success: true,
@@ -800,6 +1074,7 @@ module.exports = {
   adminUnlockAccount,
   logout,
   refreshToken: refreshTokenFn,
+  getCsrfToken,
   getMe,
   linkGoogle,
   unlinkGoogle

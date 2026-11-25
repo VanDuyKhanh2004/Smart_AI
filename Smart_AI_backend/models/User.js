@@ -29,8 +29,24 @@ const userSchema = new mongoose.Schema({
     unique: true,
     sparse: true // Allow null values but enforce uniqueness
   },
-  refreshToken: {
+  // Refresh-token session state. Only the SHA-256 digest of the current token
+  // is stored; the raw token never touches the database. The previous digest
+  // and rotation timestamp are used solely to classify a concurrent/retry
+  // request without accepting the old token.
+  refreshTokenHash: {
     type: String,
+    select: false
+  },
+  refreshTokenPrevHash: {
+    type: String,
+    select: false
+  },
+  refreshTokenSessionId: {
+    type: String,
+    select: false
+  },
+  refreshTokenRotatedAt: {
+    type: Date,
     select: false
   },
   role: {
@@ -98,6 +114,15 @@ const userSchema = new mongoose.Schema({
   tokenVersion: {
     type: Number,
     default: 0
+  },
+  // One-off F-01 migration idempotency marker. Never read by application code.
+  f01TokenVersionBumpMarker: {
+    type: String,
+    select: false
+  },
+  f01TokenVersionBumpedAt: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true,
@@ -108,7 +133,12 @@ const userSchema = new mongoose.Schema({
       delete ret._id;
       delete ret.__v;
       delete ret.password;
-      delete ret.refreshToken;
+      delete ret.refreshTokenHash;
+      delete ret.refreshTokenPrevHash;
+      delete ret.refreshTokenSessionId;
+      delete ret.refreshTokenRotatedAt;
+      delete ret.f01TokenVersionBumpMarker;
+      delete ret.f01TokenVersionBumpedAt;
       delete ret.emailVerificationToken;
       delete ret.emailVerificationExpires;
       delete ret.passwordResetToken;
@@ -128,7 +158,12 @@ const userSchema = new mongoose.Schema({
       delete ret._id;
       delete ret.__v;
       delete ret.password;
-      delete ret.refreshToken;
+      delete ret.refreshTokenHash;
+      delete ret.refreshTokenPrevHash;
+      delete ret.refreshTokenSessionId;
+      delete ret.refreshTokenRotatedAt;
+      delete ret.f01TokenVersionBumpMarker;
+      delete ret.f01TokenVersionBumpedAt;
       delete ret.emailVerificationToken;
       delete ret.emailVerificationExpires;
       delete ret.passwordResetToken;
@@ -217,7 +252,9 @@ userSchema.statics.findByEmailWithPassword = function(email) {
 
 // Static method to find user by email with refresh token
 userSchema.statics.findByEmailWithRefreshToken = function(email) {
-  return this.findOne({ email }).select('+refreshToken');
+  return this.findOne({ email }).select(
+    '+refreshTokenHash +refreshTokenPrevHash +refreshTokenSessionId +refreshTokenRotatedAt'
+  );
 };
 
 // Static method to find user by unlock token

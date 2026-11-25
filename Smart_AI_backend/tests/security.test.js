@@ -18,6 +18,7 @@ jest.mock('../controllers/authController', () => ({
   login: (req, res) => res.json({ ok: 'login' }),
   logout: (req, res) => res.json({ ok: 'logout' }),
   refreshToken: (req, res) => res.json({ ok: 'refresh' }),
+  getCsrfToken: (req, res) => res.json({ ok: 'csrf' }),
   getMe: (req, res) => res.json({ ok: 'me' }),
   googleLogin: (req, res) => res.json({ ok: 'google-login' }),
   linkGoogle: (req, res) => res.json({ ok: 'link-google' }),

@@ -1,18 +1,39 @@
 const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/jwt');
 const logger = require('../utils/logger');
+const { resolveAccessCredentials } = require('./cookieAuth');
+
+const CREDENTIAL_CONFLICT_RESPONSE = {
+  success: false,
+  error: {
+    code: 'AUTH_CREDENTIAL_CONFLICT',
+    message: 'Thông tin xác thực Bearer và cookie không khớp nhau'
+  }
+};
+
+function markCookieAuthResponse(res) {
+  if (!res) return;
+  if (typeof res.set === 'function') res.set('Cache-Control', 'no-store');
+  if (typeof res.vary === 'function') res.vary('Cookie');
+}
 
 /**
- * Protect routes - verify JWT and attach user to request
+ * Protect routes - verify JWT and attach user to request.
+ * Accepts the legacy Bearer header first and falls back to the HttpOnly
+ * access cookie. `req.user` keeps the exact same shape in both cases.
  */
 const protect = async (req, res, next) => {
   try {
-    let token;
+    const credentials = resolveAccessCredentials(req);
 
-    // Check for token in Authorization header
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+    // Never silently pick one credential when the client supplied two that
+    // disagree. This also prevents an explicit invalid Bearer token from
+    // falling back to a valid cookie.
+    if (credentials.conflict) {
+      return res.status(401).json(CREDENTIAL_CONFLICT_RESPONSE);
     }
+
+    const token = credentials.token;
 
     if (!token) {
       return res.status(401).json({
@@ -95,6 +116,10 @@ const protect = async (req, res, next) => {
       });
     }
 
+    if (credentials.hasCookie) {
+      markCookieAuthResponse(res);
+    }
+
     // Attach user to request
     req.user = user;
     next();
@@ -111,15 +136,18 @@ const protect = async (req, res, next) => {
 };
 
 /**
- * Optional auth - attach user if token exists, continue if not
+ * Optional auth - attach user if token exists, continue if not.
+ * Uses the same Bearer-then-cookie resolution as protect.
  */
 const optionalAuth = async (req, res, next) => {
   try {
-    let token;
+    const credentials = resolveAccessCredentials(req);
 
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+    if (credentials.conflict) {
+      return res.status(401).json(CREDENTIAL_CONFLICT_RESPONSE);
     }
+
+    const token = credentials.token;
 
     if (!token) {
       return next();
@@ -134,6 +162,9 @@ const optionalAuth = async (req, res, next) => {
         if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
           // Stale token — continue without authenticating
         } else {
+          if (credentials.hasCookie) {
+            markCookieAuthResponse(res);
+          }
           req.user = user;
         }
       }

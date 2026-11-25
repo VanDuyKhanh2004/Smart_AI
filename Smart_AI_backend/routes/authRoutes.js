@@ -6,6 +6,7 @@ const {
   logout, 
   refreshToken, 
   getMe,
+  getCsrfToken,
   googleLogin,
   linkGoogle,
   unlinkGoogle,
@@ -36,6 +37,9 @@ router.post('/google-login', authSessionLimiter, googleLogin);
 router.post('/link/google', protect, linkGoogle);
 router.delete('/unlink/google', protect, unlinkGoogle);
 router.post('/refresh', authSessionLimiter, refreshToken);
+// CSRF bootstrap endpoint: returns a fresh signed double-submit token and
+// mirrors it into the JS-readable __sa_csrf cookie.
+router.get('/csrf', getCsrfToken);
 router.get('/verify-email', authSessionLimiter, verifyEmail);
 router.post('/verify-email', authSessionLimiter, verifyEmail);
 router.post('/resend-verification', resendVerificationLimiter, resendVerification);

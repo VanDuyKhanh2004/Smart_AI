@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const asyncHandler = require('../utils/asyncHandler');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
+const { clearAuthCookies, clearRefreshSession } = require('../configs/authCookies');
 const logger = require('../utils/logger');
 
 function safeUnlink(filePath, context = '') {
@@ -129,8 +130,10 @@ const changePassword = async (req, res) => {
 
   user.password = newPassword;
   user.tokenVersion = (user.tokenVersion || 0) + 1;
-  user.refreshToken = null;
+  clearRefreshSession(user);
   await user.save();
+
+  clearAuthCookies(res);
 
   res.status(200).json({
     success: true,

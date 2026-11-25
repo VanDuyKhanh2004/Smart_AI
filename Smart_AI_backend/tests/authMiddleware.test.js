@@ -23,16 +23,18 @@ jest.mock('../utils/jwt', () => ({
   verifyAccessToken: jest.fn(),
 }));
 
-function mockReq({ authorization } = {}) {
+function mockReq({ authorization, cookies } = {}) {
   const headers = {};
   if (authorization !== undefined) headers.authorization = authorization;
-  return { headers, requestId: 'test-req-1' };
+  return { headers, cookies, requestId: 'test-req-1' };
 }
 
 function mockRes() {
   const res = { _status: null, _body: null };
   res.status = jest.fn((code) => { res._status = code; return res; });
   res.json = jest.fn((body) => { res._body = body; return res; });
+  res.set = jest.fn(() => res);
+  res.vary = jest.fn(() => res);
   return res;
 }
 
@@ -156,6 +158,133 @@ describe('protect', () => {
     expect(req.user).toBe(fakeUser);
     expect(next).toHaveBeenCalledTimes(1);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('attaches req.user from the HttpOnly access cookie when no Bearer header exists', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-cookie', email: 'cookie@test.com' });
+    const fakeUser = { _id: 'user-cookie', email: 'cookie@test.com', role: 'user', emailVerified: true, isLocked: false };
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ cookies: { __sa_access: 'cookie-token' } });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(verifyAccessToken).toHaveBeenCalledWith('cookie-token');
+    expect(req.user).toBe(fakeUser);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.vary).toHaveBeenCalledWith('Cookie');
+    expect(res.set).toHaveBeenCalledWith('Cache-Control', 'no-store');
+  });
+
+  it('accepts Bearer and parseable cookie credentials when they are identical', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-both', email: 'both@test.com' });
+    const fakeUser = { _id: 'user-both', email: 'both@test.com', role: 'user', emailVerified: true, isLocked: false };
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({
+      authorization: 'Bearer same-token',
+      cookies: { __sa_access: 'same-token' },
+    });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(verifyAccessToken).toHaveBeenCalledWith('same-token');
+    expect(req.user).toBe(fakeUser);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.vary).toHaveBeenCalledWith('Cookie');
+  });
+
+  it('rejects conflicting Bearer and cookie credentials instead of choosing one', async () => {
+    const req = mockReq({
+      authorization: 'Bearer bearer-token',
+      cookies: { __sa_access: 'cookie-token' },
+    });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: {
+        code: 'AUTH_CREDENTIAL_CONFLICT',
+        message: 'Thông tin xác thực Bearer và cookie không khớp nhau',
+      },
+    });
+    expect(verifyAccessToken).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to a valid cookie when the explicit Bearer token is invalid', async () => {
+    verifyAccessToken.mockImplementation(() => {
+      const err = new Error('invalid token');
+      err.name = 'JsonWebTokenError';
+      throw err;
+    });
+
+    const req = mockReq({
+      authorization: 'Bearer same-invalid-token',
+      cookies: { __sa_access: 'same-invalid-token' },
+    });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(verifyAccessToken).toHaveBeenCalledWith('same-invalid-token');
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: { code: 'INVALID_TOKEN', message: 'Token không hợp lệ' },
+    });
+    expect(req.user).toBeUndefined();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('optionalAuth rejects conflicting Bearer and cookie credentials', async () => {
+    const req = mockReq({
+      authorization: 'Bearer bearer-token',
+      cookies: { __sa_access: 'cookie-token' },
+    });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({ code: 'AUTH_CREDENTIAL_CONFLICT' }),
+      }),
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('optionalAuth does not authenticate from the cookie when Bearer is invalid', async () => {
+    verifyAccessToken.mockImplementation(() => {
+      const err = new Error('invalid token');
+      err.name = 'JsonWebTokenError';
+      throw err;
+    });
+
+    const req = mockReq({
+      authorization: 'Bearer same-invalid-token',
+      cookies: { __sa_access: 'same-invalid-token' },
+    });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await optionalAuth(req, res, next);
+
+    expect(verifyAccessToken).toHaveBeenCalledWith('same-invalid-token');
+    expect(req.user).toBeUndefined();
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('returns 403 ACCOUNT_LOCKED when user account is locked', async () => {
