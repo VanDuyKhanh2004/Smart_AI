@@ -29,7 +29,10 @@ const mockUser = {
   emailVerified: true,
   emailVerificationToken: null,
   emailVerificationExpires: null,
-  refreshToken: 'valid-refresh-token',
+  refreshTokenHash: hashToken('valid-refresh-token'),
+  refreshTokenPrevHash: null,
+  refreshTokenSessionId: 'test-session-id',
+  refreshTokenRotatedAt: null,
   welcomeEmailSent: true,
   loginAttempts: 0,
   lockUntil: null,
@@ -153,7 +156,10 @@ describe('Auth Controller — centralized error handling', () => {
     mockUser.emailVerified = true;
     mockUser.password = 'hashedpassword';
     mockUser.googleId = null;
-    mockUser.refreshToken = 'valid-refresh-token';
+    mockUser.refreshTokenHash = hashToken('valid-refresh-token');
+    mockUser.refreshTokenPrevHash = null;
+    mockUser.refreshTokenSessionId = 'test-session-id';
+    mockUser.refreshTokenRotatedAt = null;
     mockUser.lockUntil = null;
     mockUser.loginAttempts = 0;
     mockUser.tokenVersion = undefined;
@@ -512,6 +518,14 @@ describe('Auth Controller — centralized error handling', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.accessToken).toBe('new-access-token');
       expect(res.body.data.refreshToken).toBe('new-refresh-token');
+      expect(res.body.data.refreshToken).not.toBe('valid-refresh-token');
+
+      const cookies = res.headers['set-cookie'] || [];
+      expect(cookies.some((c) => c.startsWith('__sa_access='))).toBe(true);
+      expect(cookies.some((c) => c.startsWith('__sa_refresh='))).toBe(true);
+      expect(cookies.some((c) => c.startsWith('__sa_csrf='))).toBe(true);
+      // A new login bumps tokenVersion to revoke the previous session.
+      expect(mockUser.tokenVersion).toBe(1);
     });
 
     it('should return 400 when email/password missing', async () => {
@@ -586,7 +600,7 @@ describe('Auth Controller — centralized error handling', () => {
    * POST /api/auth/logout
    * ================================ */
   describe('POST /api/auth/logout', () => {
-    it('should logout successfully', async () => {
+    it('should logout successfully and revoke the session', async () => {
       User.findByIdAndUpdate.mockResolvedValue({});
 
       const res = await request(app)
@@ -595,6 +609,22 @@ describe('Auth Controller — centralized error handling', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+      expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({
+          $inc: { tokenVersion: 1 },
+          $set: expect.objectContaining({
+            refreshTokenHash: null,
+            refreshTokenPrevHash: null,
+            refreshTokenSessionId: null,
+            refreshTokenRotatedAt: null,
+          }),
+        }),
+      );
+
+      const cookies = res.headers['set-cookie'] || [];
+      expect(cookies.some((c) => c.startsWith('__sa_access='))).toBe(true);
+      expect(cookies.some((c) => c.startsWith('__sa_refresh='))).toBe(true);
     });
 
     it('should return 401 without auth token', async () => {
@@ -642,16 +672,18 @@ describe('Auth Controller — centralized error handling', () => {
       expect(res.body.error.code).toBe('REFRESH_TOKEN_INVALID');
     });
 
-    it('should return 401 when refresh token does not match', async () => {
-      verifyRefreshToken.mockReturnValue({ id: USER_ID });
-      User.findById.mockImplementation(() => thenableChainable({ ...mockUser, refreshToken: 'different-token' }));
+    it('should return 401 when refresh token does not match the stored digest', async () => {
+      verifyRefreshToken.mockReturnValue({ id: USER_ID, type: 'refresh', jti: 'test-jti' });
+      const mismatchedUser = { ...mockUser, refreshTokenHash: hashToken('different-token') };
+      User.findById.mockImplementation(() => thenableChainable(mismatchedUser));
 
       const res = await request(app)
         .post('/api/auth/refresh')
         .send({ refreshToken: 'some-token' });
 
       expect(res.status).toBe(401);
-      expect(res.body.error.code).toBe('REFRESH_TOKEN_INVALID');
+      expect(res.body.error.code).toBe('REFRESH_TOKEN_REUSED');
+      expect(mismatchedUser.tokenVersion).toBe(1);
     });
   });
 

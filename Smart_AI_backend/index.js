@@ -9,6 +9,14 @@ const correlationId = require("./middlewares/correlationId");
 const requestLogger = require("./middlewares/requestLogger");
 const securityHeaders = require("./middlewares/securityHeaders");
 const { trustProxyHops } = require("./configs/trustProxy");
+const { parseCookies, noStoreAuthResponses } = require("./middlewares/cookieAuth");
+const { csrfProtection } = require("./middlewares/csrfMiddleware");
+const {
+  corsOrigin,
+  CORS_ALLOWED_HEADERS,
+  CORS_ALLOWED_METHODS,
+  isOriginAllowed,
+} = require("./configs/frontendConfig");
 
 const { connectDatabase } = require("./configs/database");
 const { connectRedis } = require("./configs/redis");
@@ -41,6 +49,7 @@ const { startBullMQ, stopBullMQ } = require("./bullmq/bootstrap");
 const { shutdownStep } = require("./utils/shutdown");
 const sanitizeUrl = require("./utils/sanitizeUrl");
 const { validateJwtSecrets } = require("./utils/jwtValidation");
+const { validateCsrfSecret } = require("./utils/csrf");
 
 const app = express();
 const server = http.createServer(app);
@@ -49,10 +58,12 @@ const PORT = process.env.PORT || 5000;
 
 const io = socketIo(server, {
   cors: {
-    origin:
-      process.env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL || "http://localhost:3000"
-        : "*",
+    origin: (origin, callback) => {
+      if (!origin || isOriginAllowed(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -74,20 +85,27 @@ app.use(securityHeaders());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Cookie parsing is dependency-free and must run before CSRF/auth middleware.
+app.use(parseCookies);
+
 app.use(
   cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL || "http://localhost:3000"
-        : "*",
+    origin: corsOrigin,
     credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID", "Idempotency-Key"],
+    methods: CORS_ALLOWED_METHODS,
+    allowedHeaders: CORS_ALLOWED_HEADERS,
   }),
 );
 
 // Request logger captures every response after parsers have run
 app.use(requestLogger);
+
+// Auth and authenticated responses are never cacheable.
+app.use(noStoreAuthResponses);
+
+// Cookie-authenticated unsafe requests require Origin + signed CSRF token.
+// Bearer requests and public auth endpoints remain compatible in Wave 1.
+app.use(csrfProtection());
 
 /* ============================================================
    Swagger API Documentation
@@ -312,6 +330,24 @@ function validateJwtOrExit() {
 }
 
 validateJwtOrExit();
+
+// ---------------------------------------------------------------------------
+// Fail-fast CSRF secret validation — production requires its own secret.
+// ---------------------------------------------------------------------------
+function validateCsrfOrExit() {
+  const errors = validateCsrfSecret();
+
+  if (errors.length > 0) {
+    for (const err of errors) {
+      logger.fatal(err);
+    }
+    process.exit(1);
+  }
+
+  logger.info("CSRF secret validated");
+}
+
+validateCsrfOrExit();
 
 initializeServer();
 

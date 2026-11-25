@@ -1,4 +1,5 @@
 const request = require('supertest');
+const { hashToken } = require('../utils/tokenHash');
 
 process.env.JWT_SECRET = 'test-token-version-secret';
 process.env.JWT_REFRESH_SECRET = 'test-token-version-refresh-secret';
@@ -58,7 +59,10 @@ const mockUser = {
   avatar: null,
   emailVerified: true,
   tokenVersion: 0,
-  refreshToken: 'valid-refresh-token',
+  refreshTokenHash: hashToken('valid-refresh-token'),
+  refreshTokenPrevHash: null,
+  refreshTokenSessionId: 'test-session-id',
+  refreshTokenRotatedAt: null,
   loginMethod: 'password',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
@@ -90,6 +94,7 @@ function thenableChainable(result) {
 jest.mock('../models/User', () => ({
   findById: jest.fn(),
   findByIdAndUpdate: jest.fn(),
+  findOneAndUpdate: jest.fn(),
   findOne: jest.fn(),
 }));
 
@@ -148,7 +153,10 @@ describe('Token version — password change invalidation (HTTP)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUser.tokenVersion = 0;
-    mockUser.refreshToken = 'valid-refresh-token';
+    mockUser.refreshTokenHash = hashToken('valid-refresh-token');
+    mockUser.refreshTokenPrevHash = null;
+    mockUser.refreshTokenSessionId = 'test-session-id';
+    mockUser.refreshTokenRotatedAt = null;
     User.findById.mockReset();
     User.findById.mockImplementation((id) => thenableChainable(mockUser));
   });
@@ -171,7 +179,10 @@ describe('Token version — password change invalidation (HTTP)', () => {
 
     expect(res.body.success).toBe(true);
     expect(mockUser.tokenVersion).toBe(1);
-    expect(mockUser.refreshToken).toBeNull();
+    expect(mockUser.refreshTokenHash).toBeNull();
+    expect(mockUser.refreshTokenPrevHash).toBeNull();
+    expect(mockUser.refreshTokenSessionId).toBeNull();
+    expect(mockUser.refreshTokenRotatedAt).toBeNull();
     expect(mockUser.save).toHaveBeenCalled();
   });
 
@@ -289,7 +300,10 @@ describe('Token version — refresh token flow', () => {
     resetRateLimiters();
     jest.clearAllMocks();
     mockUser.tokenVersion = 0;
-    mockUser.refreshToken = 'valid-refresh-token';
+    mockUser.refreshTokenHash = hashToken('valid-refresh-token');
+    mockUser.refreshTokenPrevHash = null;
+    mockUser.refreshTokenSessionId = 'test-session-id';
+    mockUser.refreshTokenRotatedAt = null;
     User.findById.mockReset();
     User.findById.mockImplementation(() => thenableChainable(mockUser));
   });
@@ -304,7 +318,8 @@ describe('Token version — refresh token flow', () => {
     mockUser.tokenVersion = 1;
     // The refresh token in the DB must match the token sent (passes the
     // stored-token check), but tokenVersion mismatch triggers TOKEN_REVOKED.
-    mockUser.refreshToken = 'old-refresh-token';
+    mockUser.refreshTokenHash = hashToken('old-refresh-token');
+    mockUser.refreshTokenPrevHash = null;
 
     const res = await request(authApp)
       .post('/api/auth/refresh')
@@ -322,7 +337,8 @@ describe('Token version — refresh token flow', () => {
     });
 
     mockUser.tokenVersion = 1;
-    mockUser.refreshToken = 'new-refresh-token';
+    mockUser.refreshTokenHash = hashToken('new-refresh-token');
+    mockUser.refreshTokenPrevHash = null;
 
     const res = await request(authApp)
       .post('/api/auth/refresh')
@@ -357,7 +373,8 @@ describe('Token version — refresh token flow', () => {
 
     mockUser.tokenVersion = 1;
     // Must pass the stored-token check so tokenVersion check is reached.
-    mockUser.refreshToken = 'some-token';
+    mockUser.refreshTokenHash = hashToken('some-token');
+    mockUser.refreshTokenPrevHash = null;
 
     const res = await request(authApp)
       .post('/api/auth/refresh')
@@ -381,7 +398,10 @@ describe('Token version — password reset', () => {
     resetRateLimiters();
     jest.clearAllMocks();
     mockUser.tokenVersion = 0;
-    mockUser.refreshToken = 'valid-refresh-token';
+    mockUser.refreshTokenHash = hashToken('valid-refresh-token');
+    mockUser.refreshTokenPrevHash = null;
+    mockUser.refreshTokenSessionId = 'test-session-id';
+    mockUser.refreshTokenRotatedAt = null;
     mockUser.passwordResetToken = undefined;
     mockUser.passwordResetExpires = undefined;
     User.findById.mockReset();
@@ -412,7 +432,10 @@ describe('Token version — password reset', () => {
 
     expect(res.body.success).toBe(true);
     expect(mockUser.tokenVersion).toBe(1);
-    expect(mockUser.refreshToken).toBeNull();
+    expect(mockUser.refreshTokenHash).toBeNull();
+    expect(mockUser.refreshTokenPrevHash).toBeNull();
+    expect(mockUser.refreshTokenSessionId).toBeNull();
+    expect(mockUser.refreshTokenRotatedAt).toBeNull();
   });
 
   it('rejects old access token after password reset', async () => {

@@ -1,18 +1,24 @@
 const User = require('../models/User');
 const { verifyAccessToken } = require('../utils/jwt');
 const logger = require('../utils/logger');
+const { extractAccessToken, getBearerToken } = require('./cookieAuth');
+
+function markCookieAuthResponse(res) {
+  if (!res) return;
+  if (typeof res.set === 'function') res.set('Cache-Control', 'no-store');
+  if (typeof res.vary === 'function') res.vary('Cookie');
+}
 
 /**
- * Protect routes - verify JWT and attach user to request
+ * Protect routes - verify JWT and attach user to request.
+ * Accepts the legacy Bearer header first and falls back to the HttpOnly
+ * access cookie. `req.user` keeps the exact same shape in both cases.
  */
 const protect = async (req, res, next) => {
   try {
-    let token;
-
-    // Check for token in Authorization header
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
+    const bearerToken = getBearerToken(req);
+    const token = extractAccessToken(req);
+    const usingCookie = !bearerToken && Boolean(token);
 
     if (!token) {
       return res.status(401).json({
@@ -95,6 +101,10 @@ const protect = async (req, res, next) => {
       });
     }
 
+    if (usingCookie) {
+      markCookieAuthResponse(res);
+    }
+
     // Attach user to request
     req.user = user;
     next();
@@ -111,15 +121,14 @@ const protect = async (req, res, next) => {
 };
 
 /**
- * Optional auth - attach user if token exists, continue if not
+ * Optional auth - attach user if token exists, continue if not.
+ * Uses the same Bearer-then-cookie resolution as protect.
  */
 const optionalAuth = async (req, res, next) => {
   try {
-    let token;
-
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
+    const bearerToken = getBearerToken(req);
+    const token = extractAccessToken(req);
+    const usingCookie = !bearerToken && Boolean(token);
 
     if (!token) {
       return next();
@@ -134,6 +143,9 @@ const optionalAuth = async (req, res, next) => {
         if (user.tokenVersion !== undefined && decodedTokenVersion !== user.tokenVersion) {
           // Stale token — continue without authenticating
         } else {
+          if (usingCookie) {
+            markCookieAuthResponse(res);
+          }
           req.user = user;
         }
       }

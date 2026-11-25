@@ -10,7 +10,7 @@ function buildApp(corsOrigin = PRODUCTION_ORIGIN) {
     origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'Idempotency-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'Idempotency-Key', 'X-CSRF-Token'],
   }));
   app.get('/api/orders', (_req, res) => res.json({ ok: true }));
   return app;
@@ -95,5 +95,22 @@ describe('CORS — Idempotency-Key header preflight', () => {
     expect(allowed).toContain('authorization');
     expect(allowed).toContain('x-request-id');
     expect(res.status).toBe(204);
+  });
+
+  it('OPTIONS /api/orders accepts the X-CSRF-Token header used by cookie auth', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .options('/api/orders')
+      .set('Origin', PRODUCTION_ORIGIN)
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type, x-csrf-token');
+
+    const allowed = (res.headers['access-control-allow-headers'] || '')
+      .split(/,\s*/)
+      .map((header) => header.toLowerCase());
+
+    expect(res.status).toBe(204);
+    expect(allowed).toContain('x-csrf-token');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
   });
 });

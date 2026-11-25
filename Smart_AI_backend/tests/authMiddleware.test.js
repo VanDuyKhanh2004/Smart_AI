@@ -23,16 +23,18 @@ jest.mock('../utils/jwt', () => ({
   verifyAccessToken: jest.fn(),
 }));
 
-function mockReq({ authorization } = {}) {
+function mockReq({ authorization, cookies } = {}) {
   const headers = {};
   if (authorization !== undefined) headers.authorization = authorization;
-  return { headers, requestId: 'test-req-1' };
+  return { headers, cookies, requestId: 'test-req-1' };
 }
 
 function mockRes() {
   const res = { _status: null, _body: null };
   res.status = jest.fn((code) => { res._status = code; return res; });
   res.json = jest.fn((body) => { res._body = body; return res; });
+  res.set = jest.fn(() => res);
+  res.vary = jest.fn(() => res);
   return res;
 }
 
@@ -156,6 +158,24 @@ describe('protect', () => {
     expect(req.user).toBe(fakeUser);
     expect(next).toHaveBeenCalledTimes(1);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('attaches req.user from the HttpOnly access cookie when no Bearer header exists', async () => {
+    verifyAccessToken.mockReturnValue({ id: 'user-cookie', email: 'cookie@test.com' });
+    const fakeUser = { _id: 'user-cookie', email: 'cookie@test.com', role: 'user', emailVerified: true, isLocked: false };
+    mockFindByIdChain(fakeUser);
+
+    const req = mockReq({ cookies: { __sa_access: 'cookie-token' } });
+    const res = mockRes();
+    const next = jest.fn();
+
+    await protect(req, res, next);
+
+    expect(verifyAccessToken).toHaveBeenCalledWith('cookie-token');
+    expect(req.user).toBe(fakeUser);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.vary).toHaveBeenCalledWith('Cookie');
+    expect(res.set).toHaveBeenCalledWith('Cache-Control', 'no-store');
   });
 
   it('returns 403 ACCOUNT_LOCKED when user account is locked', async () => {
