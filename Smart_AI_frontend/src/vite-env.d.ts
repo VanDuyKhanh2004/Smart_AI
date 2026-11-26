@@ -2,6 +2,15 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL: string;
+  readonly VITE_API_URL?: string;
+  /**
+   * Backend origin used by Socket.IO, Google login and static assets.
+   * Required in production when VITE_API_BASE_URL is the same-origin `/api`
+   * proxy path.
+   */
+  readonly VITE_BACKEND_ORIGIN?: string;
+  /** Optional Socket.IO server override; defaults to VITE_BACKEND_ORIGIN. */
+  readonly VITE_SOCKET_URL?: string;
   readonly VITE_GOOGLE_CLIENT_ID: string;
 }
 

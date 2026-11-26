@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveApiBaseUrl, resolveBackendOrigin, ApiConfigError } from '@/lib/apiBaseUrl';
+import {
+  resolveApiBaseUrl,
+  resolveBackendOrigin,
+  resolveSocketUrl,
+  resolveAssetUrl,
+  ApiConfigError,
+} from '@/lib/apiBaseUrl';
 import { isHtmlResponse } from '@/lib/axios';
 
 function captureError(fn: () => unknown): unknown {
@@ -476,5 +482,221 @@ describe('Regression: production API URL validation', () => {
       isDev: false,
       frontendOrigin: 'https://smart-ai-shop.vercel.app',
     })).toBe('https://smart-ai-backend-twe5.onrender.com/api');
+  });
+});
+
+describe('Wave 3: same-origin /api proxy', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('accepts the relative /api base in production', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: '/api',
+      isDev: false,
+    })).toBe('/api');
+  });
+
+  it('normalizes trailing slashes on the relative /api base', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: '/api//',
+      isDev: false,
+    })).toBe('/api');
+  });
+
+  it('accepts a relative /api/v1 production base', () => {
+    expect(resolveApiBaseUrl({
+      configuredUrl: '/api/v1/',
+      isDev: false,
+    })).toBe('/api/v1');
+  });
+
+  it('keeps rejecting a relative /api in development (no proxy)', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: '/api',
+      isDev: true,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects a relative path outside /api in production', () => {
+    const error = captureError(() => resolveApiBaseUrl({
+      configuredUrl: '/uploads',
+      isDev: false,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('resolves the backend origin from an explicit backendOrigin when the API base is relative', () => {
+    expect(resolveBackendOrigin({
+      configuredUrl: '/api',
+      isDev: false,
+      backendOrigin: 'https://smart-ai-backend-twe5.onrender.com/',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com');
+  });
+
+  it('requires a backend origin for a relative API base when no legacy origin exists', () => {
+    vi.stubEnv('VITE_API_URL', '');
+    const error = captureError(() => resolveBackendOrigin({
+      configuredUrl: '/api',
+      isDev: false,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('missing');
+  });
+
+  it('prefers VITE_SOCKET_URL over the backend origin for Socket.IO', () => {
+    expect(resolveSocketUrl({
+      socketUrl: 'https://socket.example.com/',
+      configuredUrl: '/api',
+      isDev: false,
+      backendOrigin: 'https://smart-ai-backend-twe5.onrender.com',
+    })).toBe('https://socket.example.com');
+  });
+
+  it('falls back to the backend origin for Socket.IO', () => {
+    expect(resolveSocketUrl({
+      configuredUrl: '/api',
+      isDev: false,
+      backendOrigin: 'https://smart-ai-backend-twe5.onrender.com',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com');
+  });
+
+  it('builds relative asset URLs from the backend origin', () => {
+    expect(resolveAssetUrl('uploads/avatar.png', {
+      configuredUrl: '/api',
+      isDev: false,
+      backendOrigin: 'https://smart-ai-backend-twe5.onrender.com',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/uploads/avatar.png');
+  });
+
+  it('strips a leading slash from relative asset paths', () => {
+    expect(resolveAssetUrl('/uploads/avatar.png', {
+      configuredUrl: '/api',
+      isDev: false,
+      backendOrigin: 'https://smart-ai-backend-twe5.onrender.com',
+    })).toBe('https://smart-ai-backend-twe5.onrender.com/uploads/avatar.png');
+  });
+
+  it('leaves absolute, data and blob asset URLs untouched', () => {
+    expect(resolveAssetUrl('https://cdn.example.com/a.png')).toBe('https://cdn.example.com/a.png');
+    expect(resolveAssetUrl('data:image/png;base64,abc')).toBe('data:image/png;base64,abc');
+    expect(resolveAssetUrl('blob:https://app.example.com/123')).toBe('blob:https://app.example.com/123');
+    expect(resolveAssetUrl(undefined)).toBeUndefined();
+  });
+});
+
+describe('Wave 3: URL resolver hardening', () => {
+  const backendOrigin = 'https://smart-ai-backend-twe5.onrender.com';
+  const baseOptions = {
+    configuredUrl: '/api',
+    isDev: false,
+    backendOrigin,
+  };
+
+  it('rejects a backend origin with a non-root path', () => {
+    const error = captureError(() => resolveBackendOrigin({
+      ...baseOptions,
+      backendOrigin: `${backendOrigin}/uploads`,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects a backend origin with a query string', () => {
+    const error = captureError(() => resolveBackendOrigin({
+      ...baseOptions,
+      backendOrigin: `${backendOrigin}?tenant=1`,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects a backend origin with a fragment', () => {
+    const error = captureError(() => resolveBackendOrigin({
+      ...baseOptions,
+      backendOrigin: `${backendOrigin}#section`,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects an unsupported backend origin protocol', () => {
+    const error = captureError(() => resolveBackendOrigin({
+      ...baseOptions,
+      backendOrigin: 'ftp://smart-ai-backend-twe5.onrender.com',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects a socket URL with a non-root path', () => {
+    const error = captureError(() => resolveSocketUrl({
+      ...baseOptions,
+      socketUrl: `${backendOrigin}/socket.io`,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects a socket URL with a query string', () => {
+    const error = captureError(() => resolveSocketUrl({
+      ...baseOptions,
+      socketUrl: `${backendOrigin}?token=1`,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects a socket URL with a fragment', () => {
+    const error = captureError(() => resolveSocketUrl({
+      ...baseOptions,
+      socketUrl: `${backendOrigin}#chat`,
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('rejects an unsupported socket URL protocol', () => {
+    const error = captureError(() => resolveSocketUrl({
+      ...baseOptions,
+      socketUrl: 'ws://smart-ai-backend-twe5.onrender.com',
+    }));
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
+  });
+
+  it('does not prepend the backend origin to protocol-relative asset URLs', () => {
+    expect(resolveAssetUrl('//cdn.example.com/avatar.png', baseOptions))
+      .toBe('//cdn.example.com/avatar.png');
+  });
+
+  it('resolves a relative asset path that carries a query string', () => {
+    expect(resolveAssetUrl('uploads/avatar.png?v=2', baseOptions))
+      .toBe(`${backendOrigin}/uploads/avatar.png?v=2`);
+  });
+
+  it('resolves a leading-slash relative asset path that carries a query string', () => {
+    expect(resolveAssetUrl('/uploads/avatar.png?v=2', baseOptions))
+      .toBe(`${backendOrigin}/uploads/avatar.png?v=2`);
+  });
+
+  it('keeps absolute, data and blob asset URLs unchanged', () => {
+    expect(resolveAssetUrl('https://cdn.example.com/a.png', baseOptions))
+      .toBe('https://cdn.example.com/a.png');
+    expect(resolveAssetUrl('data:image/png;base64,abc', baseOptions))
+      .toBe('data:image/png;base64,abc');
+    expect(resolveAssetUrl('blob:https://app.example.com/123', baseOptions))
+      .toBe('blob:https://app.example.com/123');
+  });
+
+  it('rejects unsupported asset URL schemes such as ftp://', () => {
+    const error = captureError(() =>
+      resolveAssetUrl('ftp://cdn.example.com/a.png', baseOptions)
+    );
+    expect(error).toBeInstanceOf(ApiConfigError);
+    expect((error as ApiConfigError).reason).toBe('invalid');
   });
 });
