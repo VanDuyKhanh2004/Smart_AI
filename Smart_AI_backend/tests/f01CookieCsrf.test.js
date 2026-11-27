@@ -270,8 +270,14 @@ describe("F-01 signed CSRF tokens", () => {
     const token = generateCsrfToken();
     const [nonce, signature] = token.split(".");
 
-    expect(verifyCsrfToken(`${nonce.slice(0, -1)}0.${signature}`)).toBe(false);
-    expect(verifyCsrfToken(`${nonce}.${signature.slice(0, -1)}0`)).toBe(false);
+    const tamperedNonce =
+      `${nonce.slice(0, -1)}${nonce.endsWith("0") ? "1" : "0"}`;
+
+    expect(verifyCsrfToken(`${tamperedNonce}.${signature}`)).toBe(false);
+    const tamperedSignature =
+      `${signature.slice(0, -1)}${signature.endsWith("0") ? "1" : "0"}`;
+
+    expect(verifyCsrfToken(`${nonce}.${tamperedSignature}`)).toBe(false);
     expect(verifyCsrfToken(`${nonce}.${signature}.extra`)).toBe(false);
     expect(verifyCsrfToken(nonce)).toBe(false);
     expect(verifyCsrfToken("")).toBe(false);
