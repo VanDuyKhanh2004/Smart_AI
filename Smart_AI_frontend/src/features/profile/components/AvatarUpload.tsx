@@ -3,6 +3,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { profileService } from '@/services/profile.service';
 import { useAuthStore } from '@/stores/authStore';
+import { resolveAssetUrl } from '@/lib/apiBaseUrl';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -102,11 +103,7 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
   };
 
   const displayAvatar = preview || currentAvatar;
-  const avatarSrc = displayAvatar?.startsWith('http') || displayAvatar?.startsWith('data:')
-    ? displayAvatar
-    : displayAvatar
-    ? `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/${displayAvatar}`
-    : undefined;
+  const avatarSrc = resolveAssetUrl(displayAvatar);
 
   return (
     <div className="flex flex-col items-center gap-3" aria-busy={isUploading}>

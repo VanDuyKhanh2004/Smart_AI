@@ -91,6 +91,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   chatService.disconnect();
 });
 
@@ -102,6 +103,27 @@ describe('ChatService socket authentication', () => {
 
     expect(ioMock).toHaveBeenCalledTimes(1);
     expect(authOptions().auth).toEqual({ token: 'test-access-token' });
+  });
+
+  it('connects to the dedicated VITE_SOCKET_URL instead of the REST proxy base', () => {
+    vi.stubEnv('VITE_SOCKET_URL', 'https://smart-ai-backend-twe5.onrender.com');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'test-access-token');
+
+    chatService.initialize(makeConfig());
+
+    expect(ioMock).toHaveBeenCalledTimes(1);
+    expect(ioMock.mock.calls[0][0]).toBe('https://smart-ai-backend-twe5.onrender.com');
+  });
+
+  it('falls back to the backend origin when VITE_SOCKET_URL is unset', () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    vi.stubEnv('VITE_BACKEND_ORIGIN', 'https://smart-ai-backend-twe5.onrender.com');
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'test-access-token');
+
+    chatService.initialize(makeConfig());
+
+    expect(ioMock).toHaveBeenCalledTimes(1);
+    expect(ioMock.mock.calls[0][0]).toBe('https://smart-ai-backend-twe5.onrender.com');
   });
 
   it('does not call io() and reports login-required locally when no token is stored', () => {

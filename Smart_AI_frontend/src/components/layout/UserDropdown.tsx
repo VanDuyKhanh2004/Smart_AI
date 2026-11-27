@@ -4,6 +4,7 @@ import { User, Package, Heart, History, Calendar, LogOut, ChevronDown } from 'lu
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
+import { resolveAssetUrl } from '@/lib/apiBaseUrl';
 
 /**
  * UserDropdown - Dropdown menu with avatar and user options
@@ -67,12 +68,9 @@ const UserDropdown: React.FC = () => {
     return null;
   }
 
-  // Build avatar URL
-  const avatarSrc = user.avatar
-    ? user.avatar.startsWith('http') || user.avatar.startsWith('data:')
-      ? user.avatar
-      : `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/${user.avatar}`
-    : undefined;
+  // Build avatar URL. Relative upload paths live on the backend origin, not on
+  // the Vercel frontend origin (the proxy only covers `/api/*`).
+  const avatarSrc = resolveAssetUrl(user.avatar);
 
   const menuItems = [
     { to: '/profile', icon: User, label: 'Hồ sơ của tôi' },

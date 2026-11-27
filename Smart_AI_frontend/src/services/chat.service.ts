@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
+import { resolveSocketUrl } from '@/lib/apiBaseUrl';
 import {
   getSelectedSession,
   getRestoreMode,
@@ -255,7 +256,6 @@ class ChatService {
   }
 
   private connect(explicitToken?: string | null) {
-    const serverUrl = import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000';
     const token = explicitToken !== undefined ? explicitToken : localStorage.getItem(ACCESS_TOKEN_KEY);
 
     // Defensive: never connect an unauthenticated socket.
@@ -263,6 +263,11 @@ class ChatService {
       this.ensureDisconnectedState();
       return;
     }
+
+    // Socket.IO must talk to the backend origin directly. It must never derive
+    // its host from the REST base URL, because in production that is the
+    // same-origin Vercel `/api` proxy rather than the Render backend.
+    const serverUrl = resolveSocketUrl();
 
     this.currentToken = token;
 
